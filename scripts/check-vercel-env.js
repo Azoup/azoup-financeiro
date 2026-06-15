@@ -1,31 +1,49 @@
 /**
- * Falha o build na Vercel se o Supabase não estiver configurado.
- * Evita deploy "ok" que abre tela em branco / sem login.
+ * Aviso no build da Vercel se o Supabase não estiver configurado.
+ * Não bloqueia o deploy — o app mostra aviso na tela até as variáveis existirem.
  */
+function resolveSupabaseEnv() {
+  const url = (
+    process.env.EXPO_PUBLIC_SUPABASE_URL ??
+    process.env.SUPABASE_URL ??
+    process.env.NEXT_PUBLIC_SUPABASE_URL ??
+    ''
+  ).trim();
+
+  const key = (
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
+    process.env.SUPABASE_ANON_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+    ''
+  ).trim();
+
+  return { url, key };
+}
+
 if (process.env.VERCEL !== '1') {
   process.exit(0);
 }
 
-const url = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim();
-const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
+const { url, key } = resolveSupabaseEnv();
 
 if (url && key) {
-  console.log('[vercel] Variáveis do Supabase encontradas.');
+  console.log('[vercel] Supabase configurado para o build.');
   process.exit(0);
 }
 
-console.error(
+console.warn(
   [
     '',
-    'Deploy na Vercel: configure as variáveis de ambiente do Supabase.',
+    '[vercel] AVISO: Supabase não configurado neste build.',
+    'O site sobe, mas login não funciona até você adicionar:',
     '',
     '  EXPO_PUBLIC_SUPABASE_URL',
     '  EXPO_PUBLIC_SUPABASE_ANON_KEY',
     '',
-    'Painel Vercel → Project → Settings → Environment Variables',
-    'Marque Production, Preview e Development. Depois faça Redeploy.',
+    'Vercel → Project → Settings → Environment Variables',
+    '(Production + Preview + Development) → Redeploy',
     '',
   ].join('\n'),
 );
 
-process.exit(1);
+process.exit(0);
