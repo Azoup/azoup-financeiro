@@ -9,7 +9,12 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "build": "node scripts/check-vercel-env.js && expo export --platform web",
+    "vercel-build": "node scripts/check-vercel-env.js && expo export --platform web",
     "export:web": "expo export --platform web"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
