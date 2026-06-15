@@ -1,0 +1,352 @@
+import { Card } from '@/components/Card';
+import { ExportReportButtons } from '@/components/ExportReportButtons';
+import { PrimaryButton } from '@/components/PrimaryButton';
+import { buildVendaDetailExport } from '@/utils/exportReportBuilders';
+import { BaixaPagamentoModal } from '@/components/vendas/BaixaPagamentoModal';
+import { useAuth } from '@/context/AuthContext';
+import {
+  cancelarVenda,
+  fetchVendaDetail,
+  fetchVendasFinanceiroLog,
+  parcelaStatusVisual,
+  registrarPagamentoVenda,
+} from '@/services/vendasService';
+import { colors, radius, spacing } from '@/theme/colors';
+import type { VendaDetail } from '@/types/vendas';
+import { formatBRL } from '@/utils/currency';
+import { formatDateTimeBRFromISO } from '@/utils/date';
+import { vendaDescricaoLinhas } from '@/utils/vendasDescricao';
+import { centavosParaReais, reaisParaCentavos } from '@/utils/vendasParcelas';
+import { CONSULTA, goToConsulta, useHardwareBackToConsulta } from '@/utils/navigationConsulta';
+import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import Toast from 'react-native-toast-message';
+
+function statusParcelaColor(s: string): string {
+  switch (s) {
+    case 'pago':
+      return colors.success;
+    case 'parcial':
+      return colors.orange;
+    case 'atrasado':
+      return colors.danger;
+    case 'cancelado':
+      return colors.gray400;
+    default:
+      return colors.gray600;
+  }
+}
+
+export default function VendaDetailScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { user } = useAuth();
+  useHardwareBackToConsulta(CONSULTA.vendas);
+  const [detail, setDetail] = useState<VendaDetail | null>(null);
+  const [logs, setLogs] = useState<{ id: string; tipo: string; detalhe: unknown; created_at: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [baixaOpen, setBaixaOpen] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!user?.id || !id) return;
+    setLoading(true);
+    try {
+      const [d, lg] = await Promise.all([
+        fetchVendaDetail(user.id, id),
+        fetchVendasFinanceiroLog(id),
+      ]);
+      setDetail(d);
+      setLogs(lg);
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+      setDetail(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id, id]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const totalPago = detail?.parcelas.reduce((s, p) => s + (Number(p.valor_pago) || 0), 0) ?? 0;
+  const totalValor = detail ? Number(detail.valor_total) : 0;
+  const pendente = Math.max(0, totalValor - totalPago);
+
+  const onBaixa = async (payload: Parameters<typeof registrarPagamentoVenda>[2]) => {
+    if (!user?.id || !id) return;
+    await registrarPagamentoVenda(user.id, id, payload);
+    Toast.show({ type: 'success', text1: 'Pagamento registrado.' });
+    await load();
+  };
+
+  const onCancelar = () => {
+    if (!user?.id || !id) return;
+    Alert.alert('Cancelar venda', 'Confirma o cancelamento desta venda?', [
+      { text: 'Não', style: 'cancel' },
+      {
+        text: 'Sim',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await cancelarVenda(user.id, id);
+            Toast.show({ type: 'success', text1: 'Venda cancelada.' });
+            goToConsulta(CONSULTA.vendas);
+          } catch (e) {
+            Toast.show({ type: 'error', text1: (e as Error).message });
+          }
+        },
+      },
+    ]);
+  };
+
+  if (loading && !detail) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.orange} />
+      </View>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.miss}>Venda não encontrada.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.root}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ExportReportButtons getReport={() => buildVendaDetailExport(detail)} />
+        <Card>
+          <View style={styles.rowBetween}>
+            <Text style={styles.h1}>{detail.cliente.nome_cliente}</Text>
+            <View style={[styles.tag, { backgroundColor: colors.gray100 }]}>
+              <Text style={styles.tagTxt}>{detail.status}</Text>
+            </View>
+          </View>
+          {detail.cliente.nome_empresa ? (
+            <Text style={styles.emp}>{detail.cliente.nome_empresa}</Text>
+          ) : null}
+          {(() => {
+            const linhas = vendaDescricaoLinhas(detail);
+            if (linhas.length === 0) return null;
+            if (linhas.length === 1) {
+              return <Text style={styles.descSolo}>{linhas[0]}</Text>;
+            }
+            return (
+              <>
+                <Text style={styles.secDesc}>Itens</Text>
+                {linhas.map((linha, i) => (
+                  <View key={i} style={styles.descLineWrap}>
+                    <Text style={styles.descBullet}>•</Text>
+                    <Text style={styles.desc}>{linha}</Text>
+                  </View>
+                ))}
+              </>
+            );
+          })()}
+          <View style={styles.resumo}>
+            <View>
+              <Text style={styles.rLab}>Total</Text>
+              <Text style={styles.rVal}>{formatBRL(detail.valor_total)}</Text>
+            </View>
+            <View>
+              <Text style={styles.rLab}>Pago</Text>
+              <Text style={[styles.rVal, { color: colors.success }]}>{formatBRL(totalPago)}</Text>
+            </View>
+            <View>
+              <Text style={styles.rLab}>Pendente</Text>
+              <Text style={[styles.rVal, { color: colors.orange }]}>{formatBRL(pendente)}</Text>
+            </View>
+          </View>
+          <Text style={styles.meta}>Criada em {formatDateTimeBRFromISO(detail.created_at)}</Text>
+        </Card>
+
+        <View style={styles.actions}>
+          <PrimaryButton
+            title="Dar baixa"
+            onPress={() => setBaixaOpen(true)}
+            disabled={pendente <= 0.009 || detail.status === 'cancelada'}
+          />
+          <PrimaryButton
+            title="Cancelar venda"
+            variant="danger"
+            onPress={onCancelar}
+            disabled={detail.status === 'cancelada' || totalPago > 0.009}
+          />
+        </View>
+
+        <Text style={styles.sec}>Parcelas</Text>
+        {detail.parcelas.map((p) => {
+          const vis = parcelaStatusVisual(p);
+          const open =
+            p.status !== 'cancelado' &&
+            reaisParaCentavos(p.valor_pago) < reaisParaCentavos(p.valor);
+          const rest = centavosParaReais(
+            reaisParaCentavos(p.valor) - reaisParaCentavos(p.valor_pago),
+          );
+          return (
+            <Card key={p.id} style={styles.parc}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.pNum}>Parcela {p.numero_parcela}</Text>
+                <Text style={[styles.pSt, { color: statusParcelaColor(vis) }]}>{vis}</Text>
+              </View>
+              <Text style={styles.pForm}>{p.forma_pagamento?.nome ?? '—'}</Text>
+              <Text style={styles.pVal}>{formatBRL(p.valor)}</Text>
+              <Text style={styles.pSub}>
+                Pago {formatBRL(p.valor_pago)}
+                {open ? ` · em aberto ${formatBRL(rest)}` : ''}
+              </Text>
+              <Text style={styles.pVen}>Vencimento {p.data_vencimento.split('-').reverse().join('/')}</Text>
+            </Card>
+          );
+        })}
+
+        <Text style={styles.sec}>Pagamentos</Text>
+        {detail.pagamentos.length === 0 ? (
+          <Text style={styles.empty}>Nenhum pagamento ainda.</Text>
+        ) : (
+          detail.pagamentos.map((pay) => {
+            const parts = detail.pagamento_parcelas.filter((x) => x.pagamento_id === pay.id);
+            const parcLines = parts
+              .map((pp) => {
+                const pr = detail.parcelas.find((x) => x.id === pp.parcela_id);
+                return pr ? `#${pr.numero_parcela}: ${formatBRL(pp.valor_aplicado)}` : '';
+              })
+              .filter(Boolean)
+              .join(' · ');
+            return (
+              <Card key={pay.id} style={styles.payCard}>
+                <Text style={styles.payVal}>{formatBRL(pay.valor_pago)}</Text>
+                <Text style={styles.payDate}>
+                  {pay.data_pagamento.split('-').reverse().join('/')} ·{' '}
+                  {formatDateTimeBRFromISO(pay.created_at)}
+                </Text>
+                {pay.observacao ? <Text style={styles.payObs}>{pay.observacao}</Text> : null}
+                {parcLines ? <Text style={styles.payParc}>Parcelas: {parcLines}</Text> : null}
+                <Text style={styles.payUser}>Usuário: {pay.user_id.slice(0, 8)}…</Text>
+              </Card>
+            );
+          })
+        )}
+
+        <Text style={styles.sec}>Histórico financeiro</Text>
+        {logs.map((l) => (
+          <View key={l.id} style={styles.logRow}>
+            <Ionicons name="document-text-outline" size={18} color={colors.gray400} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.logTipo}>{l.tipo}</Text>
+              <Text style={styles.logTime}>{formatDateTimeBRFromISO(l.created_at)}</Text>
+              {l.detalhe != null ? (
+                <Text style={styles.logDet} numberOfLines={3}>
+                  {JSON.stringify(l.detalhe)}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+        ))}
+      </ScrollView>
+
+      <BaixaPagamentoModal
+        visible={baixaOpen}
+        onClose={() => setBaixaOpen(false)}
+        parcelas={detail.parcelas}
+        onSubmit={onBaixa}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.gray50 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  miss: { color: colors.gray600 },
+  scroll: { padding: spacing.md, paddingBottom: spacing.xl * 2 },
+  h1: { fontSize: 20, fontWeight: '800', color: colors.petroleum, flex: 1 },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  tag: { paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.sm },
+  tagTxt: { fontSize: 12, fontWeight: '700', textTransform: 'capitalize' },
+  emp: { fontSize: 14, color: colors.gray600, marginTop: 4 },
+  secDesc: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.gray600,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  descSolo: {
+    marginTop: spacing.md,
+    fontSize: 15,
+    color: colors.gray800,
+    lineHeight: 22,
+  },
+  descLineWrap: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  descBullet: {
+    fontSize: 15,
+    color: colors.orange,
+    lineHeight: 22,
+    width: 14,
+  },
+  desc: { flex: 1, fontSize: 15, color: colors.gray800, lineHeight: 22 },
+  resumo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.gray100,
+  },
+  rLab: { fontSize: 11, color: colors.gray400, fontWeight: '600' },
+  rVal: { fontSize: 16, fontWeight: '800', color: colors.petroleum, marginTop: 4 },
+  meta: { marginTop: spacing.md, fontSize: 12, color: colors.gray400 },
+  actions: { gap: spacing.sm, marginBottom: spacing.md },
+  sec: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.petroleum,
+    marginBottom: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  parc: { marginBottom: spacing.sm },
+  pNum: { fontSize: 15, fontWeight: '700', color: colors.petroleum },
+  pSt: { fontSize: 12, fontWeight: '800', textTransform: 'capitalize' },
+  pForm: { fontSize: 13, color: colors.gray600, marginTop: 4 },
+  pVal: { fontSize: 18, fontWeight: '800', color: colors.orange, marginTop: spacing.xs },
+  pSub: { fontSize: 13, color: colors.gray800, marginTop: 4 },
+  pVen: { fontSize: 12, color: colors.gray400, marginTop: 4 },
+  empty: { color: colors.gray400, marginBottom: spacing.md },
+  payCard: { marginBottom: spacing.sm },
+  payVal: { fontSize: 18, fontWeight: '800', color: colors.success },
+  payDate: { fontSize: 13, color: colors.gray600, marginTop: 4 },
+  payObs: { fontSize: 14, color: colors.gray800, marginTop: spacing.sm },
+  payParc: { fontSize: 12, color: colors.gray600, marginTop: 4 },
+  payUser: { fontSize: 11, color: colors.gray400, marginTop: 6 },
+  logRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.gray100,
+  },
+  logTipo: { fontWeight: '700', color: colors.petroleum, textTransform: 'capitalize' },
+  logTime: { fontSize: 12, color: colors.gray400, marginTop: 2 },
+  logDet: { fontSize: 11, color: colors.gray600, marginTop: 4, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: undefined }) },
+});
