@@ -38,3 +38,19 @@ export function labelAmbienteNfe(ambiente: number): string {
 export function podeImprimirDanfe(nota: { status: string; danfe_url?: string | null }): boolean {
   return nota.status === 'autorizada' && Boolean(nota.danfe_url?.trim());
 }
+
+export function podeCancelarNotaFiscal(nota: {
+  status: string;
+  chave_acesso?: string | null;
+  protocolo_autorizacao?: string | null;
+}): boolean {
+  return (
+    nota.status === 'autorizada' &&
+    Boolean(nota.chave_acesso?.trim()) &&
+    Boolean(nota.protocolo_autorizacao?.trim())
+  );
+}
+
+export function isAmbienteHomologacao(ambiente: number): boolean {
+  return ambiente !== 1;
+}

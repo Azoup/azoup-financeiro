@@ -53,6 +53,8 @@ export type NotaFiscal = {
   natureza_operacao: string;
   ambiente: 1 | 2;
   motivo_rejeicao: string | null;
+  motivo_cancelamento?: string | null;
+  data_cancelamento?: string | null;
   competencia: string | null;
   created_at: string;
   updated_at: string;
@@ -60,6 +62,12 @@ export type NotaFiscal = {
 
 export type NotaFiscalListRow = NotaFiscal & {
   cliente?: { nome_cliente: string; nome_empresa: string | null } | null;
+};
+
+export type CancelarNfeResult = {
+  success: boolean;
+  status?: string;
+  message?: string;
 };
 
 export type EmitirNfeResult = {

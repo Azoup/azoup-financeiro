@@ -1,12 +1,21 @@
 import { Card } from '@/components/Card';
+import { CancelarNotaFiscalModal } from '@/components/notas-fiscais/CancelarNotaFiscalModal';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
-import { fetchNotasFiscaisLista } from '@/services/notaFiscalService';
+import { fetchNfeConfig } from '@/services/nfeConfigService';
+import { cancelarNotaFiscalSefaz, fetchNotasFiscaisLista } from '@/services/notaFiscalService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { NotaFiscalListRow } from '@/types/notaFiscal';
 import { formatBRL } from '@/utils/currency';
 import { formatDateTimeBRFromISO } from '@/utils/date';
-import { corNotaFiscalStatus, labelAmbienteNfe, labelNotaFiscalStatus, podeImprimirDanfe } from '@/utils/nfeStatus';
+import {
+  corNotaFiscalStatus,
+  isAmbienteHomologacao,
+  labelAmbienteNfe,
+  labelNotaFiscalStatus,
+  podeCancelarNotaFiscal,
+  podeImprimirDanfe,
+} from '@/utils/nfeStatus';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -29,11 +38,18 @@ export default function NotasFiscaisIndexScreen() {
   const [rows, setRows] = useState<NotaFiscalListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [ambienteConfig, setAmbienteConfig] = useState<number>(2);
+  const [cancelTarget, setCancelTarget] = useState<NotaFiscalListRow | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
-    const list = await fetchNotasFiscaisLista(user.id);
+    const [list, cfg] = await Promise.all([
+      fetchNotasFiscaisLista(user.id),
+      fetchNfeConfig(user.id),
+    ]);
     setRows(list);
+    if (cfg?.ambiente) setAmbienteConfig(cfg.ambiente);
   }, [user?.id]);
 
   useEffect(() => {
@@ -79,10 +95,26 @@ export default function NotasFiscaisIndexScreen() {
     else Toast.show({ type: 'error', text1: 'Não foi possível abrir o DANFE.' });
   };
 
+  const confirmarCancelamento = async (justificativa: string) => {
+    if (!cancelTarget) return;
+    setCancelBusy(true);
+    try {
+      await cancelarNotaFiscalSefaz(cancelTarget.id, justificativa);
+      Toast.show({ type: 'success', text1: 'NF-e cancelada na SEFAZ.' });
+      setCancelTarget(null);
+      await load();
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setCancelBusy(false);
+    }
+  };
+
   const renderItem = ({ item }: { item: NotaFiscalListRow }) => {
     const st = corNotaFiscalStatus(item.status);
     const cli = item.cliente?.nome_cliente ?? '—';
     const podeDanfe = podeImprimirDanfe(item);
+    const podeCancelar = podeCancelarNotaFiscal(item);
 
     return (
       <Card style={styles.card}>
@@ -108,6 +140,11 @@ export default function NotasFiscaisIndexScreen() {
             Chave: {item.chave_acesso}
           </Text>
         ) : null}
+        {item.motivo_cancelamento ? (
+          <Text style={styles.cancelMotivo} numberOfLines={3}>
+            Cancelamento: {item.motivo_cancelamento}
+          </Text>
+        ) : null}
         {item.motivo_rejeicao ? (
           <Text style={styles.rejeicao} numberOfLines={3}>
             {item.motivo_rejeicao}
@@ -120,19 +157,42 @@ export default function NotasFiscaisIndexScreen() {
             variant="secondary"
             onPress={() => void imprimirDanfe(item)}
             disabled={!podeDanfe}
-            style={styles.btnDanfe}
+            style={styles.btnAcao}
           />
+          {podeCancelar ? (
+            <PrimaryButton
+              title="Cancelar NF-e"
+              variant="danger"
+              onPress={() => setCancelTarget(item)}
+              style={styles.btnAcao}
+            />
+          ) : null}
         </View>
       </Card>
     );
   };
 
+  const emHomologacao = isAmbienteHomologacao(ambienteConfig);
+
   return (
     <View style={styles.root}>
       <View style={styles.topBar}>
+        {emHomologacao ? (
+          <View style={styles.homologBanner}>
+            <Ionicons name="flask-outline" size={18} color={colors.petroleum} />
+            <Text style={styles.homologTxt}>
+              Ambiente de <Text style={styles.homologStrong}>homologação</Text> (testes SEFAZ). As notas não têm
+              valor fiscal. Para produção, altere em Configurar NF-e (ambiente 1).
+            </Text>
+          </View>
+        ) : (
+          <View style={[styles.homologBanner, styles.prodBanner]}>
+            <Ionicons name="checkmark-circle-outline" size={18} color={colors.success} />
+            <Text style={styles.homologTxt}>Ambiente de produção — notas com validade fiscal.</Text>
+          </View>
+        )}
         <Text style={styles.lead}>
-          Notas fiscais emitidas a partir das mensalidades. Configure certificado e parâmetros fiscais antes de
-          gerar.
+          Notas emitidas a partir das mensalidades. Cancelamento só para NF-e autorizada (envia evento à SEFAZ).
         </Text>
         <Pressable style={styles.configLink} onPress={() => router.push('/(app)/configuracoes/nfe')}>
           <Ionicons name="settings-outline" size={16} color={colors.orange} />
@@ -156,6 +216,14 @@ export default function NotasFiscaisIndexScreen() {
           }
         />
       )}
+
+      <CancelarNotaFiscalModal
+        visible={cancelTarget != null}
+        nota={cancelTarget}
+        loading={cancelBusy}
+        onClose={() => !cancelBusy && setCancelTarget(null)}
+        onConfirm={(j) => void confirmarCancelamento(j)}
+      />
     </View>
   );
 }
@@ -163,6 +231,23 @@ export default function NotasFiscaisIndexScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.gray50 },
   topBar: { padding: spacing.md, paddingBottom: spacing.sm },
+  homologBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: '#fff8e1',
+    borderWidth: 1,
+    borderColor: '#ffe082',
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  prodBanner: {
+    backgroundColor: '#e8f5e9',
+    borderColor: '#c8e6c9',
+  },
+  homologTxt: { flex: 1, fontSize: 12, color: colors.gray800, lineHeight: 17 },
+  homologStrong: { fontWeight: '800', color: colors.petroleum },
   lead: { fontSize: 13, color: colors.gray600, lineHeight: 18 },
   configLink: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: spacing.sm },
   configLinkTxt: { color: colors.orange, fontWeight: '700', fontSize: 13 },
@@ -177,9 +262,10 @@ const styles = StyleSheet.create({
   val: { fontSize: 18, fontWeight: '800', color: colors.orange, marginTop: spacing.sm },
   meta: { fontSize: 12, color: colors.gray600, marginTop: 4 },
   chave: { fontSize: 10, color: colors.gray400, marginTop: 4 },
+  cancelMotivo: { fontSize: 12, color: colors.gray600, marginTop: spacing.sm, lineHeight: 17 },
   rejeicao: { fontSize: 12, color: colors.danger, marginTop: spacing.sm, lineHeight: 17 },
   date: { fontSize: 11, color: colors.gray400, marginTop: spacing.sm },
-  acoes: { marginTop: spacing.md },
-  btnDanfe: { minHeight: 44 },
+  acoes: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md, flexWrap: 'wrap' },
+  btnAcao: { flex: 1, minWidth: 140, minHeight: 44 },
   empty: { textAlign: 'center', color: colors.gray400, marginTop: spacing.xl, lineHeight: 20 },
 });

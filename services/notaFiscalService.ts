@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { ensureNfeConfig, fetchCertificadoAtivo, nfeApiBaseUrl } from '@/services/nfeConfigService';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
-import type { EmitirNfeResult, NotaFiscalListRow } from '@/types/notaFiscal';
+import type { CancelarNfeResult, EmitirNfeResult, NotaFiscalListRow } from '@/types/notaFiscal';
 
 type MensalidadeNfInput = {
   id: string;
@@ -26,7 +26,12 @@ export async function fetchNotasFiscaisLista(userId: string): Promise<NotaFiscal
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
-  return (data as NotaFiscalListRow[] | null) ?? [];
+  return ((data as (NotaFiscalListRow & { clientes?: NotaFiscalListRow['cliente'] })[] | null) ?? []).map(
+    (row) => {
+      const { clientes, ...rest } = row;
+      return { ...rest, cliente: clientes ?? null };
+    },
+  );
 }
 
 export async function criarNotaFiscalRascunhoMensalidade(
@@ -151,6 +156,42 @@ export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emiti
       .update({ status: 'rejeitada', motivo_rejeicao: msg, status_sefaz: body.status ?? null })
       .eq('id', notaFiscalId);
     return { success: false, message: msg, status: body.status };
+  }
+
+  return body;
+}
+
+export async function cancelarNotaFiscalSefaz(
+  notaFiscalId: string,
+  justificativa: string,
+): Promise<CancelarNfeResult> {
+  const { data: session } = await supabase.auth.getSession();
+  const token = session.session?.access_token;
+  if (!token) throw new Error('Sessão expirada. Faça login novamente.');
+
+  const just = justificativa.trim();
+  if (just.length < 15) {
+    throw new Error('Informe o motivo do cancelamento com no mínimo 15 caracteres.');
+  }
+
+  const base = nfeApiBaseUrl();
+  if (!base) {
+    throw new Error('URL da API NF-e não configurada.');
+  }
+
+  const res = await fetch(`${base}/api/nfe/cancelar`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ notaFiscalId, justificativa: just }),
+  });
+
+  const body = (await res.json().catch(() => ({}))) as CancelarNfeResult & { error?: string };
+
+  if (!res.ok || !body.success) {
+    throw new Error(body.message ?? body.error ?? `Cancelamento falhou (${res.status}).`);
   }
 
   return body;

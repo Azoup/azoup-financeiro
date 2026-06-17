@@ -1,53 +1,15 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { buildNFeLayout } = require('./buildNFeFromDb');
-const { decrypt } = require('./crypto');
-
-async function loadNfeWizard() {
-  try {
-    const mod = await import('nfewizard-io');
-    return mod.default ?? mod;
-  } catch {
-    return null;
-  }
-}
-
-async function downloadCertToTemp(admin, storagePath) {
-  const { data, error } = await admin.storage.from('empresa_certificados').download(storagePath);
-  if (error || !data) throw new Error('Não foi possível baixar o certificado A1.');
-  const tmp = path.join(os.tmpdir(), `cert-${Date.now()}.pfx`);
-  const buf = Buffer.from(await data.arrayBuffer());
-  fs.writeFileSync(tmp, buf);
-  return tmp;
-}
+const { createNfeWizard, cleanupCert } = require('./nfeCancel');
 
 async function emitirNfeSefaz({ admin, nota, itens, pagamentos, perfil, cliente, config, cert, senhaEnc }) {
-  const NFeWizard = await loadNfeWizard();
-  if (!NFeWizard) {
-    throw new Error(
-      'Pacote nfewizard-io não instalado no servidor. Rode npm install nfewizard-io @nfewizard/danfe na Vercel.',
-    );
-  }
-
   const layout = buildNFeLayout({ nota, itens, pagamentos, perfil, cliente, config });
-  const senha = decrypt(senhaEnc);
-  const certPath = await downloadCertToTemp(admin, cert.storage_path);
+  const { wizard, certPath } = await createNfeWizard({
+    admin,
+    cert,
+    senhaEnc,
+    ambiente: nota.ambiente,
+  });
 
   try {
-    const wizard = new NFeWizard();
-    await wizard.NFE_LoadEnvironment({
-      config: {
-        dfe: {
-          pathCertificado: certPath,
-          senhaCertificado: senha,
-        },
-        nfe: {
-          ambiente: Number(nota.ambiente),
-        },
-      },
-    });
-
     const signed = await wizard.NFE_Assinar(layout);
     const auth = await wizard.NFE_Autorizacao(signed, { indSinc: 1 });
 
@@ -91,11 +53,7 @@ async function emitirNfeSefaz({ admin, nota, itens, pagamentos, perfil, cliente,
       message: xMotivo,
     };
   } finally {
-    try {
-      fs.unlinkSync(certPath);
-    } catch {
-      /* ignore */
-    }
+    cleanupCert(certPath);
   }
 }
 
