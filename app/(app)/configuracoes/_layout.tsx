@@ -14,6 +14,8 @@ export default function ConfiguracoesLayout() {
     >
       <Stack.Screen name="index" options={{ title: 'Configurações' }} />
       <Stack.Screen name="perfil-cobranca" options={{ title: 'Dados do beneficiário' }} />
+      <Stack.Screen name="nfe" options={{ title: 'Configurar NF-e' }} />
+      <Stack.Screen name="segmentos" options={{ title: 'Segmentos' }} />
     </Stack>
   );
 }

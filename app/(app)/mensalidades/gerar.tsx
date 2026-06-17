@@ -1,4 +1,4 @@
-import { Card } from '@/components/Card';
+import { EnviarMensalidadeModal } from '@/components/mensalidades/EnviarMensalidadeModal';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { buildGerarMensalidadeExport } from '@/utils/exportReportBuilders';
 import { DatePickerField } from '@/components/DatePickerField';
@@ -70,6 +70,7 @@ export default function GerarMensalidadeScreen() {
   const [segmentos, setSegmentos] = useState<SegmentoClienteRow[]>([]);
   const [rows, setRows] = useState<ClienteListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [enviarModalOpen, setEnviarModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [percentStr, setPercentStr] = useState('');
@@ -219,7 +220,7 @@ export default function GerarMensalidadeScreen() {
     }
   };
 
-  const onEnviar = async () => {
+  const executarEnvio = async (gerarNotaFiscal: boolean) => {
     if (!user?.id) return;
     const ids = targetIds;
     if (!ids.length) {
@@ -244,26 +245,41 @@ export default function GerarMensalidadeScreen() {
         setPercentStr('');
         await load();
       }
-      const { criados, ignorados, semVencimento } = await criarMensalidadesGeradasLote({
+      const { criados, ignorados, semVencimento, nf } = await criarMensalidadesGeradasLote({
         userId: user.id,
         clienteIds: ids,
         dataVencimentoOverride: usarMesmaDataTodos && vencimento ? toISODate(vencimento) : null,
         competencia: competencia.trim() || null,
+        gerarNotaFiscal,
       });
       const extras: string[] = [];
       if (ignorados > 0) extras.push(`${ignorados} sem valor de mensalidade`);
       if (semVencimento > 0) extras.push(`${semVencimento} sem primeiro vencimento no cadastro`);
+      if (gerarNotaFiscal && nf) {
+        extras.push(`${nf.emitidas} NF-e autorizada(s)`);
+        if (nf.rejeitadas > 0) extras.push(`${nf.rejeitadas} NF rejeitada(s)`);
+        if (nf.ignoradas > 0) extras.push(`${nf.ignoradas} sem NF no cadastro`);
+      }
       Toast.show({
         type: 'success',
         text1: `${criados} mensalidade(s) gerada(s).${extras.length ? ` ${extras.join('; ')}.` : ''}`,
-        text2: 'Confira em A receber.',
+        text2: gerarNotaFiscal ? 'Veja as notas em Notas fiscais.' : 'Confira em A receber.',
       });
-      router.replace('/(app)/contas-receber');
+      setEnviarModalOpen(false);
+      router.replace(gerarNotaFiscal ? '/(app)/notas-fiscais' : '/(app)/contas-receber');
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setBusy(false);
     }
+  };
+
+  const onAbrirEnviar = () => {
+    if (!targetIds.length) {
+      Toast.show({ type: 'error', text1: 'Não há clientes na lista para gerar mensalidade.' });
+      return;
+    }
+    setEnviarModalOpen(true);
   };
 
   return (
@@ -499,16 +515,18 @@ export default function GerarMensalidadeScreen() {
         <Text style={styles.hintGerar}>
           Se o percentual ainda estiver preenchido, o reajuste será aplicado de novo antes de gerar as mensalidades.
         </Text>
-        <PrimaryButton
-          title="Enviar (gerar mensalidades)"
-          loading={busy}
-          onPress={onEnviar}
-          style={styles.enviar}
-        />
+        <PrimaryButton title="Enviar" loading={busy} onPress={onAbrirEnviar} style={styles.enviar} />
         <Text style={styles.footerHint}>
-          Após o reajuste, o valor da mensalidade gerada será o atual do cadastro. Carnês em A receber.
+          Ao enviar, escolha gerar só mensalidade ou mensalidade com NF-e (SEFAZ). Carnês em A receber.
         </Text>
       </ScrollView>
+      <EnviarMensalidadeModal
+        visible={enviarModalOpen}
+        loading={busy}
+        onClose={() => setEnviarModalOpen(false)}
+        onSomenteMensalidade={() => void executarEnvio(false)}
+        onMensalidadeComNf={() => void executarEnvio(true)}
+      />
     </View>
   );
 }

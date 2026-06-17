@@ -11,6 +11,7 @@ export const CONSULTA = {
   mensalidades: '/(app)/mensalidades' as Href,
   configuracoes: '/(app)/configuracoes' as Href,
   contasReceber: '/(app)/contas-receber' as Href,
+  notasFiscais: '/(app)/notas-fiscais' as Href,
 } as const;
 
 export function goToConsulta(href: Href): void {

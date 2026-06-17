@@ -1,13 +1,33 @@
 import { Card } from '@/components/Card';
+import { PrimaryButton } from '@/components/PrimaryButton';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
+import { useAuth } from '@/context/AuthContext';
+import { fetchNfeProntidao } from '@/utils/nfeProntidao';
 import { buildConfiguracoesExport } from '@/utils/exportReportBuilders';
 import { colors, radius, spacing } from '@/theme/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function ConfiguracoesIndexScreen() {
   const router = useRouter();
+  const { user } = useAuth();
+  const [nfePronto, setNfePronto] = useState<boolean | null>(null);
+
+  const loadNfeStatus = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const p = await fetchNfeProntidao(user.id);
+      setNfePronto(p.pronto);
+    } catch {
+      setNfePronto(null);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    void loadNfeStatus();
+  }, [loadNfeStatus]);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -16,6 +36,26 @@ export default function ConfiguracoesIndexScreen() {
         Ajustes do aplicativo e cadastros auxiliares. Os segmentos definem a classificação usada no cadastro de
         clientes.
       </Text>
+
+      <Card style={styles.nfeHero}>
+        <View style={styles.nfeHeroIcon}>
+          <Ionicons name="document-text" size={28} color={colors.white} />
+        </View>
+        <Text style={styles.nfeHeroTitle}>Emissão de nota fiscal (NF-e)</Text>
+        <Text style={styles.nfeHeroSub}>
+          Emitente, certificado digital A1, ambiente SEFAZ, NCM/CFOP e numeração — tudo em um só lugar.
+        </Text>
+        {nfePronto === true ? (
+          <Text style={styles.nfeHeroOk}>✓ Pronto para emitir NF-e</Text>
+        ) : nfePronto === false ? (
+          <Text style={styles.nfeHeroPending}>Configuração incompleta</Text>
+        ) : null}
+        <PrimaryButton
+          title="Configurar emissão de NF-e"
+          onPress={() => router.push('/(app)/configuracoes/nfe')}
+          style={styles.nfeHeroBtn}
+        />
+      </Card>
 
       <Card style={styles.card}>
         <Pressable
@@ -28,7 +68,7 @@ export default function ConfiguracoesIndexScreen() {
           <View style={styles.rowBody}>
             <Text style={styles.rowTitle}>Dados do beneficiário (boleto)</Text>
             <Text style={styles.rowSub}>
-              Razão social, CNPJ/CPF, endereço e instruções usados nos carnês de contas a receber.
+              Carnês em A receber. Os mesmos dados do emitente podem ser editados na configuração de NF-e.
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.gray400} />
@@ -68,6 +108,50 @@ const styles = StyleSheet.create({
     color: colors.gray600,
     lineHeight: 21,
     marginBottom: spacing.lg,
+  },
+  nfeHero: {
+    marginBottom: spacing.lg,
+    padding: spacing.lg,
+    backgroundColor: colors.petroleum,
+    borderRadius: radius.lg,
+    alignItems: 'flex-start',
+  },
+  nfeHeroIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  nfeHeroTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.white,
+    marginBottom: spacing.xs,
+  },
+  nfeHeroSub: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.88)',
+    lineHeight: 19,
+    marginBottom: spacing.sm,
+  },
+  nfeHeroOk: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#a5d6a7',
+    marginBottom: spacing.sm,
+  },
+  nfeHeroPending: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.orangeLight,
+    marginBottom: spacing.sm,
+  },
+  nfeHeroBtn: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.orange,
   },
   card: {
     padding: 0,

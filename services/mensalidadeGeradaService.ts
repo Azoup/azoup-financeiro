@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { gerarBoletosParaMensalidades } from '@/services/boletoParcelaService';
+import { gerarNotasFiscaisParaMensalidades } from '@/services/notaFiscalService';
 import type {
   CriarMensalidadeGeradaInput,
   MensalidadeGerada,
@@ -191,7 +192,14 @@ export async function criarMensalidadesGeradasLote(params: {
   /** Se informado, usa a mesma data para todos os clientes do lote. */
   dataVencimentoOverride?: string | null;
   competencia?: string | null;
-}): Promise<{ criados: number; ignorados: number; semVencimento: number }> {
+  /** Gera NF-e (SEFAZ) para clientes com emite_nf após criar mensalidades. */
+  gerarNotaFiscal?: boolean;
+}): Promise<{
+  criados: number;
+  ignorados: number;
+  semVencimento: number;
+  nf?: { emitidas: number; rejeitadas: number; ignoradas: number; erros: string[] };
+}> {
   const comp = params.competencia?.trim() || null;
   const ultimos = await fetchUltimoVencimentoMensalidadePorCliente(params.userId, params.clienteIds);
   const rows: {
@@ -282,7 +290,20 @@ export async function criarMensalidadesGeradasLote(params: {
     }
   }
 
-  return { criados: criadosRows.length, ignorados, semVencimento };
+  let nfResult;
+  if (params.gerarNotaFiscal && criadosRows.length) {
+    nfResult = await gerarNotasFiscaisParaMensalidades(
+      params.userId,
+      criadosRows.map((m) => ({
+        id: m.id,
+        cliente_id: m.cliente_id,
+        valor: m.valor,
+        competencia: m.competencia,
+      })),
+    );
+  }
+
+  return { criados: criadosRows.length, ignorados, semVencimento, nf: nfResult };
 }
 
 export async function registrarPagamentoMensalidadeGerada(

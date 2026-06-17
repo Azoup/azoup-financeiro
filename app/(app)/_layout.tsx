@@ -89,6 +89,17 @@ export default function AppLayout() {
         }}
       />
       <Tabs.Screen
+        name="notas-fiscais"
+        options={{
+          title: 'Notas fiscais',
+          headerShown: false,
+          tabBarLabel: 'NF-e',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="document-text-outline" color={color} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="account"
         options={{
           title: 'Conta',
