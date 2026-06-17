@@ -14,7 +14,10 @@
     "export:web": "expo export --platform web"
   },
   "engines": {
-    "node": ">=20"
+    "node": "20.x"
+  },
+  "overrides": {
+    "xsd-schema-validator": "file:./patches/xsd-schema-validator-stub"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

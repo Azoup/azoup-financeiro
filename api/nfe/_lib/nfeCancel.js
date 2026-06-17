@@ -43,6 +43,9 @@ async function createNfeWizard({ admin, cert, senhaEnc, ambiente }) {
       nfe: {
         ambiente: Number(ambiente),
       },
+      lib: {
+        useForSchemaValidation: 'validateSchemaJsBased',
+      },
     },
   });
   return { wizard, certPath };

@@ -1,0 +1,6 @@
+{
+  "name": "xsd-schema-validator",
+  "version": "0.7.0",
+  "description": "Stub sem Java para deploy serverless (validação XSD via JS no nfewizard).",
+  "main": "index.js"
+}
