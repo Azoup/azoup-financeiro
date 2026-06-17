@@ -1,5 +1,5 @@
 const { getAdmin, getUserFromBearer } = require('./_lib/supabaseAdmin');
-const { emitirNfeSefaz } = require('./_lib/nfeEmit');
+const { emitirNfseSefaz } = require('./_lib/nfseEmit');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -30,7 +30,7 @@ module.exports = async function handler(req, res) {
         status: nota.status_sefaz ?? '100',
         chave_acesso: nota.chave_acesso,
         danfe_url: nota.danfe_url,
-        message: 'NF-e já autorizada.',
+        message: 'NFS-e já autorizada.',
       });
     }
 
@@ -48,10 +48,10 @@ module.exports = async function handler(req, res) {
       throw new Error('Preencha o perfil do beneficiário (emitente).');
     }
     if (!config?.codigo_ibge_emitente) {
-      throw new Error('Informe o código IBGE do emitente em Configurações › NF-e.');
+      throw new Error('Informe o código IBGE do município do prestador em Configurações › NFS-e.');
     }
     if (!cert) {
-      throw new Error('Cadastre o certificado A1 em Configurações › NF-e.');
+      throw new Error('Cadastre o certificado A1 em Configurações › NFS-e.');
     }
     if (!itens?.length) {
       throw new Error('Nota sem itens fiscais.');
@@ -66,7 +66,7 @@ module.exports = async function handler(req, res) {
       throw new Error('Senha do certificado não encontrada. Reenvie o certificado A1.');
     }
 
-    const result = await emitirNfeSefaz({
+    const result = await emitirNfseSefaz({
       admin,
       nota,
       itens,
@@ -84,7 +84,7 @@ module.exports = async function handler(req, res) {
         .update({
           status: 'rejeitada',
           status_sefaz: result.status ?? null,
-          motivo_rejeicao: result.message ?? 'Rejeitada pela SEFAZ',
+          motivo_rejeicao: result.message ?? 'Rejeitada pela prefeitura/SEFIN',
         })
         .eq('id', notaFiscalId);
       return res.status(422).json(result);
@@ -100,6 +100,9 @@ module.exports = async function handler(req, res) {
         xml_autorizado: result.xml_autorizado,
         danfe_url: result.danfe_url,
         danfe_storage_path: result.danfe_storage_path,
+        codigo_verificacao: result.codigo_verificacao ?? null,
+        tipo_documento: 'nfse',
+        ambiente: 2,
         motivo_rejeicao: null,
       })
       .eq('id', notaFiscalId);
@@ -109,7 +112,7 @@ module.exports = async function handler(req, res) {
     console.error('nfe/emitir', e);
     return res.status(500).json({
       success: false,
-      message: e.message ?? 'Falha na emissão NF-e.',
+      message: e.message ?? 'Falha na emissão NFS-e.',
     });
   }
 };

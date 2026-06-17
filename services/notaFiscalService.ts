@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { ensureNfeConfig, fetchCertificadoAtivo, nfeApiBaseUrl } from '@/services/nfeConfigService';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
 import type { CancelarNfeResult, EmitirNfeResult, NotaFiscalListRow } from '@/types/notaFiscal';
+import { AMBIENTE_FISCAL_HOMOLOGACAO } from '@/types/notaFiscal';
 
 type MensalidadeNfInput = {
   id: string;
@@ -60,10 +61,13 @@ export async function criarNotaFiscalRascunhoMensalidade(
     throw new Error(`Cliente "${cliente.nome_cliente}" está marcado como Sem NF no cadastro.`);
   }
   if (!perfil?.razao_social?.trim() || !onlyDigits(perfil.documento).length) {
-    throw new Error('Preencha os dados do beneficiário em Configurações antes de emitir NF-e.');
+    throw new Error('Preencha os dados do beneficiário em Configurações antes de emitir NFS-e.');
   }
   if (!config.codigo_ibge_emitente?.trim()) {
-    throw new Error('Informe o código IBGE do município do emitente em Configurações › NF-e.');
+    throw new Error('Informe o código IBGE do município do prestador em Configurações › NFS-e.');
+  }
+  if (!config.codigo_tributacao_nacional?.trim()) {
+    throw new Error('Informe o código de tributação nacional do serviço em Configurações › NFS-e.');
   }
 
   const numero = config.proximo_numero;
@@ -80,12 +84,13 @@ export async function criarNotaFiscalRascunhoMensalidade(
       status: 'rascunho',
       valor_total: mensalidade.valor,
       natureza_operacao: config.natureza_operacao,
-      ambiente: config.ambiente,
+      ambiente: AMBIENTE_FISCAL_HOMOLOGACAO,
+      tipo_documento: 'nfse',
       competencia: mensalidade.competencia,
     })
     .select('id')
     .single();
-  if (nfErr || !nf) throw new Error(nfErr?.message ?? 'Falha ao criar rascunho da NF-e.');
+  if (nfErr || !nf) throw new Error(nfErr?.message ?? 'Falha ao criar rascunho da NFS-e.');
 
   const notaId = nf.id as string;
 
@@ -93,8 +98,8 @@ export async function criarNotaFiscalRascunhoMensalidade(
     nota_fiscal_id: notaId,
     numero_item: 1,
     descricao,
-    ncm: config.ncm_servico,
-    cfop: config.cfop_padrao,
+    ncm: config.codigo_tributacao_nacional,
+    cfop: config.codigo_nbs,
     unidade: 'UN',
     quantidade: 1,
     valor_unitario: mensalidade.valor,
@@ -133,7 +138,7 @@ export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emiti
 
   const base = nfeApiBaseUrl();
   if (!base) {
-    throw new Error('URL da API NF-e não configurada (EXPO_PUBLIC_NFE_API_URL ou origem web).');
+    throw new Error('URL da API NFS-e não configurada (EXPO_PUBLIC_NFE_API_URL ou origem web).');
   }
 
   await supabase.from('nota_fiscal').update({ status: 'processando' }).eq('id', notaFiscalId);
@@ -176,7 +181,7 @@ export async function cancelarNotaFiscalSefaz(
 
   const base = nfeApiBaseUrl();
   if (!base) {
-    throw new Error('URL da API NF-e não configurada.');
+    throw new Error('URL da API NFS-e não configurada.');
   }
 
   const res = await fetch(`${base}/api/nfe/cancelar`, {
@@ -203,7 +208,7 @@ export async function gerarNotasFiscaisParaMensalidades(
 ): Promise<{ emitidas: number; rejeitadas: number; ignoradas: number; erros: string[] }> {
   const cert = await fetchCertificadoAtivo(userId);
   if (!cert) {
-    throw new Error('Cadastre o certificado A1 em Configurações › NF-e antes de gerar notas fiscais.');
+    throw new Error('Cadastre o certificado A1 em Configurações › NFS-e antes de gerar notas fiscais.');
   }
 
   let emitidas = 0;

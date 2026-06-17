@@ -5,6 +5,8 @@ export type NotaFiscalStatus =
   | 'rejeitada'
   | 'cancelada';
 
+export type TipoDocumentoFiscal = 'nfse' | 'nfe';
+
 export type NfeConfig = {
   user_id: string;
   serie: string;
@@ -19,6 +21,13 @@ export type NfeConfig = {
   csosn: string;
   descricao_servico_padrao: string;
   natureza_operacao: string;
+  inscricao_municipal: string;
+  codigo_tributacao_nacional: string;
+  codigo_nbs: string;
+  op_simp_nac: 1 | 2 | 3;
+  reg_esp_trib: number;
+  trib_issqn: 1 | 2 | 3 | 4;
+  tp_ret_issqn: 1 | 2 | 3;
   created_at: string;
   updated_at: string;
 };
@@ -42,9 +51,11 @@ export type NotaFiscal = {
   serie: string;
   numero: number;
   status: NotaFiscalStatus;
+  tipo_documento: TipoDocumentoFiscal;
   status_sefaz: string | null;
   chave_acesso: string | null;
   protocolo_autorizacao: string | null;
+  codigo_verificacao: string | null;
   xml_autorizado: string | null;
   danfe_url: string | null;
   danfe_storage_path: string | null;
@@ -75,6 +86,10 @@ export type EmitirNfeResult = {
   status?: string;
   chave_acesso?: string;
   protocolo_autorizacao?: string;
+  codigo_verificacao?: string;
   danfe_url?: string;
   message?: string;
 };
+
+/** Ambiente fiscal fixo em homologação até liberação de produção. */
+export const AMBIENTE_FISCAL_HOMOLOGACAO = 2 as const;

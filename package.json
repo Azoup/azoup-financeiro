@@ -44,7 +44,7 @@
     "react-native-web": "^0.21.0",
     "react-native-worklets": "0.5.1",
     "xlsx": "^0.18.5",
-    "nfewizard-io": "^1.0.0",
+    "@nfewizard/nfse": "^1.0.0",
     "@nfewizard/danfe": "^1.0.0"
   },
   "devDependencies": {

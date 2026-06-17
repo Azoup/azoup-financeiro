@@ -93,7 +93,7 @@ export default function AppLayout() {
         options={{
           title: 'Notas fiscais',
           headerShown: false,
-          tabBarLabel: 'NF-e',
+          tabBarLabel: 'NFS-e',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="document-text-outline" color={color} size={size} />
           ),

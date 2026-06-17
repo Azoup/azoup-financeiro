@@ -35,6 +35,10 @@ export function labelAmbienteNfe(ambiente: number): string {
   return ambiente === 1 ? 'Produção' : 'Homologação';
 }
 
+export function labelTipoDocumentoFiscal(tipo: string | undefined | null): string {
+  return tipo === 'nfe' ? 'NF-e' : 'NFS-e';
+}
+
 export function podeImprimirDanfe(nota: { status: string; danfe_url?: string | null }): boolean {
   return nota.status === 'autorizada' && Boolean(nota.danfe_url?.trim());
 }
@@ -43,12 +47,11 @@ export function podeCancelarNotaFiscal(nota: {
   status: string;
   chave_acesso?: string | null;
   protocolo_autorizacao?: string | null;
+  tipo_documento?: string | null;
 }): boolean {
-  return (
-    nota.status === 'autorizada' &&
-    Boolean(nota.chave_acesso?.trim()) &&
-    Boolean(nota.protocolo_autorizacao?.trim())
-  );
+  if (nota.status !== 'autorizada' || !nota.chave_acesso?.trim()) return false;
+  if (nota.tipo_documento === 'nfse') return true;
+  return Boolean(nota.protocolo_autorizacao?.trim());
 }
 
 export function isAmbienteHomologacao(ambiente: number): boolean {

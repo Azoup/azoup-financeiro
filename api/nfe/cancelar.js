@@ -1,5 +1,5 @@
 const { getAdmin, getUserFromBearer } = require('./_lib/supabaseAdmin');
-const { cancelarNfeSefaz } = require('./_lib/nfeCancel');
+const { cancelarNfseSefaz } = require('./_lib/nfseCancel');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -25,12 +25,12 @@ module.exports = async function handler(req, res) {
       return res.status(404).json({ success: false, message: 'Nota fiscal não encontrada.' });
     }
     if (nota.status === 'cancelada') {
-      return res.status(200).json({ success: true, message: 'NF-e já cancelada.' });
+      return res.status(200).json({ success: true, message: 'NFS-e já cancelada.' });
     }
     if (nota.status !== 'autorizada') {
       return res.status(400).json({
         success: false,
-        message: 'Só é possível cancelar NF-e autorizada na SEFAZ.',
+        message: 'Só é possível cancelar NFS-e autorizada.',
       });
     }
 
@@ -55,7 +55,7 @@ module.exports = async function handler(req, res) {
       throw new Error('Senha do certificado não encontrada.');
     }
 
-    const result = await cancelarNfeSefaz({
+    const result = await cancelarNfseSefaz({
       admin,
       nota,
       perfil,
@@ -83,7 +83,7 @@ module.exports = async function handler(req, res) {
     console.error('nfe/cancelar', e);
     return res.status(500).json({
       success: false,
-      message: e.message ?? 'Falha ao cancelar NF-e.',
+      message: e.message ?? 'Falha ao cancelar NFS-e.',
     });
   }
 };

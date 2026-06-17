@@ -41,17 +41,17 @@ export default function ConfiguracoesIndexScreen() {
         <View style={styles.nfeHeroIcon}>
           <Ionicons name="document-text" size={28} color={colors.white} />
         </View>
-        <Text style={styles.nfeHeroTitle}>Emissão de nota fiscal (NF-e)</Text>
+        <Text style={styles.nfeHeroTitle}>Emissão de NFS-e (serviço)</Text>
         <Text style={styles.nfeHeroSub}>
-          Emitente, certificado digital A1, ambiente SEFAZ, NCM/CFOP e numeração — tudo em um só lugar.
+          Prestador, certificado A1, código do serviço (LC 116/NBS) e numeração — homologação por enquanto.
         </Text>
         {nfePronto === true ? (
-          <Text style={styles.nfeHeroOk}>✓ Pronto para emitir NF-e</Text>
+          <Text style={styles.nfeHeroOk}>✓ Pronto para emitir NFS-e em homologação</Text>
         ) : nfePronto === false ? (
           <Text style={styles.nfeHeroPending}>Configuração incompleta</Text>
         ) : null}
         <PrimaryButton
-          title="Configurar emissão de NF-e"
+          title="Configurar emissão de NFS-e"
           onPress={() => router.push('/(app)/configuracoes/nfe')}
           style={styles.nfeHeroBtn}
         />
@@ -68,7 +68,7 @@ export default function ConfiguracoesIndexScreen() {
           <View style={styles.rowBody}>
             <Text style={styles.rowTitle}>Dados do beneficiário (boleto)</Text>
             <Text style={styles.rowSub}>
-              Carnês em A receber. Os mesmos dados do emitente podem ser editados na configuração de NF-e.
+              Carnês em A receber. Os mesmos dados do prestador podem ser editados na configuração de NFS-e.
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.gray400} />

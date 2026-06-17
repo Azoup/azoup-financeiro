@@ -256,7 +256,7 @@ export default function GerarMensalidadeScreen() {
       if (ignorados > 0) extras.push(`${ignorados} sem valor de mensalidade`);
       if (semVencimento > 0) extras.push(`${semVencimento} sem primeiro vencimento no cadastro`);
       if (gerarNotaFiscal && nf) {
-        extras.push(`${nf.emitidas} NF-e autorizada(s)`);
+        extras.push(`${nf.emitidas} NFS-e autorizada(s)`);
         if (nf.rejeitadas > 0) extras.push(`${nf.rejeitadas} NF rejeitada(s)`);
         if (nf.ignoradas > 0) extras.push(`${nf.ignoradas} sem NF no cadastro`);
       }
@@ -517,7 +517,7 @@ export default function GerarMensalidadeScreen() {
         </Text>
         <PrimaryButton title="Enviar" loading={busy} onPress={onAbrirEnviar} style={styles.enviar} />
         <Text style={styles.footerHint}>
-          Ao enviar, escolha gerar só mensalidade ou mensalidade com NF-e (SEFAZ). Carnês em A receber.
+          Ao enviar, escolha gerar só mensalidade ou mensalidade com NFS-e de serviço (homologação). Carnês em A receber.
         </Text>
       </ScrollView>
       <EnviarMensalidadeModal

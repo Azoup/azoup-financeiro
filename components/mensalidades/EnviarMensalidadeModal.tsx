@@ -24,7 +24,7 @@ export function EnviarMensalidadeModal({
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <Text style={styles.title}>Como deseja enviar?</Text>
           <Text style={styles.hint}>
-            Escolha se deseja gerar apenas as mensalidades e carnês, ou também emitir NF-e na SEFAZ (clientes com
+            Escolha se deseja gerar apenas as mensalidades e carnês, ou também emitir NFS-e de serviço (clientes com
             NF no cadastro).
           </Text>
 
@@ -35,9 +35,9 @@ export function EnviarMensalidadeModal({
           >
             <Ionicons name="document-text" size={22} color={colors.white} />
             <View style={styles.optionBody}>
-              <Text style={styles.optionTitleLight}>Gerar mensalidade + NF-e</Text>
+              <Text style={styles.optionTitleLight}>Gerar mensalidade + NFS-e</Text>
               <Text style={styles.optionSubLight}>
-                Mensalidade, carnê em A receber, XML/DANFE e envio à SEFAZ.
+                Mensalidade, carnê em A receber e nota fiscal de serviço (homologação).
               </Text>
             </View>
           </Pressable>

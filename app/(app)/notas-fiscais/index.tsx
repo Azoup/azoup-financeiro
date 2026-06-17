@@ -2,7 +2,6 @@ import { Card } from '@/components/Card';
 import { CancelarNotaFiscalModal } from '@/components/notas-fiscais/CancelarNotaFiscalModal';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
-import { fetchNfeConfig } from '@/services/nfeConfigService';
 import { cancelarNotaFiscalSefaz, fetchNotasFiscaisLista } from '@/services/notaFiscalService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { NotaFiscalListRow } from '@/types/notaFiscal';
@@ -10,8 +9,8 @@ import { formatBRL } from '@/utils/currency';
 import { formatDateTimeBRFromISO } from '@/utils/date';
 import {
   corNotaFiscalStatus,
-  isAmbienteHomologacao,
   labelAmbienteNfe,
+  labelTipoDocumentoFiscal,
   labelNotaFiscalStatus,
   podeCancelarNotaFiscal,
   podeImprimirDanfe,
@@ -38,18 +37,14 @@ export default function NotasFiscaisIndexScreen() {
   const [rows, setRows] = useState<NotaFiscalListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [ambienteConfig, setAmbienteConfig] = useState<number>(2);
+  const [homologacao] = useState(true);
   const [cancelTarget, setCancelTarget] = useState<NotaFiscalListRow | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
-    const [list, cfg] = await Promise.all([
-      fetchNotasFiscaisLista(user.id),
-      fetchNfeConfig(user.id),
-    ]);
+    const [list] = await Promise.all([fetchNotasFiscaisLista(user.id)]);
     setRows(list);
-    if (cfg?.ambiente) setAmbienteConfig(cfg.ambiente);
   }, [user?.id]);
 
   useEffect(() => {
@@ -83,7 +78,7 @@ export default function NotasFiscaisIndexScreen() {
   const imprimirDanfe = async (item: NotaFiscalListRow) => {
     const url = item.danfe_url?.trim();
     if (!url) {
-      Toast.show({ type: 'info', text1: 'DANFE ainda não disponível para esta nota.' });
+      Toast.show({ type: 'info', text1: 'DANFSe ainda não disponível para esta nota.' });
       return;
     }
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -100,7 +95,7 @@ export default function NotasFiscaisIndexScreen() {
     setCancelBusy(true);
     try {
       await cancelarNotaFiscalSefaz(cancelTarget.id, justificativa);
-      Toast.show({ type: 'success', text1: 'NF-e cancelada na SEFAZ.' });
+      Toast.show({ type: 'success', text1: 'NFS-e cancelada.' });
       setCancelTarget(null);
       await load();
     } catch (e) {
@@ -121,7 +116,7 @@ export default function NotasFiscaisIndexScreen() {
         <View style={styles.cardTop}>
           <View style={{ flex: 1 }}>
             <Text style={styles.nfNum}>
-              NF-e {item.serie}/{item.numero}
+              NFS-e {item.serie}/{item.numero}
             </Text>
             <Text style={styles.cli}>{cli}</Text>
             {item.competencia ? <Text style={styles.comp}>Competência: {item.competencia}</Text> : null}
@@ -132,9 +127,14 @@ export default function NotasFiscaisIndexScreen() {
         </View>
         <Text style={styles.val}>{formatBRL(item.valor_total)}</Text>
         <Text style={styles.meta}>
-          {labelAmbienteNfe(item.ambiente)}
-          {item.status_sefaz ? ` · SEFAZ ${item.status_sefaz}` : ''}
+          {labelTipoDocumentoFiscal(item.tipo_documento)} · {labelAmbienteNfe(item.ambiente)}
+          {item.status_sefaz ? ` · ${item.status_sefaz}` : ''}
         </Text>
+        {item.codigo_verificacao ? (
+          <Text style={styles.chave} numberOfLines={1}>
+            Cód. verificação: {item.codigo_verificacao}
+          </Text>
+        ) : null}
         {item.chave_acesso ? (
           <Text style={styles.chave} numberOfLines={1}>
             Chave: {item.chave_acesso}
@@ -153,7 +153,7 @@ export default function NotasFiscaisIndexScreen() {
         <Text style={styles.date}>{formatDateTimeBRFromISO(item.created_at)}</Text>
         <View style={styles.acoes}>
           <PrimaryButton
-            title="Imprimir DANFE"
+            title="Imprimir DANFSe"
             variant="secondary"
             onPress={() => void imprimirDanfe(item)}
             disabled={!podeDanfe}
@@ -161,7 +161,7 @@ export default function NotasFiscaisIndexScreen() {
           />
           {podeCancelar ? (
             <PrimaryButton
-              title="Cancelar NF-e"
+              title="Cancelar NFS-e"
               variant="danger"
               onPress={() => setCancelTarget(item)}
               style={styles.btnAcao}
@@ -172,7 +172,7 @@ export default function NotasFiscaisIndexScreen() {
     );
   };
 
-  const emHomologacao = isAmbienteHomologacao(ambienteConfig);
+  const emHomologacao = homologacao;
 
   return (
     <View style={styles.root}>
@@ -181,22 +181,17 @@ export default function NotasFiscaisIndexScreen() {
           <View style={styles.homologBanner}>
             <Ionicons name="flask-outline" size={18} color={colors.petroleum} />
             <Text style={styles.homologTxt}>
-              Ambiente de <Text style={styles.homologStrong}>homologação</Text> (testes SEFAZ). As notas não têm
-              valor fiscal. Para produção, altere em Configurar NF-e (ambiente 1).
+              Ambiente de <Text style={styles.homologStrong}>homologação</Text> — NFS-e de serviço sem valor fiscal.
+              Produção será habilitada futuramente.
             </Text>
           </View>
-        ) : (
-          <View style={[styles.homologBanner, styles.prodBanner]}>
-            <Ionicons name="checkmark-circle-outline" size={18} color={colors.success} />
-            <Text style={styles.homologTxt}>Ambiente de produção — notas com validade fiscal.</Text>
-          </View>
-        )}
+        ) : null}
         <Text style={styles.lead}>
-          Notas emitidas a partir das mensalidades. Cancelamento só para NF-e autorizada (envia evento à SEFAZ).
+          Notas de serviço emitidas a partir das mensalidades. Cancelamento só para NFS-e autorizada.
         </Text>
         <Pressable style={styles.configLink} onPress={() => router.push('/(app)/configuracoes/nfe')}>
           <Ionicons name="settings-outline" size={16} color={colors.orange} />
-          <Text style={styles.configLinkTxt}>Configurar emissão de NF-e</Text>
+          <Text style={styles.configLinkTxt}>Configurar emissão de NFS-e</Text>
         </Pressable>
       </View>
 
@@ -211,7 +206,7 @@ export default function NotasFiscaisIndexScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
             <Text style={styles.empty}>
-              Nenhuma nota fiscal ainda. Use &quot;Gerar mensalidade + NF-e&quot; na tela de geração.
+              Nenhuma NFS-e ainda. Use &quot;Gerar mensalidade + NFS-e&quot; na tela de geração.
             </Text>
           }
         />

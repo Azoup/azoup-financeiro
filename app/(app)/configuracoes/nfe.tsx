@@ -14,7 +14,6 @@ import { colors, radius, spacing } from '@/theme/colors';
 import type { PerfilCobrancaInput } from '@/types/contasReceber';
 import type { NfeConfig } from '@/types/notaFiscal';
 import { avaliarProntidaoNfe } from '@/utils/nfeProntidao';
-import { labelAmbienteNfe } from '@/utils/nfeStatus';
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -64,11 +63,10 @@ export default function NfeConfigScreen() {
   const [emitente, setEmitente] = useState<PerfilCobrancaInput>(emptyEmitente());
   const [serie, setSerie] = useState('1');
   const [proximoNumero, setProximoNumero] = useState('1');
-  const [ambiente, setAmbiente] = useState<'1' | '2'>('2');
-  const [ie, setIe] = useState('');
   const [ibge, setIbge] = useState('');
-  const [ncm, setNcm] = useState('00000000');
-  const [cfop, setCfop] = useState('5933');
+  const [inscricaoMunicipal, setInscricaoMunicipal] = useState('');
+  const [codTribNac, setCodTribNac] = useState('010701');
+  const [codNbs, setCodNbs] = useState('106043000');
   const [descricao, setDescricao] = useState('Serviço de mensalidade');
 
   const load = useCallback(async () => {
@@ -83,11 +81,10 @@ export default function NfeConfigScreen() {
       setConfig(c);
       setSerie(c.serie);
       setProximoNumero(String(c.proximo_numero));
-      setAmbiente(String(c.ambiente) as '1' | '2');
-      setIe(c.inscricao_estadual);
       setIbge(c.codigo_ibge_emitente);
-      setNcm(c.ncm_servico);
-      setCfop(c.cfop_padrao);
+      setInscricaoMunicipal(c.inscricao_municipal ?? '');
+      setCodTribNac(c.codigo_tributacao_nacional ?? '010701');
+      setCodNbs(c.codigo_nbs ?? '106043000');
       setDescricao(c.descricao_servico_padrao);
       setCertOk(Boolean(cert));
       if (perfil) {
@@ -133,13 +130,13 @@ export default function NfeConfigScreen() {
         },
         {
           codigo_ibge_emitente: ibge,
-          inscricao_estadual: ie,
-          ncm_servico: ncm,
-          cfop_padrao: cfop,
+          codigo_tributacao_nacional: codTribNac,
+          codigo_nbs: codNbs,
+          descricao_servico_padrao: descricao,
         },
         certOk || Boolean(pendingCertFile),
       ),
-    [emitente, ibge, ie, ncm, cfop, certOk, pendingCertFile],
+    [emitente, ibge, codTribNac, codNbs, descricao, certOk, pendingCertFile],
   );
 
   const patchEmitente = (p: Partial<PerfilCobrancaInput>) => setEmitente((v) => ({ ...v, ...p }));
@@ -178,16 +175,22 @@ export default function NfeConfigScreen() {
       await upsertNfeConfig(user.id, {
         serie,
         proximo_numero: Math.max(1, parseInt(proximoNumero, 10) || 1),
-        ambiente: Number(ambiente) as 1 | 2,
-        inscricao_estadual: ie.trim() || 'ISENTO',
+        inscricao_estadual: '',
         regime_tributario: 1,
         codigo_ibge_emitente: ibge,
-        ncm_servico: ncm,
-        cfop_padrao: cfop,
+        inscricao_municipal: inscricaoMunicipal,
+        codigo_tributacao_nacional: codTribNac,
+        codigo_nbs: codNbs,
+        ncm_servico: '00000000',
+        cfop_padrao: '5933',
         cst_icms: '102',
         csosn: '102',
         descricao_servico_padrao: descricao,
         natureza_operacao: 'Prestação de serviço',
+        op_simp_nac: 1,
+        reg_esp_trib: 0,
+        trib_issqn: 1,
+        tp_ret_issqn: 1,
       });
 
       if (pendingCertFile) {
@@ -204,8 +207,8 @@ export default function NfeConfigScreen() {
 
       Toast.show({
         type: 'success',
-        text1: 'Configuração de NF-e salva.',
-        text2: prontidao.pronto || pendingCertFile ? 'Pronto para emitir em homologação/produção.' : undefined,
+        text1: 'Configuração de NFS-e salva.',
+        text2: prontidao.pronto || pendingCertFile ? 'Pronto para emitir em homologação.' : undefined,
       });
       await load();
     } catch (e) {
@@ -226,8 +229,8 @@ export default function NfeConfigScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.lead}>
-        Configure aqui tudo para emitir NF-e de mensalidade: emitente, certificado digital A1 e parâmetros fiscais.
-        Use homologação (ambiente 2) antes de ir para produção.
+        Configure a emissão de NFS-e (nota fiscal de serviço) para mensalidades: prestador, certificado A1 e
+        parâmetros do serviço. Por enquanto, apenas ambiente de homologação.
       </Text>
 
       <Card style={[styles.card, prontidao.pronto ? styles.cardOk : styles.cardWarn]}>
@@ -247,14 +250,14 @@ export default function NfeConfigScreen() {
         ))}
         <Text style={styles.prontoResumo}>
           {prontidao.pronto
-            ? 'Tudo configurado. Pode gerar mensalidade + NF-e.'
+            ? 'Tudo configurado. Pode gerar mensalidade + NFS-e em homologação.'
             : 'Complete os itens pendentes e clique em Salvar tudo.'}
         </Text>
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.h}>1. Emitente (empresa na nota)</Text>
-        <Text style={styles.sub}>Mesmos dados usados nos carnês; aparecem como emitente na NF-e.</Text>
+        <Text style={styles.h}>1. Prestador do serviço</Text>
+        <Text style={styles.sub}>Dados da empresa que presta o serviço na NFS-e.</Text>
         <FormTextInput
           label="Razão social"
           value={emitente.razao_social}
@@ -299,7 +302,7 @@ export default function NfeConfigScreen() {
             ? 'Certificado ativo no servidor'
             : pendingCertFile
               ? `Arquivo selecionado: ${certFileName}`
-              : 'Nenhum certificado — obrigatório para enviar à SEFAZ'}
+              : 'Nenhum certificado — obrigatório para enviar à prefeitura/SEFIN'}
         </Text>
         <Pressable style={styles.fileBtn} onPress={() => void escolherCertificado()}>
           <Ionicons name="folder-open-outline" size={22} color={colors.petroleum} />
@@ -320,41 +323,49 @@ export default function NfeConfigScreen() {
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.h}>3. Numeração e ambiente SEFAZ</Text>
-        <FormTextInput label="Série" value={serie} onChangeText={setSerie} />
+        <Text style={styles.h}>3. Numeração (homologação)</Text>
+        <View style={styles.homologBadge}>
+          <Text style={styles.homologBadgeTxt}>Ambiente fixo: homologação (testes — sem valor fiscal)</Text>
+        </View>
+        <FormTextInput label="Série do RPS" value={serie} onChangeText={setSerie} />
         <FormTextInput
-          label="Próximo número da NF-e"
+          label="Próximo número do RPS"
           value={proximoNumero}
           onChangeText={setProximoNumero}
           keyboardType="number-pad"
         />
         <FormTextInput
-          label="Ambiente (1 = Produção, 2 = Homologação)"
-          value={ambiente}
-          onChangeText={(t) => setAmbiente((t === '1' ? '1' : '2') as '1' | '2')}
-          keyboardType="number-pad"
-        />
-        <Text style={styles.ambiente}>{labelAmbienteNfe(Number(ambiente))}</Text>
-        <FormTextInput
-          label="Inscrição estadual"
-          value={ie}
-          onChangeText={setIe}
-          placeholder="ISENTO ou número da IE"
-        />
-        <FormTextInput
-          label="Código IBGE do município (emitente)"
+          label="Código IBGE do município do prestador"
           value={ibge}
           onChangeText={setIbge}
           keyboardType="number-pad"
           placeholder="7 dígitos — ex.: 3550308"
         />
+        <FormTextInput
+          label="Inscrição municipal (se exigida)"
+          value={inscricaoMunicipal}
+          onChangeText={setInscricaoMunicipal}
+          placeholder="Opcional conforme a prefeitura"
+        />
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.h}>4. Serviço na nota (mensalidade)</Text>
-        <FormTextInput label="NCM" value={ncm} onChangeText={setNcm} keyboardType="number-pad" />
-        <FormTextInput label="CFOP" value={cfop} onChangeText={setCfop} keyboardType="number-pad" />
-        <FormTextInput label="Descrição do item" value={descricao} onChangeText={setDescricao} />
+        <Text style={styles.h}>4. Serviço na NFS-e (mensalidade)</Text>
+        <FormTextInput
+          label="Código tributação nacional (LC 116)"
+          value={codTribNac}
+          onChangeText={setCodTribNac}
+          keyboardType="number-pad"
+          placeholder="6 dígitos — ex.: 010701"
+        />
+        <FormTextInput
+          label="Código NBS"
+          value={codNbs}
+          onChangeText={setCodNbs}
+          keyboardType="number-pad"
+          placeholder="9 dígitos"
+        />
+        <FormTextInput label="Descrição do serviço" value={descricao} onChangeText={setDescricao} />
       </Card>
 
       <PrimaryButton title="Salvar tudo" onPress={() => void salvarTudo()} loading={busy} />
@@ -406,5 +417,14 @@ const styles = StyleSheet.create({
     marginTop: -spacing.sm,
     marginBottom: spacing.md,
   },
+  homologBadge: {
+    backgroundColor: '#fff8e1',
+    borderRadius: radius.sm,
+    padding: spacing.sm,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: '#ffe082',
+  },
+  homologBadgeTxt: { fontSize: 12, color: colors.gray800, fontWeight: '600' },
   footer: { fontSize: 11, color: colors.gray400, marginTop: spacing.sm, textAlign: 'center' },
 });

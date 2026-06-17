@@ -26,15 +26,14 @@ export function CancelarNotaFiscalModal({ visible, nota, loading, onClose, onCon
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.bg} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-          <Text style={styles.title}>Cancelar NF-e</Text>
+          <Text style={styles.title}>Cancelar NFS-e</Text>
           {nota ? (
             <Text style={styles.sub}>
-              NF-e {nota.serie}/{nota.numero} · {nota.cliente?.nome_cliente ?? 'Cliente'}
+              NFS-e {nota.serie}/{nota.numero} · {nota.cliente?.nome_cliente ?? 'Cliente'}
             </Text>
           ) : null}
           <Text style={styles.hint}>
-            O cancelamento será enviado à SEFAZ (homologação ou produção, conforme a nota). Mínimo 15
-            caracteres na justificativa.
+            O cancelamento será enviado ao ambiente de homologação da NFS-e. Mínimo 15 caracteres na justificativa.
           </Text>
           <FormTextInput
             label="Motivo do cancelamento"

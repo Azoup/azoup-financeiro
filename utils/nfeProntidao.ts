@@ -22,7 +22,10 @@ function docOk(doc: string | undefined | null): boolean {
 
 export function avaliarProntidaoNfe(
   perfil: Pick<PerfilCobranca, 'razao_social' | 'documento' | 'logradouro' | 'cidade' | 'uf' | 'cep'> | null,
-  config: Pick<NfeConfig, 'codigo_ibge_emitente' | 'inscricao_estadual' | 'ncm_servico' | 'cfop_padrao'> | null,
+  config: Pick<
+    NfeConfig,
+    'codigo_ibge_emitente' | 'codigo_tributacao_nacional' | 'codigo_nbs' | 'descricao_servico_padrao'
+  > | null,
   temCertificado: boolean,
 ): NfeProntidao {
   const emitenteOk =
@@ -36,9 +39,9 @@ export function avaliarProntidaoNfe(
   const itens: NfeProntidaoItem[] = [
     {
       id: 'emitente',
-      label: 'Dados do emitente (razão social, CNPJ/CPF, endereço)',
+      label: 'Dados do prestador (razão social, CNPJ/CPF, endereço)',
       ok: emitenteOk,
-      hint: emitenteOk ? undefined : 'Preencha a seção Emitente abaixo.',
+      hint: emitenteOk ? undefined : 'Preencha a seção Prestador abaixo.',
     },
     {
       id: 'certificado',
@@ -48,19 +51,18 @@ export function avaliarProntidaoNfe(
     },
     {
       id: 'ibge',
-      label: 'Código IBGE do município do emitente',
+      label: 'Código IBGE do município do prestador',
       ok: Boolean(config?.codigo_ibge_emitente?.trim()?.length >= 6),
       hint: 'Ex.: 3550308 para São Paulo.',
     },
     {
-      id: 'ie',
-      label: 'Inscrição estadual (ou ISENTO)',
-      ok: Boolean(config?.inscricao_estadual?.trim()),
-    },
-    {
-      id: 'fiscal',
-      label: 'NCM e CFOP do serviço de mensalidade',
-      ok: Boolean(config?.ncm_servico?.trim()) && Boolean(config?.cfop_padrao?.trim()),
+      id: 'servico',
+      label: 'Código de tributação nacional e NBS do serviço',
+      ok:
+        Boolean(config?.codigo_tributacao_nacional?.trim()) &&
+        Boolean(config?.codigo_nbs?.trim()) &&
+        Boolean(config?.descricao_servico_padrao?.trim()),
+      hint: 'Item da LC 116 (6 dígitos) e código NBS — ex.: 010701 para desenvolvimento de sistemas.',
     },
   ];
 

@@ -1,12 +1,13 @@
 import { supabase } from '@/lib/supabase';
 import type { EmpresaCertificado, NfeConfig, NfeConfigInput } from '@/types/notaFiscal';
+import { AMBIENTE_FISCAL_HOMOLOGACAO } from '@/types/notaFiscal';
 import * as DocumentPicker from 'expo-document-picker';
 import { Platform } from 'react-native';
 
 const DEFAULT_NFE_CONFIG: NfeConfigInput = {
   serie: '1',
   proximo_numero: 1,
-  ambiente: 2,
+  ambiente: AMBIENTE_FISCAL_HOMOLOGACAO,
   inscricao_estadual: '',
   regime_tributario: 1,
   codigo_ibge_emitente: '',
@@ -16,6 +17,13 @@ const DEFAULT_NFE_CONFIG: NfeConfigInput = {
   csosn: '102',
   descricao_servico_padrao: 'Serviço de mensalidade',
   natureza_operacao: 'Prestação de serviço',
+  inscricao_municipal: '',
+  codigo_tributacao_nacional: '010701',
+  codigo_nbs: '106043000',
+  op_simp_nac: 1,
+  reg_esp_trib: 0,
+  trib_issqn: 1,
+  tp_ret_issqn: 1,
 };
 
 export async function fetchNfeConfig(userId: string): Promise<NfeConfig | null> {
@@ -34,7 +42,7 @@ export async function upsertNfeConfig(userId: string, input: Partial<NfeConfigIn
     user_id: userId,
     serie: (input.serie ?? current.serie).trim() || '1',
     proximo_numero: input.proximo_numero ?? current.proximo_numero ?? 1,
-    ambiente: input.ambiente ?? current.ambiente ?? 2,
+    ambiente: AMBIENTE_FISCAL_HOMOLOGACAO,
     inscricao_estadual: (input.inscricao_estadual ?? current.inscricao_estadual ?? '').trim(),
     regime_tributario: input.regime_tributario ?? current.regime_tributario ?? 1,
     codigo_ibge_emitente: (input.codigo_ibge_emitente ?? current.codigo_ibge_emitente ?? '').trim(),
@@ -46,6 +54,15 @@ export async function upsertNfeConfig(userId: string, input: Partial<NfeConfigIn
       input.descricao_servico_padrao ?? current.descricao_servico_padrao ?? 'Serviço de mensalidade'
     ).trim(),
     natureza_operacao: (input.natureza_operacao ?? current.natureza_operacao ?? 'Prestação de serviço').trim(),
+    inscricao_municipal: (input.inscricao_municipal ?? current.inscricao_municipal ?? '').trim(),
+    codigo_tributacao_nacional: (input.codigo_tributacao_nacional ?? current.codigo_tributacao_nacional ?? '010701')
+      .replace(/\D/g, '')
+      .slice(0, 6),
+    codigo_nbs: (input.codigo_nbs ?? current.codigo_nbs ?? '106043000').replace(/\D/g, '').slice(0, 9),
+    op_simp_nac: input.op_simp_nac ?? current.op_simp_nac ?? 1,
+    reg_esp_trib: input.reg_esp_trib ?? current.reg_esp_trib ?? 0,
+    trib_issqn: input.trib_issqn ?? current.trib_issqn ?? 1,
+    tp_ret_issqn: input.tp_ret_issqn ?? current.tp_ret_issqn ?? 1,
   };
   const { error } = await supabase.from('nfe_config').upsert(row, { onConflict: 'user_id' });
   if (error) throw new Error(error.message);
@@ -56,7 +73,7 @@ export async function ensureNfeConfig(userId: string): Promise<NfeConfig> {
   if (existing) return existing;
   await upsertNfeConfig(userId, DEFAULT_NFE_CONFIG);
   const created = await fetchNfeConfig(userId);
-  if (!created) throw new Error('Não foi possível criar configuração NF-e.');
+  if (!created) throw new Error('Não foi possível criar configuração NFS-e.');
   return created;
 }
 
@@ -118,9 +135,7 @@ export async function uploadCertificadoA1(
 
   if (secErr) {
     await supabase.from('empresa_certificado').delete().eq('id', cert.id);
-    throw new Error(
-      secErr.message ?? 'Falha ao salvar senha do certificado no servidor.',
-    );
+    throw new Error(secErr.message ?? 'Falha ao salvar senha do certificado no servidor.');
   }
 }
 
