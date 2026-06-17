@@ -20,9 +20,11 @@ export type AddressFields = {
 type Props = {
   value: AddressFields;
   onChange: (patch: Partial<AddressFields>) => void;
+  compact?: boolean;
+  hideTitle?: boolean;
 };
 
-export function AddressFormSection({ value, onChange }: Props) {
+export function AddressFormSection({ value, onChange, compact, hideTitle }: Props) {
   const [buscando, setBuscando] = useState(false);
 
   const buscarCep = async () => {
@@ -53,10 +55,10 @@ export function AddressFormSection({ value, onChange }: Props) {
   const podeBuscar = cepDigits.length === 8;
 
   return (
-    <View style={styles.block}>
-      <Text style={styles.section}>Endereço</Text>
+    <View style={[styles.block, compact && styles.blockCompact]}>
+      {!hideTitle ? <Text style={[styles.section, compact && styles.sectionCompact]}>Endereço</Text> : null}
 
-      <Text style={styles.label}>CEP</Text>
+      <Text style={[styles.label, compact && styles.labelCompact]}>CEP</Text>
       <View style={styles.cepRow}>
         <MaskInput
           value={value.cep}
@@ -64,39 +66,49 @@ export function AddressFormSection({ value, onChange }: Props) {
           mask={[/\d/, /\d/, /\d/, /\d/, /\d/, '-', /\d/, /\d/, /\d/]}
           placeholder="00000-000"
           keyboardType="number-pad"
-          style={[styles.mask, styles.cepInput]}
+          style={[styles.mask, compact && styles.maskCompact, styles.cepInput]}
           placeholderTextColor={colors.gray400}
         />
         <PrimaryButton
-          title="Buscar CEP"
+          title={compact ? 'Buscar' : 'Buscar CEP'}
           variant="secondary"
           onPress={buscarCep}
           loading={buscando}
           disabled={!podeBuscar}
-          style={styles.cepBtn}
+          style={[styles.cepBtn, compact && styles.cepBtnCompact]}
         />
       </View>
 
       <FormTextInput
+        compact={compact}
         label="Logradouro"
         value={value.logradouro}
         onChangeText={(t) => onChange({ logradouro: t })}
         placeholder="Rua, avenida..."
       />
+      <View style={styles.row2}>
+        <View style={styles.flex1}>
+          <FormTextInput
+            compact={compact}
+            label="Número"
+            value={value.numero}
+            onChangeText={(t) => onChange({ numero: t })}
+            placeholder="Nº"
+            keyboardType="default"
+          />
+        </View>
+        <View style={styles.flex2}>
+          <FormTextInput
+            compact={compact}
+            label="Complemento"
+            value={value.complemento}
+            onChangeText={(t) => onChange({ complemento: t })}
+            placeholder="Apto, sala..."
+          />
+        </View>
+      </View>
       <FormTextInput
-        label="Número"
-        value={value.numero}
-        onChangeText={(t) => onChange({ numero: t })}
-        placeholder="Nº do imóvel"
-        keyboardType="default"
-      />
-      <FormTextInput
-        label="Complemento"
-        value={value.complemento}
-        onChangeText={(t) => onChange({ complemento: t })}
-        placeholder="Apto, bloco, sala..."
-      />
-      <FormTextInput
+        compact={compact}
         label="Bairro"
         value={value.bairro}
         onChangeText={(t) => onChange({ bairro: t })}
@@ -104,6 +116,7 @@ export function AddressFormSection({ value, onChange }: Props) {
       <View style={styles.row2}>
         <View style={styles.flex2}>
           <FormTextInput
+            compact={compact}
             label="Cidade"
             value={value.cidade}
             onChangeText={(t) => onChange({ cidade: t })}
@@ -111,6 +124,7 @@ export function AddressFormSection({ value, onChange }: Props) {
         </View>
         <View style={styles.ufBox}>
           <FormTextInput
+            compact={compact}
             label="UF"
             value={value.uf}
             onChangeText={(t) => onChange({ uf: t.toUpperCase().slice(0, 2) })}
@@ -128,11 +142,18 @@ const styles = StyleSheet.create({
   block: {
     marginTop: spacing.sm,
   },
+  blockCompact: {
+    marginTop: 0,
+  },
   section: {
     fontSize: 18,
     fontWeight: '700',
     color: colors.petroleum,
     marginBottom: spacing.md,
+  },
+  sectionCompact: {
+    fontSize: 14,
+    marginBottom: spacing.sm,
   },
   label: {
     fontSize: 13,
@@ -140,11 +161,17 @@ const styles = StyleSheet.create({
     color: colors.gray600,
     marginBottom: spacing.sm,
   },
+  labelCompact: {
+    fontSize: 11,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
   cepRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   mask: {
     borderWidth: 1,
@@ -156,6 +183,13 @@ const styles = StyleSheet.create({
     color: colors.gray800,
     backgroundColor: colors.white,
   },
+  maskCompact: {
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 9,
+    fontSize: 14,
+    minHeight: 40,
+  },
   cepInput: {
     flex: 1,
   },
@@ -164,15 +198,23 @@ const styles = StyleSheet.create({
     minHeight: 48,
     paddingHorizontal: spacing.sm,
   },
+  cepBtnCompact: {
+    minWidth: 72,
+    minHeight: 40,
+    paddingHorizontal: spacing.sm,
+  },
   row2: {
     flexDirection: 'row',
-    gap: spacing.md,
+    gap: spacing.sm,
     alignItems: 'flex-start',
+  },
+  flex1: {
+    width: 100,
   },
   flex2: {
     flex: 1,
   },
   ufBox: {
-    width: 88,
+    width: 72,
   },
 });

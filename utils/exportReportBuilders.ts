@@ -160,7 +160,9 @@ export function buildClientDetailExport(
 
 export function buildClientFormExport(values: ClienteFormValues, title: string): ExportReportPayload {
   const items = [
-    { label: 'Documento', value: values.documento || '—' },
+    { label: 'CNPJ', value: values.cnpj || values.documento || '—' },
+    { label: 'Inscrição estadual', value: values.inscricao_estadual || '—' },
+    { label: 'Documento interno', value: values.documento || '—' },
     { label: 'Nome', value: values.nome_cliente },
     { label: 'Empresa', value: values.nome_empresa || '—' },
     { label: 'Segmento', value: values.segmento_cliente_codigo },

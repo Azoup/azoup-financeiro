@@ -17,9 +17,10 @@ type Props = {
   /** Código salvo no banco (segmento_cliente.codigo). */
   valueCodigo: string;
   onChangeCodigo: (codigo: string) => void;
+  compact?: boolean;
 };
 
-export function SegmentoClientePicker({ valueCodigo, onChangeCodigo }: Props) {
+export function SegmentoClientePicker({ valueCodigo, onChangeCodigo, compact }: Props) {
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<SegmentoClienteRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -47,17 +48,19 @@ export function SegmentoClientePicker({ valueCodigo, onChangeCodigo }: Props) {
     (valueCodigo ? `${valueCodigo} (código)` : '');
 
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.label}>Segmento</Text>
-      <Pressable onPress={() => setOpen(true)} style={styles.field}>
-        <Text style={[styles.fieldText, !valueCodigo && styles.placeholder]}>
+    <View style={[styles.wrap, compact && styles.wrapCompact]}>
+      <Text style={[styles.label, compact && styles.labelCompact]}>Segmento</Text>
+      <Pressable onPress={() => setOpen(true)} style={[styles.field, compact && styles.fieldCompact]}>
+        <Text style={[styles.fieldText, compact && styles.fieldTextCompact, !valueCodigo && styles.placeholder]}>
           {valueCodigo ? label : 'Selecionar segmento'}
         </Text>
         <Text style={styles.chev}>▼</Text>
       </Pressable>
-      <Text style={styles.hint}>
-        Catálogo de segmentos (código + nome). Para incluir ou remover opções, use Configurações → Segmentos.
-      </Text>
+      {!compact ? (
+        <Text style={styles.hint}>
+          Catálogo de segmentos (código + nome). Para incluir ou remover opções, use Configurações → Segmentos.
+        </Text>
+      ) : null}
 
       <Modal visible={open} animationType="slide" transparent>
         <View style={styles.backdrop}>
@@ -105,11 +108,20 @@ const styles = StyleSheet.create({
   wrap: {
     marginBottom: spacing.md,
   },
+  wrapCompact: {
+    marginBottom: spacing.sm,
+  },
   label: {
     fontSize: 13,
     fontWeight: '600',
     color: colors.gray600,
     marginBottom: spacing.sm,
+  },
+  labelCompact: {
+    fontSize: 11,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   hint: {
     fontSize: 11,
@@ -128,10 +140,19 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     backgroundColor: colors.white,
   },
+  fieldCompact: {
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 9,
+    minHeight: 40,
+  },
   fieldText: {
     fontSize: 16,
     color: colors.gray800,
     flex: 1,
+  },
+  fieldTextCompact: {
+    fontSize: 14,
   },
   placeholder: {
     color: colors.gray400,

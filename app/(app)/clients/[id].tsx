@@ -327,7 +327,8 @@ export default function ClientDetailScreen() {
       <Card style={styles.block}>
         <Text style={styles.h}>Dados principais</Text>
         <Row label="Situação" value={data.cancelado ? 'Cancelado' : 'Ativo'} />
-        <Row label="Documento" value={data.documento} />
+        <Row label="CNPJ / documento" value={data.documento} />
+        <Row label="Inscrição estadual" value={data.inscricao_estadual?.trim() || '—'} />
         <Row label="Cliente" value={data.nome_cliente} />
         <Row label="Empresa" value={data.nome_empresa || '—'} />
         <Row
@@ -557,7 +558,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.gray50,
   },
   screenFormInset: {
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
   },
   scroll: {

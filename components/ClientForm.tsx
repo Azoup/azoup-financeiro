@@ -1,27 +1,27 @@
 import { AddressFormSection } from '@/components/AddressFormSection';
+import { Card } from '@/components/Card';
 import { ContactListEditor } from '@/components/ContactListEditor';
 import { DateMaskedField } from '@/components/DateMaskedField';
 import { FormTextInput } from '@/components/FormTextInput';
 import { PdfAttachmentSection } from '@/components/PdfAttachmentSection';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { SegmentoClientePicker } from '@/components/SegmentoClientePicker';
-import { colors, spacing } from '@/theme/colors';
+import { colors, radius, spacing } from '@/theme/colors';
 import type { Cliente, ClienteFormValues, ContatoClienteInput } from '@/types/models';
 import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate, toISODate } from '@/utils/date';
 import { validateClienteForm } from '@/utils/validation';
+import { documentoToCnpjField, isCnpjDigitsComplete, isZpfDocumento, CNPJ_INPUT_MASK } from '@/utils/cnpj';
+import { fetchCompanyByCnpj } from '@/services/cnpjLookup';
 import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import MaskInput, { Masks } from 'react-native-mask-input';
-
-const emptyContato = (): ContatoClienteInput => ({
-  nome_contato: '',
-  tipo_contato: 'whatsapp',
-  valor_contato: '',
-});
+import Toast from 'react-native-toast-message';
 
 export function getEmptyClienteForm(): ClienteFormValues {
   return {
+    cnpj: '',
+    inscricao_estadual: '',
     documento: '',
     nome_cliente: '',
     nome_empresa: '',
@@ -52,6 +52,8 @@ export function getEmptyClienteForm(): ClienteFormValues {
 
 export function clienteToFormValues(c: Cliente, contatos: ContatoClienteInput[]): ClienteFormValues {
   return {
+    cnpj: documentoToCnpjField(c.documento),
+    inscricao_estadual: c.inscricao_estadual ?? '',
     documento: c.documento,
     nome_cliente: c.nome_cliente,
     nome_empresa: c.nome_empresa ?? '',
@@ -88,18 +90,86 @@ type Props = {
   submitLabel: string;
 };
 
+function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <Card style={styles.sectionCard}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {children}
+    </Card>
+  );
+}
+
+function CompactToggle({
+  label,
+  value,
+  onValueChange,
+  activeColor,
+}: {
+  label: string;
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+  activeColor: string;
+}) {
+  return (
+    <View style={styles.toggleItem}>
+      <Text style={styles.toggleLabel}>{label}</Text>
+      <Switch
+        accessibilityLabel={label}
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: colors.gray200, true: activeColor }}
+        thumbColor={value ? colors.white : colors.gray400}
+      />
+    </View>
+  );
+}
+
 export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
   const [values, setValues] = useState<ClienteFormValues>(initial ?? getEmptyClienteForm());
   const [loading, setLoading] = useState(false);
+  const [buscandoCnpj, setBuscandoCnpj] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (initial) setValues(initial);
   }, [initial]);
 
+  const buscarCnpj = async () => {
+    setBuscandoCnpj(true);
+    try {
+      const r = await fetchCompanyByCnpj(values.cnpj);
+      if (!r.ok) {
+        Toast.show({ type: 'error', text1: r.message });
+        return;
+      }
+      setValues((v) => ({
+        ...v,
+        cnpj: values.cnpj,
+        documento: values.cnpj.trim(),
+        nome_empresa: r.razao_social || v.nome_empresa,
+        nome_cliente: v.nome_cliente.trim() ? v.nome_cliente : r.nome_fantasia || r.razao_social,
+        inscricao_estadual: r.inscricao_estadual || v.inscricao_estadual,
+        cep: r.cep || v.cep,
+        logradouro: r.logradouro || v.logradouro,
+        numero: r.numero || v.numero,
+        complemento: r.complemento || v.complemento,
+        bairro: r.bairro || v.bairro,
+        cidade: r.cidade || v.cidade,
+        uf: r.uf || v.uf,
+      }));
+      setError(null);
+      Toast.show({ type: 'success', text1: 'Dados do CNPJ preenchidos.' });
+    } finally {
+      setBuscandoCnpj(false);
+    }
+  };
+
   const submit = async () => {
+    const documento = values.cnpj.trim() || values.documento.trim();
+    const payload: ClienteFormValues = { ...values, documento };
     const msg = validateClienteForm({
-      documento: values.documento,
-      nome_cliente: values.nome_cliente,
+      documento: payload.documento,
+      cnpj: payload.cnpj,
+      nome_cliente: payload.nome_cliente,
       valor_mensalidade: values.valor_mensalidade,
       contatos: values.contatos,
       uf: values.uf,
@@ -125,7 +195,7 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
     setError(null);
     setLoading(true);
     try {
-      await onSubmit(values);
+      await onSubmit(payload);
     } finally {
       setLoading(false);
     }
@@ -140,197 +210,248 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
       keyboardShouldPersistTaps="always"
       showsVerticalScrollIndicator={false}
     >
-      <Text style={styles.section}>Dados principais</Text>
-      <FormTextInput
-        label="Número do documento"
-        value={values.documento}
-        onChangeText={(t) => setValues((v) => ({ ...v, documento: t }))}
-        placeholder="Deixe vazio para gerar ZPF - 1, ZPF - 2… automaticamente"
-        autoCapitalize="characters"
-      />
-      <Text style={styles.hint}>
-        Documento único por conta. Vazio no cadastro gera sequência no formato ZPF - número.
-      </Text>
-      <View style={styles.switchRow}>
-        <View style={styles.switchLabels}>
-          <Text style={styles.switchTitle}>Cliente cancelado</Text>
-          <Text style={styles.switchHint}>
-            Cancelados permanecem no cadastro, mas não entram na contagem e na soma do painel.
-          </Text>
+      <FormSection title="Identificação">
+        <Text style={styles.fieldLabel}>CNPJ</Text>
+        <View style={styles.cnpjRow}>
+          <MaskInput
+            value={values.cnpj}
+            onChangeText={(masked) =>
+              setValues((v) => ({
+                ...v,
+                cnpj: masked,
+                documento: masked.trim() || (isZpfDocumento(v.documento) ? v.documento : ''),
+              }))
+            }
+            mask={CNPJ_INPUT_MASK}
+            keyboardType="number-pad"
+            placeholder="00.000.000/0000-00"
+            style={[styles.mask, styles.cnpjInput]}
+            placeholderTextColor={colors.gray400}
+          />
+          <PrimaryButton
+            title="Buscar"
+            variant="secondary"
+            onPress={() => void buscarCnpj()}
+            loading={buscandoCnpj}
+            disabled={!isCnpjDigitsComplete(values.cnpj)}
+            style={styles.cnpjBtn}
+          />
         </View>
-        <Switch
-          accessibilityLabel="Cliente cancelado"
-          value={values.cancelado}
-          onValueChange={(cancelado) =>
+        <Text style={styles.hint}>
+          Vazio gera documento interno ZPF. Busca preenche razão social, endereço e IE.
+        </Text>
+        {isZpfDocumento(values.documento) && !values.cnpj.trim() ? (
+          <View style={styles.zpfBadge}>
+            <Text style={styles.zpfBadgeText}>{values.documento}</Text>
+          </View>
+        ) : null}
+
+        <View style={styles.row2}>
+          <View style={styles.flex1}>
+            <FormTextInput
+              compact
+              label="Inscrição estadual"
+              value={values.inscricao_estadual}
+              onChangeText={(t) => setValues((v) => ({ ...v, inscricao_estadual: t }))}
+              placeholder="IE ou ISENTO"
+              autoCapitalize="characters"
+            />
+          </View>
+        </View>
+
+        <View style={styles.row2}>
+          <View style={styles.flex1}>
+            <FormTextInput
+              compact
+              label="Nome do cliente"
+              value={values.nome_cliente}
+              onChangeText={(t) => setValues((v) => ({ ...v, nome_cliente: t }))}
+            />
+          </View>
+          <View style={styles.flex1}>
+            <FormTextInput
+              compact
+              label="Nome da empresa"
+              value={values.nome_empresa}
+              onChangeText={(t) => setValues((v) => ({ ...v, nome_empresa: t }))}
+            />
+          </View>
+        </View>
+
+        <View style={styles.toggleRow}>
+          <CompactToggle
+            label="Cancelado"
+            value={values.cancelado}
+            onValueChange={(cancelado) =>
+              setValues((v) => ({
+                ...v,
+                cancelado,
+                cancelamento_justificativa: cancelado ? v.cancelamento_justificativa : '',
+              }))
+            }
+            activeColor="rgba(232, 106, 36, 0.45)"
+          />
+          <View style={styles.toggleDivider} />
+          <CompactToggle
+            label="NF-e"
+            value={values.emite_nf}
+            onValueChange={(emite_nf) => setValues((v) => ({ ...v, emite_nf }))}
+            activeColor="rgba(13, 59, 79, 0.35)"
+          />
+        </View>
+
+        {values.cancelado ? (
+          <FormTextInput
+            compact
+            label="Justificativa do cancelamento"
+            value={values.cancelamento_justificativa}
+            onChangeText={(t) => setValues((v) => ({ ...v, cancelamento_justificativa: t }))}
+            placeholder="Motivo (obrigatório)"
+            multiline
+            numberOfLines={3}
+            style={styles.textArea}
+          />
+        ) : null}
+      </FormSection>
+
+      <FormSection title="Endereço">
+        <AddressFormSection
+          compact
+          hideTitle
+          value={{
+            cep: values.cep,
+            logradouro: values.logradouro,
+            numero: values.numero,
+            complemento: values.complemento,
+            bairro: values.bairro,
+            cidade: values.cidade,
+            uf: values.uf,
+          }}
+          onChange={addressPatch}
+        />
+      </FormSection>
+
+      <FormSection title="Contatos">
+        <ContactListEditor
+          compact
+          hideTitle
+          contatos={values.contatos}
+          onChange={(contatos) => setValues((v) => ({ ...v, contatos }))}
+        />
+      </FormSection>
+
+      <FormSection title="Financeiro">
+        <View style={styles.row2}>
+          <View style={styles.flex1}>
+            <Text style={styles.fieldLabel}>Mês entrada</Text>
+            <MaskInput
+              value={values.mes_entrada}
+              onChangeText={(masked) => setValues((v) => ({ ...v, mes_entrada: masked }))}
+              mask={[/\d/, /\d/, '/', /\d/, /\d/, /\d/, /\d/]}
+              placeholder="MM/AAAA"
+              keyboardType="number-pad"
+              style={styles.mask}
+              placeholderTextColor={colors.gray400}
+            />
+          </View>
+          <View style={styles.flex1}>
+            <Text style={styles.fieldLabel}>Mensalidade</Text>
+            <MaskInput
+              value={values.valor_mensalidade}
+              onChangeText={(masked) => setValues((v) => ({ ...v, valor_mensalidade: masked }))}
+              mask={Masks.BRL_CURRENCY}
+              keyboardType="numeric"
+              style={styles.mask}
+              placeholderTextColor={colors.gray400}
+            />
+          </View>
+        </View>
+
+        <View style={styles.readonlyRow}>
+          <View style={styles.readonlyItem}>
+            <Text style={styles.readonlyLabel}>Mens. anterior</Text>
+            <Text style={styles.readonlyValue}>
+              {values.valor_mensalidade_anterior?.trim() ? values.valor_mensalidade_anterior : '—'}
+            </Text>
+          </View>
+        </View>
+
+        <SegmentoClientePicker
+          compact
+          valueCodigo={values.segmento_cliente_codigo}
+          onChangeCodigo={(segmento_cliente_codigo) =>
+            setValues((v) => ({ ...v, segmento_cliente_codigo }))
+          }
+        />
+
+        <Text style={styles.fieldLabel}>Anexo PDF</Text>
+        <PdfAttachmentSection
+          compact
+          pdfPath={values.pdfPath}
+          pdfLocalUri={values.pdfLocalUri}
+          pdfFileName={values.pdfFileName}
+          onPick={(uri, fileName) =>
+            setValues((v) => ({ ...v, pdfLocalUri: uri, pdfFileName: fileName }))
+          }
+          onRemove={() =>
             setValues((v) => ({
               ...v,
-              cancelado,
-              cancelamento_justificativa: cancelado ? v.cancelamento_justificativa : '',
+              pdfLocalUri: null,
+              pdfFileName: null,
+              pdfPath: null,
             }))
           }
-          trackColor={{ false: colors.gray200, true: 'rgba(232, 106, 36, 0.45)' }}
-          thumbColor={values.cancelado ? colors.orange : colors.gray400}
         />
-      </View>
-      {values.cancelado ? (
+      </FormSection>
+
+      <FormSection title="Mensalidade">
+        <View style={styles.row2}>
+          <DateMaskedField
+            compact
+            label="1º vencimento"
+            value={values.data_inicio}
+            onChange={(d) => setValues((v) => ({ ...v, data_inicio: d }))}
+          />
+          <DateMaskedField
+            compact
+            label="Data reajuste"
+            value={values.data_reajuste}
+            onChange={(d) =>
+              setValues((v) => {
+                if (d == null) {
+                  return { ...v, data_reajuste: null };
+                }
+                const prev = v.data_reajuste;
+                const same = prev != null && toISODate(prev) === toISODate(d);
+                if (!same && prev != null) {
+                  return { ...v, data_reajuste: d, ultimo_reajuste: prev };
+                }
+                return { ...v, data_reajuste: d };
+              })
+            }
+          />
+        </View>
+        <View style={styles.readonlyRow}>
+          <View style={styles.readonlyItem}>
+            <Text style={styles.readonlyLabel}>Último reajuste</Text>
+            <Text style={styles.readonlyValue}>{formatBRDate(values.ultimo_reajuste) || '—'}</Text>
+          </View>
+        </View>
+      </FormSection>
+
+      <FormSection title="Observações">
         <FormTextInput
-          label="Justificativa do cancelamento"
-          value={values.cancelamento_justificativa}
-          onChangeText={(t) => setValues((v) => ({ ...v, cancelamento_justificativa: t }))}
-          placeholder="Descreva o motivo (obrigatório para cliente cancelado)."
+          compact
+          label="Notas"
+          hideLabel
+          value={values.observacao}
+          onChangeText={(t) => setValues((v) => ({ ...v, observacao: t }))}
+          placeholder="Observações gerais, internas ou comerciais"
           multiline
           numberOfLines={4}
           style={styles.textArea}
         />
-      ) : null}
-      <View style={styles.switchRow}>
-        <View style={styles.switchLabels}>
-          <Text style={styles.switchTitle}>Nota fiscal (NF)</Text>
-          <Text style={styles.switchHint}>
-            {values.emite_nf
-              ? 'Com NF: cliente tratado como que emite ou exige nota fiscal.'
-              : 'Sem NF: cliente sem emissão de NF neste cadastro.'}
-          </Text>
-        </View>
-        <Switch
-          accessibilityLabel="Cliente com nota fiscal"
-          value={values.emite_nf}
-          onValueChange={(emite_nf) => setValues((v) => ({ ...v, emite_nf }))}
-          trackColor={{ false: colors.gray200, true: 'rgba(13, 59, 79, 0.35)' }}
-          thumbColor={values.emite_nf ? colors.petroleum : colors.gray400}
-        />
-      </View>
-      <FormTextInput
-        label="Nome do cliente"
-        value={values.nome_cliente}
-        onChangeText={(t) => setValues((v) => ({ ...v, nome_cliente: t }))}
-      />
-      <FormTextInput
-        label="Nome da empresa"
-        value={values.nome_empresa}
-        onChangeText={(t) => setValues((v) => ({ ...v, nome_empresa: t }))}
-      />
-
-      <AddressFormSection
-        value={{
-          cep: values.cep,
-          logradouro: values.logradouro,
-          numero: values.numero,
-          complemento: values.complemento,
-          bairro: values.bairro,
-          cidade: values.cidade,
-          uf: values.uf,
-        }}
-        onChange={addressPatch}
-      />
-
-      <ContactListEditor
-        contatos={values.contatos}
-        onChange={(contatos) => setValues((v) => ({ ...v, contatos }))}
-      />
-
-      <Text style={styles.section}>Financeiro e comercial</Text>
-      <Text style={styles.label}>Mês de entrada</Text>
-      <MaskInput
-        value={values.mes_entrada}
-        onChangeText={(masked) => setValues((v) => ({ ...v, mes_entrada: masked }))}
-        mask={[/\d/, /\d/, '/', /\d/, /\d/, /\d/, /\d/]}
-        placeholder="MM/AAAA"
-        keyboardType="number-pad"
-        style={styles.mask}
-        placeholderTextColor={colors.gray400}
-      />
-
-      <View style={styles.readonlyBox}>
-        <Text style={styles.label}>Mensalidade antes do último reajuste</Text>
-        <Text style={styles.readonlyValue}>
-          {values.valor_mensalidade_anterior?.trim()
-            ? values.valor_mensalidade_anterior
-            : '—'}
-        </Text>
-        <Text style={styles.readonlyHint}>
-          Atualizado ao aplicar reajuste em lote (Gerar mensalidade) ou ao alterar o valor da mensalidade neste cadastro.
-        </Text>
-      </View>
-
-      <Text style={styles.label}>Mensalidade atual</Text>
-      <MaskInput
-        value={values.valor_mensalidade}
-        onChangeText={(masked) => setValues((v) => ({ ...v, valor_mensalidade: masked }))}
-        mask={Masks.BRL_CURRENCY}
-        keyboardType="numeric"
-        style={styles.mask}
-        placeholderTextColor={colors.gray400}
-      />
-
-      <SegmentoClientePicker
-        valueCodigo={values.segmento_cliente_codigo}
-        onChangeCodigo={(segmento_cliente_codigo) =>
-          setValues((v) => ({ ...v, segmento_cliente_codigo }))
-        }
-      />
-
-      <PdfAttachmentSection
-        pdfPath={values.pdfPath}
-        pdfLocalUri={values.pdfLocalUri}
-        pdfFileName={values.pdfFileName}
-        onPick={(uri, fileName) =>
-          setValues((v) => ({ ...v, pdfLocalUri: uri, pdfFileName: fileName }))
-        }
-        onRemove={() =>
-          setValues((v) => ({
-            ...v,
-            pdfLocalUri: null,
-            pdfFileName: null,
-            pdfPath: null,
-          }))
-        }
-      />
-
-      <Text style={styles.section}>Datas para mensalidade</Text>
-      <DateMaskedField
-        label="Primeiro vencimento"
-        value={values.data_inicio}
-        onChange={(d) => setValues((v) => ({ ...v, data_inicio: d }))}
-      />
-      <DateMaskedField
-        label="Data do reajuste"
-        value={values.data_reajuste}
-        onChange={(d) =>
-          setValues((v) => {
-            if (d == null) {
-              return { ...v, data_reajuste: null };
-            }
-            const prev = v.data_reajuste;
-            const same =
-              prev != null &&
-              toISODate(prev) === toISODate(d);
-            if (!same && prev != null) {
-              return { ...v, data_reajuste: d, ultimo_reajuste: prev };
-            }
-            return { ...v, data_reajuste: d };
-          })
-        }
-      />
-      <View style={styles.readonlyBox}>
-        <Text style={styles.label}>Último reajuste</Text>
-        <Text style={styles.readonlyValue}>
-          {formatBRDate(values.ultimo_reajuste) || '—'}
-        </Text>
-        <Text style={styles.readonlyHint}>
-          Ao alterar a data de reajuste e salvar, a data anterior passa a aparecer aqui.
-        </Text>
-      </View>
-
-      <Text style={styles.section}>Observações</Text>
-      <FormTextInput
-        label="Observações gerais / internas / comerciais"
-        value={values.observacao}
-        onChangeText={(t) => setValues((v) => ({ ...v, observacao: t }))}
-        multiline
-        numberOfLines={6}
-        style={styles.textArea}
-      />
+      </FormSection>
 
       {error ? <Text style={styles.formError}>{error}</Text> : null}
 
@@ -342,95 +463,144 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
 const styles = StyleSheet.create({
   scroll: {
     paddingBottom: spacing.xl * 2,
+    gap: spacing.sm,
   },
-  section: {
-    fontSize: 18,
+  sectionCard: {
+    padding: spacing.sm + 4,
+    marginBottom: 0,
+  },
+  sectionTitle: {
+    fontSize: 13,
     fontWeight: '700',
     color: colors.petroleum,
-    marginTop: spacing.md,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
+    letterSpacing: 0.2,
+  },
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.gray600,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   hint: {
-    fontSize: 12,
-    color: colors.gray600,
-    marginTop: -spacing.sm,
-    marginBottom: spacing.md,
-    lineHeight: 17,
+    fontSize: 11,
+    color: colors.gray400,
+    marginTop: -2,
+    marginBottom: spacing.sm,
+    lineHeight: 15,
   },
-  switchRow: {
+  cnpjRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  cnpjInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  cnpjBtn: {
+    minWidth: 72,
+    minHeight: 40,
+    paddingHorizontal: spacing.sm,
+  },
+  zpfBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(13, 59, 79, 0.08)',
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    marginBottom: spacing.sm,
+  },
+  zpfBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.petroleum,
+  },
+  row2: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    alignItems: 'flex-start',
+  },
+  flex1: {
+    flex: 1,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.xs,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.gray100,
+  },
+  toggleItem: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: spacing.md,
-    marginBottom: spacing.lg,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.gray50,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.gray100,
+    paddingHorizontal: spacing.xs,
   },
-  switchLabels: {
-    flex: 1,
-  },
-  switchTitle: {
-    fontSize: 13,
+  toggleLabel: {
+    fontSize: 12,
     fontWeight: '600',
     color: colors.gray600,
   },
-  switchHint: {
-    fontSize: 11,
-    color: colors.gray600,
-    marginTop: 4,
-    lineHeight: 16,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.gray600,
-    marginBottom: spacing.sm,
+  toggleDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 28,
+    backgroundColor: colors.gray200,
   },
   mask: {
     borderWidth: 1,
     borderColor: colors.gray200,
-    borderRadius: 12,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 12,
-    fontSize: 16,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 9,
+    fontSize: 14,
     color: colors.gray800,
     backgroundColor: colors.white,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
+    minHeight: 40,
   },
   textArea: {
-    minHeight: 120,
+    minHeight: 80,
     textAlignVertical: 'top',
+  },
+  readonlyRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.gray50,
+    borderRadius: radius.sm,
+  },
+  readonlyItem: {
+    flex: 1,
+  },
+  readonlyLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.gray400,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  readonlyValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.petroleum,
+    marginTop: 2,
   },
   formError: {
     color: colors.danger,
-    marginBottom: spacing.md,
-    fontSize: 14,
+    marginBottom: spacing.sm,
+    fontSize: 13,
+    paddingHorizontal: spacing.xs,
   },
   submit: {
-    marginTop: spacing.md,
-  },
-  readonlyBox: {
-    marginBottom: spacing.md,
-    padding: spacing.md,
-    backgroundColor: colors.gray50,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.gray100,
-  },
-  readonlyValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.petroleum,
-    marginTop: 4,
-  },
-  readonlyHint: {
-    marginTop: spacing.sm,
-    fontSize: 12,
-    color: colors.gray600,
-    lineHeight: 17,
+    marginTop: spacing.xs,
+    minHeight: 44,
   },
 });

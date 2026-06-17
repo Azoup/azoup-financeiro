@@ -18,11 +18,16 @@ function contatoLinhaVazia(c: ContatoClienteInput): boolean {
 
 export function validateClienteForm(params: {
   documento: string;
+  cnpj?: string;
   nome_cliente: string;
   valor_mensalidade: string;
   contatos: ContatoClienteInput[];
   uf?: string;
 }): string | null {
+  const cnpjDigits = (params.cnpj ?? params.documento).replace(/\D/g, '');
+  if (cnpjDigits.length > 0 && cnpjDigits.length !== 14) {
+    return 'CNPJ incompleto — informe os 14 dígitos ou deixe vazio para ZPF.';
+  }
   if (!params.nome_cliente.trim()) return 'Informe o nome do cliente.';
   const v = parseBRLMasked(params.valor_mensalidade);
   if (v == null || v <= 0) return 'Informe um valor de mensalidade válido.';

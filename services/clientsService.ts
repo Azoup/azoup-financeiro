@@ -30,6 +30,8 @@ async function resolveDocumento(
   opts: { mode: 'create' } | { mode: 'update'; previousDocumento: string },
 ): Promise<string> {
   const trimmed = raw.trim();
+  const cnpjDigits = trimmed.replace(/\D/g, '');
+  if (cnpjDigits.length === 14) return trimmed;
   if (trimmed) return trimmed;
   if (opts.mode === 'update' && opts.previousDocumento.trim()) {
     return opts.previousDocumento.trim();
@@ -115,6 +117,7 @@ function baseClienteRow(values: ClienteFormValues, documento: string) {
     bairro: values.bairro.trim() || null,
     cidade: values.cidade.trim() || null,
     uf: values.uf.trim() ? values.uf.trim().toUpperCase().slice(0, 2) : null,
+    inscricao_estadual: values.inscricao_estadual.trim() || null,
     cancelado: values.cancelado,
     emite_nf: values.emite_nf,
   };

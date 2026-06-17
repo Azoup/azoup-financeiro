@@ -43,7 +43,8 @@ export default function ConfiguracoesIndexScreen() {
         </View>
         <Text style={styles.nfeHeroTitle}>Emissão de NFS-e (serviço)</Text>
         <Text style={styles.nfeHeroSub}>
-          Prestador, certificado A1, código do serviço (LC 116/NBS) e numeração — homologação por enquanto.
+          Prestador, certificado A1, código do serviço (LC 116 + NBS) e município (IBGE) — homologação por enquanto.
+          NFS-e não usa NCM nem CFOP.
         </Text>
         {nfePronto === true ? (
           <Text style={styles.nfeHeroOk}>✓ Pronto para emitir NFS-e em homologação</Text>

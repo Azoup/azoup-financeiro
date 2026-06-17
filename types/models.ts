@@ -51,6 +51,8 @@ export interface Cliente {
   ultima_justificativa_cancelamento?: string | null;
   /** true = com NF (nota fiscal); false = sem NF. Ausente até migration 014 = sem NF. */
   emite_nf?: boolean;
+  /** Inscrição estadual do cliente (PJ). */
+  inscricao_estadual?: string;
   /** Join opcional (lista/detalhe). */
   segmento_cliente?: { codigo: string; nome: string } | null;
   created_at: string;
@@ -62,6 +64,9 @@ export interface ClienteListItem extends Cliente {
 }
 
 export interface ClienteFormValues {
+  /** CNPJ mascarado; vazio no cadastro gera documento ZPF automaticamente. */
+  cnpj: string;
+  inscricao_estadual: string;
   documento: string;
   nome_cliente: string;
   nome_empresa: string;

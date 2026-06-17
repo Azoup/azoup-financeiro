@@ -51,18 +51,18 @@ export function avaliarProntidaoNfe(
     },
     {
       id: 'ibge',
-      label: 'Código IBGE do município do prestador',
+      label: 'Código IBGE do município do prestador (cidade, 7 dígitos)',
       ok: Boolean(config?.codigo_ibge_emitente?.trim()?.length >= 6),
-      hint: 'Ex.: 3550308 para São Paulo.',
+      hint: 'Não é inscrição municipal. Ex.: 3550308 = São Paulo.',
     },
     {
       id: 'servico',
-      label: 'Código de tributação nacional e NBS do serviço',
+      label: 'Código do serviço (LC 116) e NBS',
       ok:
         Boolean(config?.codigo_tributacao_nacional?.trim()) &&
         Boolean(config?.codigo_nbs?.trim()) &&
         Boolean(config?.descricao_servico_padrao?.trim()),
-      hint: 'Item da LC 116 (6 dígitos) e código NBS — ex.: 010701 para desenvolvimento de sistemas.',
+      hint: 'NFS-e não usa NCM/CFOP. Preencha LC 116 (6 dígitos) e NBS (9 dígitos) na seção Serviço.',
     },
   ];
 

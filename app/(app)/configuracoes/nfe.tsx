@@ -323,7 +323,7 @@ export default function NfeConfigScreen() {
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.h}>3. Numeração (homologação)</Text>
+        <Text style={styles.h}>3. Município e numeração (homologação)</Text>
         <View style={styles.homologBadge}>
           <Text style={styles.homologBadgeTxt}>Ambiente fixo: homologação (testes — sem valor fiscal)</Text>
         </View>
@@ -335,37 +335,66 @@ export default function NfeConfigScreen() {
           keyboardType="number-pad"
         />
         <FormTextInput
-          label="Código IBGE do município do prestador"
+          label="Código IBGE do município"
           value={ibge}
           onChangeText={setIbge}
           keyboardType="number-pad"
           placeholder="7 dígitos — ex.: 3550308"
         />
+        <Text style={styles.fieldHint}>
+          Código da cidade onde o prestador está estabelecido (IBGE). Não é inscrição municipal — é o código do
+          município. Ex.: São Paulo = 3550308, Campinas = 3509502.
+        </Text>
         <FormTextInput
-          label="Inscrição municipal (se exigida)"
+          label="Inscrição municipal (IM)"
           value={inscricaoMunicipal}
           onChangeText={setInscricaoMunicipal}
-          placeholder="Opcional conforme a prefeitura"
+          placeholder="Número na prefeitura — se a sua cidade exigir"
         />
+        <Text style={styles.fieldHint}>
+          Cadastro da empresa na prefeitura (IM). Campo separado do código IBGE. Preencha se sua contabilidade ou a
+          prefeitura exigir na NFS-e.
+        </Text>
       </Card>
 
       <Card style={styles.card}>
         <Text style={styles.h}>4. Serviço na NFS-e (mensalidade)</Text>
+        <Text style={styles.sub}>
+          NFS-e de serviço não usa NCM nem CFOP (esses campos são de NF-e de produto). Informe o código do serviço
+          conforme a Lista LC 116 e o NBS indicados pelo seu contador.
+        </Text>
         <FormTextInput
-          label="Código tributação nacional (LC 116)"
+          label="Código do serviço (LC 116 / cTribNac)"
           value={codTribNac}
           onChangeText={setCodTribNac}
           keyboardType="number-pad"
           placeholder="6 dígitos — ex.: 010701"
         />
+        <Text style={styles.fieldHint}>
+          Código nacional do serviço na Lei Complementar 116. Ex.: 010701 = desenvolvimento de programas sob
+          encomenda; 171901 = contabilidade. Confirme com seu contador.
+        </Text>
         <FormTextInput
-          label="Código NBS"
+          label="Código NBS (nomenclatura do serviço)"
           value={codNbs}
           onChangeText={setCodNbs}
           keyboardType="number-pad"
-          placeholder="9 dígitos"
+          placeholder="9 dígitos — ex.: 106043000"
         />
-        <FormTextInput label="Descrição do serviço" value={descricao} onChangeText={setDescricao} />
+        <Text style={styles.fieldHint}>
+          Nomenclatura Brasileira de Serviços (NBS), vinculada ao tipo de serviço. Também deve ser validada com a
+          contabilidade.
+        </Text>
+        <FormTextInput
+          label="Descrição do serviço (texto na nota)"
+          value={descricao}
+          onChangeText={setDescricao}
+          placeholder="Ex.: Mensalidade de assessoria contábil — competência"
+        />
+        <Text style={styles.fieldHint}>
+          Texto que aparece na NFS-e descrevendo o que foi prestado. A competência da mensalidade é acrescentada
+          automaticamente na emissão.
+        </Text>
       </Card>
 
       <PrimaryButton title="Salvar tudo" onPress={() => void salvarTudo()} loading={busy} />
@@ -426,5 +455,12 @@ const styles = StyleSheet.create({
     borderColor: '#ffe082',
   },
   homologBadgeTxt: { fontSize: 12, color: colors.gray800, fontWeight: '600' },
+  fieldHint: {
+    fontSize: 11,
+    color: colors.gray600,
+    lineHeight: 16,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.md,
+  },
   footer: { fontSize: 11, color: colors.gray400, marginTop: spacing.sm, textAlign: 'center' },
 });

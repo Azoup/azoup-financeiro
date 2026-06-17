@@ -10,9 +10,17 @@ type Props = {
   pdfFileName: string | null;
   onPick: (uri: string, fileName: string) => void;
   onRemove: () => void;
+  compact?: boolean;
 };
 
-export function PdfAttachmentSection({ pdfPath, pdfLocalUri, pdfFileName, onPick, onRemove }: Props) {
+export function PdfAttachmentSection({
+  pdfPath,
+  pdfLocalUri,
+  pdfFileName,
+  onPick,
+  onRemove,
+  compact,
+}: Props) {
   const anexar = async () => {
     const res = await DocumentPicker.getDocumentAsync({
       type: 'application/pdf',
@@ -27,32 +35,39 @@ export function PdfAttachmentSection({ pdfPath, pdfLocalUri, pdfFileName, onPick
 
   const temNovo = Boolean(pdfLocalUri);
   const temRemoto = Boolean(pdfPath) && !temNovo;
+  const temArquivo = temNovo || temRemoto;
 
   return (
-    <View style={styles.block}>
-      <Text style={styles.section}>Anexo PDF</Text>
-      <Text style={styles.hint}>
-        O arquivo é enviado ao bucket privado do Supabase após salvar o cliente.
-      </Text>
+    <View style={[styles.block, compact && styles.blockCompact]}>
+      {!compact ? <Text style={styles.section}>Anexo PDF</Text> : null}
+      {!compact ? (
+        <Text style={styles.hint}>Enviado ao bucket privado após salvar o cliente.</Text>
+      ) : null}
 
       {temNovo ? (
-        <View style={styles.status}>
-          <Text style={styles.statusTitle}>Novo arquivo selecionado</Text>
-          <Text style={styles.statusName}>{pdfFileName ?? 'documento.pdf'}</Text>
-        </View>
+        <Text style={styles.fileName} numberOfLines={1}>
+          {pdfFileName ?? 'documento.pdf'}
+        </Text>
       ) : temRemoto ? (
-        <View style={styles.status}>
-          <Text style={styles.statusTitle}>PDF já salvo no cadastro</Text>
-          <Text style={styles.statusName}>Substitua ou remova abaixo.</Text>
-        </View>
+        <Text style={styles.fileName}>PDF salvo no cadastro</Text>
       ) : (
-        <Text style={styles.muted}>Nenhum PDF anexado.</Text>
+        <Text style={styles.muted}>Nenhum PDF</Text>
       )}
 
       <View style={styles.row}>
-        <PrimaryButton title="Anexar PDF" variant="secondary" onPress={anexar} style={styles.btn} />
-        {(temNovo || temRemoto) ? (
-          <PrimaryButton title="Remover" variant="ghost" onPress={onRemove} style={styles.btn} />
+        <PrimaryButton
+          title={compact ? 'Anexar' : 'Anexar PDF'}
+          variant="secondary"
+          onPress={anexar}
+          style={[styles.btn, compact && styles.btnCompact]}
+        />
+        {temArquivo ? (
+          <PrimaryButton
+            title="Remover"
+            variant="ghost"
+            onPress={onRemove}
+            style={[styles.btn, compact && styles.btnCompact]}
+          />
         ) : null}
       </View>
     </View>
@@ -62,6 +77,9 @@ export function PdfAttachmentSection({ pdfPath, pdfLocalUri, pdfFileName, onPick
 const styles = StyleSheet.create({
   block: {
     marginTop: spacing.md,
+  },
+  blockCompact: {
+    marginTop: spacing.sm,
   },
   section: {
     fontSize: 18,
@@ -75,28 +93,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     lineHeight: 18,
   },
-  status: {
-    backgroundColor: 'rgba(13, 59, 79, 0.06)',
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.gray100,
-  },
-  statusTitle: {
+  fileName: {
     fontSize: 13,
-    fontWeight: '700',
-    color: colors.petroleum,
-  },
-  statusName: {
-    marginTop: spacing.xs,
-    fontSize: 14,
     color: colors.gray800,
+    marginBottom: spacing.sm,
   },
   muted: {
-    fontSize: 14,
+    fontSize: 13,
     color: colors.gray400,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   row: {
     flexDirection: 'row',
@@ -105,5 +110,9 @@ const styles = StyleSheet.create({
   },
   btn: {
     minHeight: 48,
+  },
+  btnCompact: {
+    minHeight: 36,
+    flex: 1,
   },
 });

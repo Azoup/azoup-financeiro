@@ -1,4 +1,4 @@
-import { colors, spacing } from '@/theme/colors';
+import { colors, radius, spacing } from '@/theme/colors';
 import { formatBRDate, parseBRDateDMY, toISODate } from '@/utils/date';
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -10,10 +10,11 @@ type Props = {
   label: string;
   value: Date | null;
   onChange: (d: Date | null) => void;
+  compact?: boolean;
 };
 
 /** Data digitável com máscara DD/MM/AAAA (mesmo padrão visual dos outros campos com máscara). */
-export function DateMaskedField({ label, value, onChange }: Props) {
+export function DateMaskedField({ label, value, onChange, compact }: Props) {
   const [text, setText] = useState(() => (value ? formatBRDate(value) : ''));
 
   useEffect(() => {
@@ -37,15 +38,15 @@ export function DateMaskedField({ label, value, onChange }: Props) {
   };
 
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.label}>{label}</Text>
+    <View style={[styles.wrap, compact && styles.wrapCompact]}>
+      <Text style={[styles.label, compact && styles.labelCompact]}>{label}</Text>
       <MaskInput
         value={text}
         onChangeText={onChangeText}
         mask={maskDdmYyyy}
         placeholder="DD/MM/AAAA"
         keyboardType="number-pad"
-        style={styles.mask}
+        style={[styles.mask, compact && styles.maskCompact]}
         placeholderTextColor={colors.gray400}
       />
     </View>
@@ -55,6 +56,10 @@ export function DateMaskedField({ label, value, onChange }: Props) {
 const styles = StyleSheet.create({
   wrap: {
     marginBottom: spacing.md,
+    flex: 1,
+  },
+  wrapCompact: {
+    marginBottom: 0,
   },
   label: {
     fontSize: 13,
@@ -62,14 +67,27 @@ const styles = StyleSheet.create({
     color: colors.gray600,
     marginBottom: spacing.sm,
   },
+  labelCompact: {
+    fontSize: 11,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
   mask: {
     borderWidth: 1,
     borderColor: colors.gray200,
-    borderRadius: 12,
+    borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: 12,
     fontSize: 16,
     color: colors.gray800,
     backgroundColor: colors.white,
+  },
+  maskCompact: {
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 9,
+    fontSize: 14,
+    minHeight: 40,
   },
 });
