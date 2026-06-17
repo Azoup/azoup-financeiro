@@ -11,13 +11,11 @@
     "web": "expo start --web",
     "build": "node scripts/check-vercel-env.js && expo export --platform web",
     "vercel-build": "node scripts/check-vercel-env.js && expo export --platform web",
-    "export:web": "expo export --platform web"
+    "export:web": "expo export --platform web",
+    "setup": "node scripts/postinstall-deps.js"
   },
   "engines": {
     "node": "20.x"
-  },
-  "overrides": {
-    "xsd-schema-validator": "file:./patches/xsd-schema-validator-stub"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
