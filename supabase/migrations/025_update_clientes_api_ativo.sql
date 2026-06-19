@@ -1,24 +1,20 @@
 -- Ajusta cadastros existentes em public.clientes (planilha "API ATIVO (1).xls")
 -- NÃO cria tabela nova. Apenas UPDATE em public.clientes.
--- NÃO insere clientes novos — só corrige os que já existem no cadastro.
+-- NÃO insere clientes novos — só corrige os que já existem.
+-- Não precisa informar user_id: percorre TODOS os clientes e atualiza os que derem match.
 --
 -- Colunas da planilha: Razão Social → nome_empresa, Nome Fantasia → nome_cliente, CPF/CNPJ → cnpj
 -- ID Api é ignorado.
 --
 -- Match (prioridade): 1 CNPJ/CPF · 2 Nome fantasia · 3 Razão social (empresa) · 4 Razão social (nome cliente)
+-- CNPJ só é gravado se outro cliente do mesmo user_id ainda não tiver o mesmo número (ux_clientes_user_cnpj).
 -- Planilha: 487 linhas · Após dedupe: 462
 --
--- ► ANTES DE RODAR:
---   select id, email from auth.users;
---   Substitua o UUID na CTE cfg abaixo (único lugar).
---   (Opcional) Troque commit por rollback no final para testar.
+-- (Opcional) Troque commit por rollback no final para testar sem gravar.
 
 begin;
 
 with
-cfg as (
-  select '00000000-0000-0000-0000-000000000000'::uuid as user_id  -- <<< COLE SEU user_id AQUI
-),
 planilha (staging_id, razao_social, nome_fantasia, cnpj_cadastro, cnpj_digits, linha_planilha) as (
   values
     (1, 'ZPF TECNOLOGIA EM SISTEMA DE INFORMATICA LTDA ME', 'AZOUP AUTOMAÇÃO E SISTEMAS', '10.574.166/0001-75', '10574166000175', 2),
@@ -506,9 +502,7 @@ pairs as (
         and lower(trim(c.nome_cliente)) = lower(trim(p.razao_social)) then 4
     end as match_rank
   from planilha p
-  cross join cfg
-  inner join public.clientes c on c.user_id = cfg.user_id
-    and ((p.cnpj_digits <> '' and (
+  inner join public.clientes c on ((p.cnpj_digits <> '' and (
           regexp_replace(coalesce(c.cnpj, ''), '[^0-9]', '', 'g') = p.cnpj_digits
           or regexp_replace(coalesce(c.documento, ''), '[^0-9]', '', 'g') = p.cnpj_digits
         ))
@@ -522,23 +516,40 @@ best as (
     razao_social,
     nome_fantasia,
     cnpj_cadastro,
+    cnpj_digits,
     match_rank,
     linha_planilha
   from pairs
   where match_rank is not null
-  order by cliente_id, match_rank, staging_id
+  order by cliente_id, match_rank, linha_planilha
+),
+cnpj_destino as (
+  select distinct on (c.user_id, b.cnpj_digits)
+    b.cliente_id,
+    trim(b.cnpj_cadastro) as cnpj_cadastro
+  from best b
+  inner join public.clientes c on c.id = b.cliente_id
+  where b.cnpj_digits <> ''
+    and not exists (
+      select 1
+      from public.clientes c2
+      where c2.user_id = c.user_id
+        and c2.id <> b.cliente_id
+        and c2.cnpj <> ''
+        and regexp_replace(c2.cnpj, '[^0-9]', '', 'g') = b.cnpj_digits
+    )
+  order by c.user_id, b.cnpj_digits, b.match_rank, b.linha_planilha
 ),
 atualizados as (
   update public.clientes c
   set
     nome_cliente = coalesce(nullif(trim(b.nome_fantasia), ''), c.nome_cliente),
     nome_empresa = coalesce(nullif(trim(b.razao_social), ''), c.nome_empresa),
-    cnpj = coalesce(nullif(trim(b.cnpj_cadastro), ''), c.cnpj),
+    cnpj = coalesce(d.cnpj_cadastro, c.cnpj),
     updated_at = now()
   from best b
-  cross join cfg
+  left join cnpj_destino d on d.cliente_id = b.cliente_id
   where c.id = b.cliente_id
-    and c.user_id = cfg.user_id
   returning c.id
 )
 select
@@ -546,12 +557,10 @@ select
   (
     select count(*)
     from planilha p
-    cross join cfg
     where not exists (
       select 1
       from public.clientes c
-      where c.user_id = cfg.user_id
-        and ((p.cnpj_digits <> '' and (
+      where ((p.cnpj_digits <> '' and (
           regexp_replace(coalesce(c.cnpj, ''), '[^0-9]', '', 'g') = p.cnpj_digits
           or regexp_replace(coalesce(c.documento, ''), '[^0-9]', '', 'g') = p.cnpj_digits
         ))
@@ -562,21 +571,3 @@ select
   ) as linhas_planilha_sem_match;
 
 commit;
-
--- Pré-visualização (substitua o UUID e rode separadamente, sem commit):
-/*
-with cfg as (select 'SEU-UUID'::uuid as user_id),
-planilha (...) as (values ...),
-pairs as (... mesmo join ...)
-select distinct on (c.id)
-  p.linha_planilha,
-  c.documento,
-  c.nome_cliente,
-  p.nome_fantasia as nome_novo,
-  c.nome_empresa,
-  p.razao_social as empresa_nova,
-  c.cnpj,
-  p.cnpj_cadastro as cnpj_novo
-from pairs ...
-order by c.id, match_rank;
-*/

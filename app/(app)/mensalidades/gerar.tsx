@@ -1,4 +1,5 @@
 import { EnviarMensalidadeModal } from '@/components/mensalidades/EnviarMensalidadeModal';
+import { Card } from '@/components/Card';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { buildGerarMensalidadeExport } from '@/utils/exportReportBuilders';
 import { DatePickerField } from '@/components/DatePickerField';
