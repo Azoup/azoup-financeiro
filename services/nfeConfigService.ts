@@ -126,9 +126,18 @@ export async function uploadCertificadoA1(
     },
     body: JSON.stringify({ certificadoId: cert.id, senha: senha.trim() }),
   }).then(async (r) => {
+    const b = (await r.json().catch(() => ({}))) as { error?: string };
     if (!r.ok) {
-      const b = await r.json().catch(() => ({}));
-      return { error: { message: (b as { error?: string }).error ?? r.statusText } };
+      const msg = b.error ?? r.statusText;
+      if (r.status === 404) {
+        return {
+          error: {
+            message:
+              'API NFS-e não encontrada. Em produção, faça deploy na Vercel. Em desenvolvimento, use "vercel dev" com as variáveis do .env.',
+          },
+        };
+      }
+      return { error: { message: msg } };
     }
     return { error: null };
   });

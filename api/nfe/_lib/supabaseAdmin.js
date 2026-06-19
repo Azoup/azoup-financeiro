@@ -4,7 +4,11 @@ function getAdmin() {
   const url = process.env.EXPO_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
-    throw new Error('Configure SUPABASE_SERVICE_ROLE_KEY e EXPO_PUBLIC_SUPABASE_URL na Vercel.');
+    throw new Error(
+      'Servidor NFS-e não configurado. Na Vercel (Settings → Environment Variables), cadastre: ' +
+        'EXPO_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY e CERT_ENCRYPTION_KEY. ' +
+        'Depois faça redeploy.',
+    );
   }
   return createClient(url, key, { auth: { persistSession: false } });
 }

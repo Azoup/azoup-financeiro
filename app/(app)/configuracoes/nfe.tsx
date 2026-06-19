@@ -195,21 +195,39 @@ export default function NfeConfigScreen() {
 
       if (pendingCertFile) {
         if (!senhaCert.trim()) {
-          Toast.show({ type: 'error', text1: 'Informe a senha do certificado A1.' });
+          Toast.show({
+            type: 'info',
+            text1: 'Dados da NFS-e salvos.',
+            text2: 'Informe a senha do certificado A1 para concluir o envio do .pfx.',
+          });
           setBusy(false);
           return;
         }
-        await uploadCertificadoA1(user.id, pendingCertFile, senhaCert);
-        setPendingCertFile(null);
-        setSenhaCert('');
-        setCertOk(true);
+        try {
+          await uploadCertificadoA1(user.id, pendingCertFile, senhaCert);
+          setPendingCertFile(null);
+          setSenhaCert('');
+          setCertOk(true);
+          Toast.show({
+            type: 'success',
+            text1: 'Configuração e certificado salvos.',
+            text2: prontidao.pronto ? 'Pronto para emitir em homologação.' : undefined,
+          });
+        } catch (certErr) {
+          Toast.show({
+            type: 'info',
+            text1: 'Dados da NFS-e salvos no Supabase.',
+            text2: (certErr as Error).message,
+          });
+        }
+      } else {
+        Toast.show({
+          type: 'success',
+          text1: 'Configuração de NFS-e salva.',
+          text2: certOk ? 'Pronto para emitir em homologação.' : 'Envie o certificado A1 quando for emitir.',
+        });
       }
 
-      Toast.show({
-        type: 'success',
-        text1: 'Configuração de NFS-e salva.',
-        text2: prontidao.pronto || pendingCertFile ? 'Pronto para emitir em homologação.' : undefined,
-      });
       await load();
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
