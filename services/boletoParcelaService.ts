@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
 import type { BoletoParcelaVendaRow, ContaReceberListRow, PerfilCobranca } from '@/types/contasReceber';
 import { situacaoCobrancaDeStatus } from '@/utils/contaReceberCobranca';
-import { toISODate } from '@/utils/date';
+import { clienteDocFiscal } from '@/utils/cnpj';
 
 const SQL_MIGRATION_018_HINT =
   'Execute no Supabase (SQL Editor) o arquivo supabase/migrations/018_boletos_mensalidade_contas_receber.sql — ' +
@@ -20,6 +20,7 @@ const PLACEHOLDER_BENEF = '— Preencha em Configurações › Dados do benefici
 
 type ClienteAddr = {
   documento: string;
+  cnpj?: string | null;
   nome_cliente: string;
   nome_empresa: string | null;
   cep: string | null;
@@ -134,7 +135,7 @@ async function fetchClienteAddr(userId: string, clienteId: string): Promise<Clie
   const { data: cliente, error } = await supabase
     .from('clientes')
     .select(
-      'documento, nome_cliente, nome_empresa, cep, logradouro, numero, complemento, bairro, cidade, uf',
+      'documento, cnpj, nome_cliente, nome_empresa, cep, logradouro, numero, complemento, bairro, cidade, uf',
     )
     .eq('id', clienteId)
     .eq('user_id', userId)
@@ -182,7 +183,7 @@ async function buildSnapshotBenefPag(
     beneficiario_bairro: benefBairro,
     beneficiario_cidade_uf_cep: benefCidade,
     pagador_nome: pagNome || '—',
-    pagador_documento: (cli.documento ?? '').trim() || '—',
+    pagador_documento: clienteDocFiscal(cli) || '—',
     pagador_endereco: linhaEnderecoCliente(cli) || '—',
     pagador_cidade_uf_cep: cidadeUfCepCliente(cli) || '—',
     mensagem_pagador: (perfil?.mensagem_padrao_pagador ?? '').trim() || null,

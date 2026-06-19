@@ -11,7 +11,7 @@ import type { Cliente, ClienteFormValues, ContatoClienteInput } from '@/types/mo
 import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate, toISODate } from '@/utils/date';
 import { validateClienteForm } from '@/utils/validation';
-import { documentoToCnpjField, isCnpjDigitsComplete, isZpfDocumento, CNPJ_INPUT_MASK } from '@/utils/cnpj';
+import { isCnpjDigitsComplete, isZpfDocumento, CNPJ_INPUT_MASK } from '@/utils/cnpj';
 import { fetchCompanyByCnpj } from '@/services/cnpjLookup';
 import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
@@ -20,9 +20,9 @@ import Toast from 'react-native-toast-message';
 
 export function getEmptyClienteForm(): ClienteFormValues {
   return {
+    documento: '',
     cnpj: '',
     inscricao_estadual: '',
-    documento: '',
     nome_cliente: '',
     nome_empresa: '',
     mes_entrada: '',
@@ -52,9 +52,9 @@ export function getEmptyClienteForm(): ClienteFormValues {
 
 export function clienteToFormValues(c: Cliente, contatos: ContatoClienteInput[]): ClienteFormValues {
   return {
-    cnpj: documentoToCnpjField(c.documento),
-    inscricao_estadual: c.inscricao_estadual ?? '',
     documento: c.documento,
+    cnpj: c.cnpj?.trim() ?? '',
+    inscricao_estadual: c.inscricao_estadual ?? '',
     nome_cliente: c.nome_cliente,
     nome_empresa: c.nome_empresa ?? '',
     mes_entrada: c.mes_entrada ?? '',
@@ -144,7 +144,6 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
       setValues((v) => ({
         ...v,
         cnpj: values.cnpj,
-        documento: values.cnpj.trim(),
         nome_empresa: r.razao_social || v.nome_empresa,
         nome_cliente: v.nome_cliente.trim() ? v.nome_cliente : r.nome_fantasia || r.razao_social,
         inscricao_estadual: r.inscricao_estadual || v.inscricao_estadual,
@@ -164,12 +163,9 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
   };
 
   const submit = async () => {
-    const documento = values.cnpj.trim() || values.documento.trim();
-    const payload: ClienteFormValues = { ...values, documento };
     const msg = validateClienteForm({
-      documento: payload.documento,
-      cnpj: payload.cnpj,
-      nome_cliente: payload.nome_cliente,
+      cnpj: values.cnpj,
+      nome_cliente: values.nome_cliente,
       valor_mensalidade: values.valor_mensalidade,
       contatos: values.contatos,
       uf: values.uf,
@@ -195,7 +191,7 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
     setError(null);
     setLoading(true);
     try {
-      await onSubmit(payload);
+      await onSubmit(values);
     } finally {
       setLoading(false);
     }
@@ -204,6 +200,9 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
   const addressPatch = (patch: Partial<ClienteFormValues>) =>
     setValues((v) => ({ ...v, ...patch }));
 
+  const documentoZpf = isZpfDocumento(values.documento);
+  const documentoReadonly = Boolean(initial) && documentoZpf;
+
   return (
     <ScrollView
       contentContainerStyle={styles.scroll}
@@ -211,17 +210,30 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
       showsVerticalScrollIndicator={false}
     >
       <FormSection title="Identificação">
+        {documentoReadonly ? (
+          <View style={styles.zpfBadge}>
+            <Text style={styles.fieldLabel}>Documento</Text>
+            <Text style={styles.zpfBadgeText}>{values.documento}</Text>
+          </View>
+        ) : (
+          <FormTextInput
+            compact
+            label="Documento"
+            value={values.documento}
+            onChangeText={(t) => setValues((v) => ({ ...v, documento: t }))}
+            placeholder="ZPF automático se vazio"
+            autoCapitalize="characters"
+          />
+        )}
+        {!initial && !values.documento.trim() ? (
+          <Text style={styles.hint}>Documento interno gerado automaticamente (ZPF) ao salvar, se vazio.</Text>
+        ) : null}
+
         <Text style={styles.fieldLabel}>CNPJ</Text>
         <View style={styles.cnpjRow}>
           <MaskInput
             value={values.cnpj}
-            onChangeText={(masked) =>
-              setValues((v) => ({
-                ...v,
-                cnpj: masked,
-                documento: masked.trim() || (isZpfDocumento(v.documento) ? v.documento : ''),
-              }))
-            }
+            onChangeText={(masked) => setValues((v) => ({ ...v, cnpj: masked }))}
             mask={CNPJ_INPUT_MASK}
             keyboardType="number-pad"
             placeholder="00.000.000/0000-00"
@@ -237,14 +249,7 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
             style={styles.cnpjBtn}
           />
         </View>
-        <Text style={styles.hint}>
-          Vazio gera documento interno ZPF. Busca preenche razão social, endereço e IE.
-        </Text>
-        {isZpfDocumento(values.documento) && !values.cnpj.trim() ? (
-          <View style={styles.zpfBadge}>
-            <Text style={styles.zpfBadgeText}>{values.documento}</Text>
-          </View>
-        ) : null}
+        <Text style={styles.hint}>Opcional. Busca preenche razão social, endereço e IE.</Text>
 
         <View style={styles.row2}>
           <View style={styles.flex1}>

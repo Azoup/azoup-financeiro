@@ -40,13 +40,11 @@ export function isZpfDocumento(doc: string): boolean {
   return /^ZPF\s*-\s*\d+$/i.test(doc.trim());
 }
 
-/** Exibe CNPJ mascarado se o documento tiver 14 dígitos; senão vazio (ZPF/CPF/outro). */
-export function documentoToCnpjField(doc: string): string {
-  const trimmed = doc.trim();
-  if (!trimmed || isZpfDocumento(trimmed)) return '';
-  const digits = onlyDigitsCnpj(trimmed);
-  if (digits.length === 14) return formatCnpjMasked(digits);
-  return trimmed;
+/** Documento fiscal do cliente para boletos/NFS-e: prioriza CNPJ, senão documento. */
+export function clienteDocFiscal(cliente: { cnpj?: string | null; documento?: string | null }): string {
+  const cnpj = (cliente.cnpj ?? '').trim();
+  if (cnpj) return cnpj;
+  return (cliente.documento ?? '').trim();
 }
 
 export function formatCepFromDigits(cep: string): string {

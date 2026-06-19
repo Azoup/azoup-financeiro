@@ -38,7 +38,7 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   }
 
   const emitDoc = onlyDigits(perfil.documento);
-  const destDoc = onlyDigits(cliente.documento);
+  const destDoc = onlyDigits(cliente.cnpj) || onlyDigits(cliente.documento);
   const isCnpjEmit = emitDoc.length === 14;
   const isCnpjDest = destDoc.length === 14;
 

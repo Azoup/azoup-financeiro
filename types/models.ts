@@ -22,6 +22,8 @@ export interface Cliente {
   id: string;
   user_id: string;
   documento: string;
+  /** CNPJ do cliente (PJ), independente do documento interno. */
+  cnpj?: string;
   nome_cliente: string;
   nome_empresa: string | null;
   mes_entrada: string | null;
@@ -64,10 +66,11 @@ export interface ClienteListItem extends Cliente {
 }
 
 export interface ClienteFormValues {
-  /** CNPJ mascarado; vazio no cadastro gera documento ZPF automaticamente. */
+  /** Documento interno (ex.: ZPF - N). Vazio no cadastro gera ZPF automaticamente. */
+  documento: string;
+  /** CNPJ mascarado; opcional e independente do documento. */
   cnpj: string;
   inscricao_estadual: string;
-  documento: string;
   nome_cliente: string;
   nome_empresa: string;
   mes_entrada: string;

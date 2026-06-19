@@ -160,6 +160,12 @@ export default function ClientsListScreen() {
         <Text style={styles.empresa}>{item.nome_empresa || '—'}</Text>
         <View style={styles.meta}>
           <Text style={styles.metaText}>Doc. {item.documento}</Text>
+          {item.cnpj?.trim() ? (
+            <>
+              <Text style={styles.metaDot}>•</Text>
+              <Text style={styles.metaText}>CNPJ {item.cnpj.trim()}</Text>
+            </>
+          ) : null}
           <Text style={styles.metaDot}>•</Text>
           <Text style={styles.metaText}>
             {item.segmento_cliente?.nome ?? item.segmento_cliente_codigo ?? '—'}
@@ -184,7 +190,7 @@ export default function ClientsListScreen() {
             <Ionicons name="search" size={20} color={colors.gray400} style={styles.searchIcon} />
             <TextInput
               style={styles.search}
-              placeholder="Buscar por nome, empresa ou documento"
+              placeholder="Buscar por nome, empresa, documento ou CNPJ"
               placeholderTextColor={colors.gray400}
               value={search}
               onChangeText={setSearch}

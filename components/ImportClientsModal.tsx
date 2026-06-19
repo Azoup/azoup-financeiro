@@ -134,7 +134,8 @@ export function ImportClientsModal({ visible, userId, onClose, onImported }: Pro
           <Text style={styles.title}>Importar clientes</Text>
           <Text style={styles.hint}>
             Use a mesma estrutura da planilha &quot;Rec. fixo sistema&quot; (colunas Cliente, Valor, Empresa, Tipo
-            Comercialização, Data Inclusão, etc.). O documento fica vazio para gerar ZPF automático. Contatos podem ser
+            Comercialização, Data Inclusão, etc.). O documento interno (ZPF) é gerado automaticamente; CNPJ pode ser
+            informado depois no cadastro. Contatos podem ser
             incluídos depois no cadastro.
           </Text>
 

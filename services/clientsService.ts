@@ -19,6 +19,9 @@ export type ClienteSituacaoFiltro = 'todos' | 'ativos' | 'cancelados';
 
 function mapClienteDbError(message: string, code?: string): string {
   if (code === '23505' || message.includes('duplicate') || message.includes('unique')) {
+    if (message.includes('cnpj') || message.includes('ux_clientes_user_cnpj')) {
+      return 'Este CNPJ já está cadastrado para outro cliente.';
+    }
     return 'Este número de documento já está em uso. Escolha outro.';
   }
   return message;
@@ -30,8 +33,6 @@ async function resolveDocumento(
   opts: { mode: 'create' } | { mode: 'update'; previousDocumento: string },
 ): Promise<string> {
   const trimmed = raw.trim();
-  const cnpjDigits = trimmed.replace(/\D/g, '');
-  if (cnpjDigits.length === 14) return trimmed;
   if (trimmed) return trimmed;
   if (opts.mode === 'update' && opts.previousDocumento.trim()) {
     return opts.previousDocumento.trim();
@@ -42,6 +43,10 @@ async function resolveDocumento(
     throw new Error('Não foi possível gerar o documento automático (ZPF). Rode a migration 006 no Supabase.');
   }
   return data;
+}
+
+function normalizeCnpjStored(value: string): string {
+  return value.trim();
 }
 
 function mapContatoCount(row: unknown): number {
@@ -101,6 +106,7 @@ function baseClienteRow(values: ClienteFormValues, documento: string) {
 
   return {
     documento,
+    cnpj: normalizeCnpjStored(values.cnpj),
     nome_cliente: values.nome_cliente.trim(),
     nome_empresa: values.nome_empresa.trim() || null,
     mes_entrada: values.mes_entrada.trim() || null,
@@ -152,7 +158,7 @@ export async function fetchClientsPage(params: {
   if (term) {
     const esc = term.replace(/%/g, '\\%').replace(/,/g, '');
     q = q.or(
-      `nome_cliente.ilike.%${esc}%,nome_empresa.ilike.%${esc}%,documento.ilike.%${esc}%,cep.ilike.%${esc}%,cidade.ilike.%${esc}%,segmento_cliente_codigo.ilike.%${esc}%`,
+      `nome_cliente.ilike.%${esc}%,nome_empresa.ilike.%${esc}%,documento.ilike.%${esc}%,cnpj.ilike.%${esc}%,cep.ilike.%${esc}%,cidade.ilike.%${esc}%,segmento_cliente_codigo.ilike.%${esc}%`,
     );
   }
 
@@ -504,7 +510,7 @@ export async function fetchClientesParaGerarMensalidades(
   const term = filters.search.trim().replace(/[%_,()]/g, '');
   if (term) {
     const esc = term.replace(/%/g, '\\%').replace(/,/g, '');
-    q = q.or(`nome_cliente.ilike.%${esc}%,nome_empresa.ilike.%${esc}%,documento.ilike.%${esc}%`);
+    q = q.or(`nome_cliente.ilike.%${esc}%,nome_empresa.ilike.%${esc}%,documento.ilike.%${esc}%,cnpj.ilike.%${esc}%`);
   }
   if (filters.mesReajusteDe && filters.mesReajusteAte) {
     q = q

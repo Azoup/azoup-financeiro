@@ -33,6 +33,7 @@ export function buildClientsListExport(
     'Cliente',
     'Empresa',
     'Documento',
+    'CNPJ',
     'Segmento',
     'Mensalidade',
     'Situação',
@@ -43,6 +44,7 @@ export function buildClientsListExport(
     c.nome_cliente,
     c.nome_empresa ?? '',
     c.documento,
+    c.cnpj?.trim() ?? '',
     c.segmento_cliente?.nome ?? c.segmento_cliente_codigo ?? '',
     formatBRL(c.valor_mensalidade),
     c.cancelado ? 'Cancelado' : 'Ativo',
@@ -94,6 +96,8 @@ export function buildClientDetailExport(
     ]),
     kvSection('Dados principais', [
       { label: 'Documento', value: data.documento },
+      { label: 'CNPJ', value: data.cnpj?.trim() || '—' },
+      { label: 'Inscrição estadual', value: data.inscricao_estadual?.trim() || '—' },
       { label: 'Cliente', value: data.nome_cliente },
       { label: 'Empresa', value: data.nome_empresa ?? '—' },
       { label: 'Segmento', value: data.segmento_cliente?.nome ?? data.segmento_cliente_codigo ?? '—' },
@@ -160,9 +164,9 @@ export function buildClientDetailExport(
 
 export function buildClientFormExport(values: ClienteFormValues, title: string): ExportReportPayload {
   const items = [
-    { label: 'CNPJ', value: values.cnpj || values.documento || '—' },
+    { label: 'Documento', value: values.documento || '—' },
+    { label: 'CNPJ', value: values.cnpj || '—' },
     { label: 'Inscrição estadual', value: values.inscricao_estadual || '—' },
-    { label: 'Documento interno', value: values.documento || '—' },
     { label: 'Nome', value: values.nome_cliente },
     { label: 'Empresa', value: values.nome_empresa || '—' },
     { label: 'Segmento', value: values.segmento_cliente_codigo },

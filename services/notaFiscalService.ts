@@ -44,7 +44,7 @@ export async function criarNotaFiscalRascunhoMensalidade(
     fetchPerfilCobranca(userId),
     supabase
       .from('clientes')
-      .select('id, nome_cliente, documento, emite_nf, logradouro, numero, bairro, cidade, uf, cep')
+      .select('id, nome_cliente, documento, cnpj, emite_nf, logradouro, numero, bairro, cidade, uf, cep')
       .eq('id', mensalidade.cliente_id)
       .eq('user_id', userId)
       .single(),

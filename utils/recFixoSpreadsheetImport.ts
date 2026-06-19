@@ -142,9 +142,9 @@ function inferSegmentoCodigoFromPlanilha(...parts: string[]): string {
 
 function emptyImportForm(): ClienteFormValues {
   return {
+    documento: '',
     cnpj: '',
     inscricao_estadual: '',
-    documento: '',
     nome_cliente: '',
     nome_empresa: '',
     mes_entrada: '',
