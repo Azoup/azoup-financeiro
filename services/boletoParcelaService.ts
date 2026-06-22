@@ -2,7 +2,9 @@ import { supabase } from '@/lib/supabase';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
 import type { BoletoParcelaVendaRow, ContaReceberListRow, PerfilCobranca } from '@/types/contasReceber';
 import { situacaoCobrancaDeStatus } from '@/utils/contaReceberCobranca';
+import { CLIENTE_EMBED_SELECT, mapClienteEnderecoFiscal, type ClienteDbRow } from '@/utils/clientesDbMapping';
 import { clienteDocFiscal } from '@/utils/cnpj';
+import { toISODate } from '@/utils/date';
 
 const SQL_MIGRATION_018_HINT =
   'Execute no Supabase (SQL Editor) o arquivo supabase/migrations/018_boletos_mensalidade_contas_receber.sql — ' +
@@ -18,19 +20,7 @@ function wrapBoletoDbError(error: { message?: string } | null): Error {
 
 const PLACEHOLDER_BENEF = '— Preencha em Configurações › Dados do beneficiário —';
 
-type ClienteAddr = {
-  documento: string;
-  cnpj?: string | null;
-  nome_cliente: string;
-  nome_empresa: string | null;
-  cep: string | null;
-  logradouro: string | null;
-  numero: string | null;
-  complemento: string | null;
-  bairro: string | null;
-  cidade: string | null;
-  uf: string | null;
-};
+type ClienteAddr = ReturnType<typeof mapClienteEnderecoFiscal>;
 
 type SnapshotBenefPag = {
   beneficiario_razao_social: string;
@@ -134,16 +124,14 @@ function montarInstrucoesMensalidade(
 async function fetchClienteAddr(userId: string, clienteId: string): Promise<ClienteAddr> {
   const { data: cliente, error } = await supabase
     .from('clientes')
-    .select(
-      'documento, cnpj, nome_cliente, nome_empresa, cep, logradouro, numero, complemento, bairro, cidade, uf',
-    )
+    .select(CLIENTE_EMBED_SELECT)
     .eq('id', clienteId)
     .eq('user_id', userId)
     .maybeSingle();
 
   if (error) throw new Error(error.message);
   if (!cliente) throw new Error('Cliente não encontrado para gerar boleto.');
-  return cliente as ClienteAddr;
+  return mapClienteEnderecoFiscal(cliente as ClienteDbRow);
 }
 
 async function buildSnapshotBenefPag(

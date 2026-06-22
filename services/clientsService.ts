@@ -12,6 +12,17 @@ import type {
 import { getSegmentoNomePorCodigo } from '@/services/segmentoClienteService';
 import { parseBRLMasked } from '@/utils/currency';
 import { toISODate } from '@/utils/date';
+import {
+  CLIENTE_DETAIL_SELECT,
+  CLIENTE_GERAR_MENSALIDADES_SELECT,
+  CLIENTE_LIST_SELECT,
+  isClienteCancelado,
+  mapClienteFormToDbRow,
+  mapDbRowToCliente,
+  mapDbRowToClienteListItem,
+  SORT_FIELD_DB,
+  type ClienteDbRow,
+} from '@/utils/clientesDbMapping';
 
 export const PAGE_SIZE = 20;
 
@@ -45,9 +56,6 @@ async function resolveDocumento(
   return data;
 }
 
-function normalizeCnpjStored(value: string): string {
-  return value.trim();
-}
 
 function mapContatoCount(row: unknown): number {
   const r = row as { contatos_cliente?: { count?: number }[] };
@@ -96,38 +104,8 @@ function enrichClienteSegmento<T extends { segmento_cliente_codigo?: string }>(
   return { ...row, segmento_cliente: { codigo, nome } };
 }
 
-const LIST_SELECT = '*, contatos_cliente(count)';
-const DETAIL_SELECT = '*, contatos_cliente(*)';
-function baseClienteRow(values: ClienteFormValues, documento: string) {
-  const valor = parseBRLMasked(values.valor_mensalidade);
-  if (valor == null) throw new Error('Valor inválido');
-  const codigo = values.segmento_cliente_codigo.trim();
-  if (!codigo) throw new Error('Selecione o segmento do cliente.');
-
-  return {
-    documento,
-    cnpj: normalizeCnpjStored(values.cnpj),
-    nome_cliente: values.nome_cliente.trim(),
-    nome_empresa: values.nome_empresa.trim() || null,
-    mes_entrada: values.mes_entrada.trim() || null,
-    valor_mensalidade: valor,
-    segmento_cliente_codigo: codigo,
-    tipo_ramo: null as string | null,
-    data_inicio: values.data_inicio ? toISODate(values.data_inicio) : null,
-    data_reajuste: values.data_reajuste ? toISODate(values.data_reajuste) : null,
-    observacao: values.observacao.trim() || null,
-    cep: values.cep.trim() || null,
-    logradouro: values.logradouro.trim() || null,
-    numero: values.numero.trim() || null,
-    complemento: values.complemento.trim() || null,
-    bairro: values.bairro.trim() || null,
-    cidade: values.cidade.trim() || null,
-    uf: values.uf.trim() ? values.uf.trim().toUpperCase().slice(0, 2) : null,
-    inscricao_estadual: values.inscricao_estadual.trim() || null,
-    cancelado: values.cancelado,
-    emite_nf: values.emite_nf,
-  };
-}
+const LIST_SELECT = `${CLIENTE_LIST_SELECT}, contatos_cliente(count)`;
+const DETAIL_SELECT = CLIENTE_DETAIL_SELECT;
 
 export async function fetchClientsPage(params: {
   userId: string;
@@ -144,7 +122,7 @@ export async function fetchClientsPage(params: {
     .from('clientes')
     .select(LIST_SELECT, { count: 'exact' })
     .eq('user_id', params.userId)
-    .order(params.sortField, { ascending: params.sortOrder === 'asc' })
+    .order(SORT_FIELD_DB[params.sortField], { ascending: params.sortOrder === 'asc' })
     .range(from, to);
 
   const situacao = params.situacao ?? 'todos';
@@ -158,20 +136,20 @@ export async function fetchClientsPage(params: {
   if (term) {
     const esc = term.replace(/%/g, '\\%').replace(/,/g, '');
     q = q.or(
-      `nome_cliente.ilike.%${esc}%,nome_empresa.ilike.%${esc}%,documento.ilike.%${esc}%,cnpj.ilike.%${esc}%,cep.ilike.%${esc}%,cidade.ilike.%${esc}%,segmento_cliente_codigo.ilike.%${esc}%`,
+      `nome_fantasia.ilike.%${esc}%,nome.ilike.%${esc}%,documento.ilike.%${esc}%,cnpj.ilike.%${esc}%,cep.ilike.%${esc}%,cidade.ilike.%${esc}%,segmento_cliente_codigo.ilike.%${esc}%,tipo_cliente.ilike.%${esc}%`,
     );
   }
 
   const { data, error } = await q;
   if (error) throw new Error(error.message);
 
-  const rows = (data ?? []) as (ClienteListItem & {
+  const rows = (data ?? []) as (ClienteDbRow & {
     contatos_cliente?: { count: number }[];
   })[];
 
   const nomeMap = await getSegmentoNomePorCodigo();
   const items: ClienteListItem[] = rows.map((row) => ({
-    ...enrichClienteSegmento(row, nomeMap),
+    ...enrichClienteSegmento(mapDbRowToClienteListItem(row), nomeMap),
     contatos_count: mapContatoCount(row),
   }));
 
@@ -213,12 +191,12 @@ export async function fetchClienteDetail(
   if (error) throw new Error(error.message);
   if (!data) return null;
 
-  const row = data as Cliente & { contatos_cliente: ContatoCliente[] | null };
+  const row = data as ClienteDbRow & { contatos_cliente: ContatoCliente[] | null };
   const contatos = [...(row.contatos_cliente ?? [])].sort((a, b) =>
     a.created_at.localeCompare(b.created_at),
   );
   const nomeMap = await getSegmentoNomePorCodigo();
-  const base = enrichClienteSegmento({ ...row, contatos_cliente: contatos }, nomeMap);
+  const base = enrichClienteSegmento(mapDbRowToCliente(row), nomeMap);
   const ultima_justificativa_cancelamento = await fetchUltimaJustificativaCancelamentoCliente(id);
   return { ...base, contatos_cliente: contatos, ultima_justificativa_cancelamento };
 }
@@ -233,13 +211,12 @@ export async function createCliente(
     throw new Error('Informe a justificativa do cancelamento.');
   }
 
-  const row = {
+  const row = mapClienteFormToDbRow(values, documento, {
     user_id: userId,
-    ...baseClienteRow(values, documento),
-    pdf_path: null as string | null,
-    ultimo_reajuste: null as string | null,
-    valor_mensalidade_anterior: null as number | null,
-  };
+    pdf_path: null,
+    ultimo_reajuste: null,
+    valor_mensalidade_anterior: null,
+  });
 
   const { data: inserted, error } = await supabase
     .from('clientes')
@@ -297,7 +274,7 @@ export async function updateCliente(
 ): Promise<void> {
   const { data: cur, error: e0 } = await supabase
     .from('clientes')
-    .select('pdf_path, data_reajuste, ultimo_reajuste, documento, valor_mensalidade, cancelado')
+    .select('pdf_path, data_reajuste, ultimo_reajuste, documento, mensalidade, cancelado, ativo, data_cancelamento')
     .eq('id', clienteId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -308,12 +285,14 @@ export async function updateCliente(
     data_reajuste: string | null;
     ultimo_reajuste: string | null;
     documento: string;
-    valor_mensalidade: number | null;
+    mensalidade: number | null;
     cancelado: boolean | null;
+    ativo: string | null;
+    data_cancelamento: string | null;
   };
   const curRow = cur as CurRow | null;
   if (!curRow) throw new Error('Cliente não encontrado.');
-  const wasCanceled = Boolean(curRow.cancelado);
+  const wasCanceled = isClienteCancelado(curRow);
   const becomingCanceled = values.cancelado && !wasCanceled;
   if (values.cancelado && !values.cancelamento_justificativa.trim()) {
     throw new Error('Informe a justificativa do cancelamento.');
@@ -357,18 +336,17 @@ export async function updateCliente(
 
   const novoValor = parseBRLMasked(values.valor_mensalidade);
   if (novoValor == null) throw new Error('Valor inválido');
-  const oldVal = curRow.valor_mensalidade == null ? null : Number(curRow.valor_mensalidade);
+  const oldVal = curRow.mensalidade == null ? null : Number(curRow.mensalidade);
   const valorMudou =
     oldVal == null
       ? true
       : Math.round(oldVal * 100) !== Math.round(novoValor * 100);
 
-  const row = {
-    ...baseClienteRow(values, documento),
+  const row = mapClienteFormToDbRow(values, documento, {
     pdf_path: nextPdf,
     ultimo_reajuste: nextUltimoReajuste,
     ...(valorMudou && oldVal != null ? { valor_mensalidade_anterior: oldVal } : {}),
-  };
+  });
 
   const { error } = await supabase
     .from('clientes')
@@ -425,7 +403,11 @@ export async function setClienteCancelado(
   }
   const { error } = await supabase
     .from('clientes')
-    .update({ cancelado })
+    .update({
+      cancelado,
+      ativo: cancelado ? 'N' : 'S',
+      data_cancelamento: cancelado ? toISODate(new Date()) : null,
+    })
     .eq('id', clienteId)
     .eq('user_id', userId);
   if (error) throw new Error(error.message);
@@ -461,17 +443,14 @@ export async function fetchDashboardStats(userId: string): Promise<{
 }> {
   const { data, error } = await supabase
     .from('clientes')
-    .select('valor_mensalidade, cancelado')
+    .select('mensalidade, cancelado, ativo, data_cancelamento')
     .eq('user_id', userId);
 
   if (error) throw new Error(error.message);
-  const rows = (data ?? []) as Pick<Cliente, 'valor_mensalidade' | 'cancelado'>[];
-  const active = rows.filter((r) => !r.cancelado);
+  const rows = (data ?? []) as Pick<ClienteDbRow, 'mensalidade' | 'cancelado' | 'ativo' | 'data_cancelamento'>[];
+  const active = rows.filter((r) => !isClienteCancelado(r));
   const totalClientes = active.length;
-  const somaMensalidades = active.reduce(
-    (acc, r) => acc + (Number(r.valor_mensalidade) || 0),
-    0,
-  );
+  const somaMensalidades = active.reduce((acc, r) => acc + (Number(r.mensalidade) || 0), 0);
   return { totalClientes, somaMensalidades };
 }
 
@@ -487,8 +466,7 @@ export type GerarMensalidadeFiltrosClientes = {
   mesReajusteAte: string | null;
 };
 
-const GERAR_MENSALIDADES_CLIENTES_SELECT =
-  'id, nome_cliente, nome_empresa, valor_mensalidade, valor_mensalidade_anterior, segmento_cliente_codigo, cancelado, data_reajuste, data_inicio';
+const GERAR_MENSALIDADES_CLIENTES_SELECT = CLIENTE_GERAR_MENSALIDADES_SELECT;
 
 export async function fetchClientesParaGerarMensalidades(
   userId: string,
@@ -498,7 +476,7 @@ export async function fetchClientesParaGerarMensalidades(
     .from('clientes')
     .select(GERAR_MENSALIDADES_CLIENTES_SELECT)
     .eq('user_id', userId)
-    .order('nome_cliente', { ascending: true })
+    .order('nome_fantasia', { ascending: true })
     .limit(800);
 
   if (!filters.incluirCancelados) {
@@ -510,7 +488,7 @@ export async function fetchClientesParaGerarMensalidades(
   const term = filters.search.trim().replace(/[%_,()]/g, '');
   if (term) {
     const esc = term.replace(/%/g, '\\%').replace(/,/g, '');
-    q = q.or(`nome_cliente.ilike.%${esc}%,nome_empresa.ilike.%${esc}%,documento.ilike.%${esc}%,cnpj.ilike.%${esc}%`);
+    q = q.or(`nome_fantasia.ilike.%${esc}%,nome.ilike.%${esc}%,documento.ilike.%${esc}%,cnpj.ilike.%${esc}%`);
   }
   if (filters.mesReajusteDe && filters.mesReajusteAte) {
     q = q
@@ -521,11 +499,9 @@ export async function fetchClientesParaGerarMensalidades(
 
   const { data, error } = await q;
   if (error) throw new Error(error.message);
-  const rows = (data ?? []) as ClienteListItem[];
+  const rows = (data ?? []) as ClienteDbRow[];
   const nomeMap = await getSegmentoNomePorCodigo();
-  return rows.map((row) => ({
-    ...enrichClienteSegmento(row, nomeMap),
-  }));
+  return rows.map((row) => enrichClienteSegmento(mapDbRowToClienteListItem(row), nomeMap));
 }
 
 export async function applyReajusteMensalidadePercentual(
@@ -544,19 +520,19 @@ export async function applyReajusteMensalidadePercentual(
   for (const clienteId of clienteIds) {
     const { data: cur, error: e0 } = await supabase
       .from('clientes')
-      .select('valor_mensalidade')
+      .select('mensalidade')
       .eq('id', clienteId)
       .eq('user_id', userId)
       .maybeSingle();
     if (e0) throw new Error(e0.message);
-    const old = Number((cur as { valor_mensalidade: number | null } | null)?.valor_mensalidade);
+    const old = Number((cur as { mensalidade: number | null } | null)?.mensalidade);
     if (old == null || Number.isNaN(old) || old <= 0) continue;
     const novo = Math.round(old * factor * 100) / 100;
     const { error: e1 } = await supabase
       .from('clientes')
       .update({
         valor_mensalidade_anterior: old,
-        valor_mensalidade: novo,
+        mensalidade: novo,
       })
       .eq('id', clienteId)
       .eq('user_id', userId);

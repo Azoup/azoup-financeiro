@@ -9,6 +9,7 @@ import type {
   RegistrarPagamentoMensalidadeGeradaInput,
 } from '@/types/mensalidadeGerada';
 import { toISODate } from '@/utils/date';
+import { mapClienteJoinEmbed } from '@/utils/clientesDbMapping';
 import { calcProximoVencimentoIso } from '@/utils/mensalidadeVencimento';
 import { reaisParaCentavos } from '@/utils/vendasParcelas';
 
@@ -47,11 +48,16 @@ function nextDbStatusAfterPay(valor: number, valorPagoNovo: number): Mensalidade
 export async function fetchMensalidadesGeradasHistorico(userId: string): Promise<MensalidadeGerada[]> {
   const { data, error } = await supabase
     .from('mensalidades')
-    .select('*, clientes(nome_cliente, nome_empresa)')
+    .select('*, clientes(nome_fantasia, nome)')
     .eq('user_id', userId)
     .order('data_geracao', { ascending: false });
   if (error) throw new Error(error.message);
-  return (data as MensalidadeGerada[] | null) ?? [];
+  return ((data ?? []) as (MensalidadeGerada & { clientes?: { nome_fantasia?: string; nome?: string } | null })[]).map(
+    (row) => {
+      const { clientes, ...rest } = row;
+      return { ...rest, clientes: mapClienteJoinEmbed(clientes) };
+    },
+  );
 }
 
 export async function fetchMensalidadesGeradasPorCliente(
@@ -218,13 +224,13 @@ export async function criarMensalidadesGeradasLote(params: {
   for (const clienteId of params.clienteIds) {
     const { data: c, error: e0 } = await supabase
       .from('clientes')
-      .select('valor_mensalidade, data_inicio')
+      .select('mensalidade, data_inicio')
       .eq('id', clienteId)
       .eq('user_id', params.userId)
       .maybeSingle();
     if (e0) throw new Error(e0.message);
-    const cli = c as { valor_mensalidade: number | null; data_inicio: string | null } | null;
-    const valor = Number(cli?.valor_mensalidade);
+    const cli = c as { mensalidade: number | null; data_inicio: string | null } | null;
+    const valor = Number(cli?.mensalidade);
     if (!valor || valor <= 0) {
       ignorados += 1;
       continue;

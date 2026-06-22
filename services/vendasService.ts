@@ -15,6 +15,7 @@ import type {
   VendaStatus,
 } from '@/types/vendas';
 import { formatDateTimeBRFromISO, toISODate } from '@/utils/date';
+import { mapClienteJoinEmbed } from '@/utils/clientesDbMapping';
 import { serializeVendaDescricaoItens } from '@/utils/vendasDescricao';
 import { centavosParaReais, reaisParaCentavos } from '@/utils/vendasParcelas';
 
@@ -33,18 +34,27 @@ export async function searchClientesVenda(
 ): Promise<ClienteVendaOption[]> {
   let query = supabase
     .from('clientes')
-    .select('id, nome_cliente, nome_empresa')
+    .select('id, nome_fantasia, nome')
     .eq('user_id', userId)
-    .order('nome_cliente', { ascending: true })
+    .order('nome_fantasia', { ascending: true })
     .limit(limit);
   const t = q.trim();
   if (t) {
     const esc = t.replace(/%/g, '\\%').replace(/,/g, '');
-    query = query.or(`nome_cliente.ilike.%${esc}%,nome_empresa.ilike.%${esc}%`);
+    query = query.or(`nome_fantasia.ilike.%${esc}%,nome.ilike.%${esc}%`);
   }
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return (data as ClienteVendaOption[] | null) ?? [];
+  return ((data ?? []) as { id: string | number; nome_fantasia?: string | null; nome?: string | null }[]).map(
+    (c) => {
+      const join = mapClienteJoinEmbed(c);
+      return {
+        id: String(c.id),
+        nome_cliente: join?.nome_cliente ?? '',
+        nome_empresa: join?.nome_empresa ?? null,
+      };
+    },
+  );
 }
 
 function assertSomaParcelas(total: number, parcelas: NovaVendaInput['parcelas']) {
@@ -233,16 +243,17 @@ export async function fetchVendasPage(params: {
   if (clienteIds.length) {
     const { data: cliRows, error: ec } = await supabase
       .from('clientes')
-      .select('id, nome_cliente, nome_empresa')
+      .select('id, nome_fantasia, nome')
       .eq('user_id', params.userId)
       .in('id', clienteIds);
     if (ec) throw new Error(ec.message);
     for (const c of (cliRows ?? []) as {
-      id: string;
-      nome_cliente: string;
-      nome_empresa: string | null;
+      id: string | number;
+      nome_fantasia?: string | null;
+      nome?: string | null;
     }[]) {
-      clienteMap.set(c.id, { nome_cliente: c.nome_cliente, nome_empresa: c.nome_empresa });
+      const join = mapClienteJoinEmbed(c);
+      if (join) clienteMap.set(String(c.id), join);
     }
   }
 
@@ -324,13 +335,18 @@ export async function fetchVendaDetail(userId: string, vendaId: string): Promise
 
   const { data: cli, error: ec } = await supabase
     .from('clientes')
-    .select('id, nome_cliente, nome_empresa')
+    .select('id, nome_fantasia, nome')
     .eq('id', vr.cliente_id)
     .eq('user_id', userId)
     .maybeSingle();
   if (ec) throw new Error(ec.message);
   if (!cli) throw new Error('Cliente não encontrado na venda.');
-  const cliente = cli as { id: string; nome_cliente: string; nome_empresa: string | null };
+  const join = mapClienteJoinEmbed(cli as { nome_fantasia?: string | null; nome?: string | null });
+  const cliente = {
+    id: String((cli as { id: string | number }).id),
+    nome_cliente: join?.nome_cliente ?? '',
+    nome_empresa: join?.nome_empresa ?? null,
+  };
 
   const { data: parcelas, error: e2 } = await supabase
     .from('parcelas_venda')

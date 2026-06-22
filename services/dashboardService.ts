@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { getSegmentoNomePorCodigo } from '@/services/segmentoClienteService';
 import { fetchVendaFinanceiroStats } from '@/services/vendasService';
 import { toISODate } from '@/utils/date';
+import { isClienteCancelado } from '@/utils/clientesDbMapping';
 import { centavosParaReais, reaisParaCentavos } from '@/utils/vendasParcelas';
 
 export type DashboardOverview = {
@@ -63,7 +64,10 @@ export async function fetchDashboardOverview(userId: string): Promise<DashboardO
     vendaStats,
     nomeMap,
   ] = await Promise.all([
-    supabase.from('clientes').select('cancelado, valor_mensalidade, segmento_cliente_codigo').eq('user_id', userId),
+    supabase
+      .from('clientes')
+      .select('cancelado, ativo, data_cancelamento, mensalidade, segmento_cliente_codigo, tipo_cliente')
+      .eq('user_id', userId),
     supabase
       .from('mensalidades')
       .select('valor, valor_pago, data_vencimento, status')
@@ -83,14 +87,17 @@ export async function fetchDashboardOverview(userId: string): Promise<DashboardO
   if (boletosRes.error) throw new Error(boletosRes.error.message);
 
   const clientes = (clientesRes.data ?? []) as {
-    cancelado: boolean;
-    valor_mensalidade: number | null;
-    segmento_cliente_codigo: string;
+    cancelado?: boolean | null;
+    ativo?: string | null;
+    data_cancelamento?: string | null;
+    mensalidade: number | null;
+    segmento_cliente_codigo?: string | null;
+    tipo_cliente?: string | null;
   }[];
 
-  const ativos = clientes.filter((c) => !c.cancelado);
-  const cancelados = clientes.filter((c) => c.cancelado);
-  const somaMensalidadeAtivos = ativos.reduce((s, c) => s + (Number(c.valor_mensalidade) || 0), 0);
+  const ativos = clientes.filter((c) => !isClienteCancelado(c));
+  const cancelados = clientes.filter((c) => isClienteCancelado(c));
+  const somaMensalidadeAtivos = ativos.reduce((s, c) => s + (Number(c.mensalidade) || 0), 0);
   const ticketMedio = ativos.length ? somaMensalidadeAtivos / ativos.length : 0;
 
   const segCount = new Map<string, number>();

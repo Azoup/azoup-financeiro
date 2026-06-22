@@ -3,6 +3,7 @@ import { ensureNfeConfig, fetchCertificadoAtivo, nfeApiBaseUrl } from '@/service
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
 import type { CancelarNfeResult, EmitirNfeResult, NotaFiscalListRow } from '@/types/notaFiscal';
 import { AMBIENTE_FISCAL_HOMOLOGACAO } from '@/types/notaFiscal';
+import { CLIENTE_EMBED_SELECT, mapClienteEnderecoFiscal, mapClienteJoinEmbed } from '@/utils/clientesDbMapping';
 
 type MensalidadeNfInput = {
   id: string;
@@ -23,14 +24,14 @@ function descricaoItem(competencia: string | null, padrao: string): string {
 export async function fetchNotasFiscaisLista(userId: string): Promise<NotaFiscalListRow[]> {
   const { data, error } = await supabase
     .from('nota_fiscal')
-    .select('*, clientes(nome_cliente, nome_empresa)')
+    .select('*, clientes(nome_fantasia, nome)')
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
-  return ((data as (NotaFiscalListRow & { clientes?: NotaFiscalListRow['cliente'] })[] | null) ?? []).map(
+  return ((data as (NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null })[] | null) ?? []).map(
     (row) => {
       const { clientes, ...rest } = row;
-      return { ...rest, cliente: clientes ?? null };
+      return { ...rest, cliente: mapClienteJoinEmbed(clientes) };
     },
   );
 }
@@ -44,7 +45,7 @@ export async function criarNotaFiscalRascunhoMensalidade(
     fetchPerfilCobranca(userId),
     supabase
       .from('clientes')
-      .select('id, nome_cliente, documento, cnpj, emite_nf, logradouro, numero, bairro, cidade, uf, cep')
+      .select(CLIENTE_EMBED_SELECT)
       .eq('id', mensalidade.cliente_id)
       .eq('user_id', userId)
       .single(),
@@ -53,12 +54,9 @@ export async function criarNotaFiscalRascunhoMensalidade(
   if (clienteRes.error || !clienteRes.data) {
     throw new Error(clienteRes.error?.message ?? 'Cliente não encontrado.');
   }
-  const cliente = clienteRes.data as {
-    emite_nf: boolean;
-    nome_cliente: string;
-  };
-  if (!cliente.emite_nf) {
-    throw new Error(`Cliente "${cliente.nome_cliente}" está marcado como Sem NF no cadastro.`);
+  const clienteRow = mapClienteEnderecoFiscal(clienteRes.data as Parameters<typeof mapClienteEnderecoFiscal>[0]);
+  if (!clienteRow.emite_nf) {
+    throw new Error(`Cliente "${clienteRow.nome_cliente}" está marcado como Sem NF no cadastro.`);
   }
   if (!perfil?.razao_social?.trim() || !onlyDigits(perfil.documento).length) {
     throw new Error('Preencha os dados do beneficiário em Configurações antes de emitir NFS-e.');

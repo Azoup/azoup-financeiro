@@ -21,7 +21,13 @@ function dhEmiBr(isoDate) {
   return `${br.getFullYear()}-${pad(br.getMonth() + 1)}-${pad(br.getDate())}T${pad(br.getHours())}:${pad(br.getMinutes())}:${pad(br.getSeconds())}-03:00`;
 }
 
-function padTribNac(code) {
+function nomeCliente(cliente) {
+  return (cliente.nome_fantasia || cliente.nome_cliente || cliente.nome || '').trim();
+}
+
+function ufCliente(cliente) {
+  return cliente.estado || cliente.uf || '';
+}
   return onlyDigits(code).padStart(6, '0').slice(0, 6);
 }
 
@@ -51,7 +57,7 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   const tomadorNome =
     ambiente === 2
       ? 'NOTA FISCAL EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL'
-      : cliente.nome_cliente;
+      : nomeCliente(cliente);
 
   const valor = Number(nota.valor_total);
   const tribMun = Number(config.trib_issqn ?? 1);
