@@ -120,40 +120,43 @@ async function salvarSenhaCertificado(
   });
   if (!rpcErr) return;
 
-  const rpcMsg = rpcErr.message ?? '';
-  const precisaApi =
-    /chave de criptografia/i.test(rpcMsg) ||
-    /cert_encryption_key/i.test(rpcMsg) ||
-    /function.*does not exist/i.test(rpcMsg);
+  const rpcMsg = rpcErr.message ?? 'Falha ao salvar senha do certificado.';
 
-  if (!precisaApi) {
-    throw new Error(rpcMsg || 'Falha ao salvar senha do certificado.');
-  }
-
-  const base = nfeApiBaseUrl();
-  if (!base) {
+  if (/function.*does not exist/i.test(rpcMsg) || /salvar_senha_certificado_a1/i.test(rpcMsg)) {
     throw new Error(
-      `${rpcMsg} Configure CERT_ENCRYPTION_KEY na Vercel ou rode a migration 031 e insira a chave em app_runtime_config.`,
+      'Migration 031 não aplicada no Supabase. Rode os arquivos 031 e 032 em SQL Editor (supabase/migrations).',
     );
   }
 
-  const token = (await supabase.auth.getSession()).data.session?.access_token ?? '';
-  const res = await fetch(`${base}/api/nfe/certificado`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ certificadoId, senha: trimmed }),
-  });
-  const body = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) {
-    if (res.status === 404) {
-      throw new Error(
-        'API NFS-e não encontrada. Faça deploy na Vercel com SUPABASE_SERVICE_ROLE_KEY e CERT_ENCRYPTION_KEY, ou aplique a migration 031 no Supabase.',
-      );
+  if (/chave de criptografia/i.test(rpcMsg) || /cert_encryption_key/i.test(rpcMsg)) {
+    throw new Error(
+      'Defina a chave de segurança do certificado na seção abaixo (mín. 16 caracteres) e tente enviar o .pfx novamente.',
+    );
+  }
+
+  throw new Error(rpcMsg);
+}
+
+export async function fetchCertificadoChaveConfigurada(): Promise<boolean> {
+  const { data, error } = await supabase.rpc('certificado_chave_configurada');
+  if (error) {
+    if (/function.*does not exist/i.test(error.message)) return false;
+    throw new Error(error.message);
+  }
+  return Boolean(data);
+}
+
+export async function definirChaveCertificado(chave: string): Promise<void> {
+  const trimmed = chave.trim();
+  if (trimmed.length < 16) {
+    throw new Error('Use uma chave com no mínimo 16 caracteres.');
+  }
+  const { error } = await supabase.rpc('definir_chave_certificado', { p_chave: trimmed });
+  if (error) {
+    if (/function.*does not exist/i.test(error.message)) {
+      throw new Error('Rode a migration 032 no Supabase SQL Editor e tente novamente.');
     }
-    throw new Error(body.error ?? rpcMsg ?? `Falha ao salvar senha (${res.status}).`);
+    throw new Error(error.message);
   }
 }
 

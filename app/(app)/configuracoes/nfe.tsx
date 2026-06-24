@@ -3,8 +3,10 @@ import { FormTextInput } from '@/components/FormTextInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
 import {
+  definirChaveCertificado,
   ensureNfeConfig,
   fetchCertificadoAtivo,
+  fetchCertificadoChaveConfigurada,
   pickCertificadoFile,
   uploadCertificadoA1,
   upsertNfeConfig,
@@ -68,15 +70,19 @@ export default function NfeConfigScreen() {
   const [codTribNac, setCodTribNac] = useState('010701');
   const [codNbs, setCodNbs] = useState('106043000');
   const [descricao, setDescricao] = useState('Serviço de mensalidade');
+  const [chaveConfigurada, setChaveConfigurada] = useState(false);
+  const [chaveSetup, setChaveSetup] = useState('');
+  const [busyChave, setBusyChave] = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
     try {
-      const [c, perfil, cert] = await Promise.all([
+      const [c, perfil, cert, chaveOk] = await Promise.all([
         ensureNfeConfig(user.id),
         fetchPerfilCobranca(user.id),
         fetchCertificadoAtivo(user.id),
+        fetchCertificadoChaveConfigurada().catch(() => false),
       ]);
       setConfig(c);
       setSerie(c.serie);
@@ -87,6 +93,7 @@ export default function NfeConfigScreen() {
       setCodNbs(c.codigo_nbs ?? '106043000');
       setDescricao(c.descricao_servico_padrao);
       setCertOk(Boolean(cert));
+      setChaveConfigurada(chaveOk);
       if (perfil) {
         setEmitente({
           razao_social: perfil.razao_social,
@@ -148,6 +155,24 @@ export default function NfeConfigScreen() {
     setCertFileName(file.name);
   };
 
+  const salvarChaveCertificado = async () => {
+    setBusyChave(true);
+    try {
+      await definirChaveCertificado(chaveSetup);
+      setChaveConfigurada(true);
+      setChaveSetup('');
+      Toast.show({
+        type: 'success',
+        text1: 'Chave de segurança definida.',
+        text2: 'Agora selecione o .pfx, informe a senha e clique em Salvar tudo.',
+      });
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setBusyChave(false);
+    }
+  };
+
   const salvarTudo = async () => {
     if (!user?.id) return;
     if (!emitente.razao_social.trim() || !emitente.documento.trim()) {
@@ -163,6 +188,14 @@ export default function NfeConfigScreen() {
         type: 'error',
         text1: 'Informe a senha do certificado A1.',
         text2: 'Ela é obrigatória junto com o arquivo .pfx / .p12.',
+      });
+      return;
+    }
+    if (pendingCertFile && !chaveConfigurada) {
+      Toast.show({
+        type: 'error',
+        text1: 'Defina a chave de segurança do certificado antes.',
+        text2: 'Use a seção logo abaixo do prestador (mín. 16 caracteres).',
       });
       return;
     }
@@ -311,6 +344,29 @@ export default function NfeConfigScreen() {
         <FormTextInput label="CEP" value={emitente.cep} onChangeText={(t) => patchEmitente({ cep: t })} />
       </Card>
 
+      {!chaveConfigurada ? (
+        <Card style={[styles.card, styles.cardWarn]}>
+          <Text style={styles.h}>Chave de segurança do certificado</Text>
+          <Text style={styles.sub}>
+            Antes de enviar o .pfx, invente uma senha longa (mín. 16 caracteres) para criptografar a senha do
+            certificado no banco. Guarde essa chave — use a mesma em CERT_ENCRYPTION_KEY na Vercel ao emitir NFS-e.
+          </Text>
+          <FormTextInput
+            label="Chave de segurança (definir uma vez)"
+            value={chaveSetup}
+            onChangeText={setChaveSetup}
+            secureTextEntry
+            placeholder="Ex.: MinhaEmpresa2026ChaveSecreta!"
+          />
+          <PrimaryButton
+            title="Definir chave"
+            onPress={() => void salvarChaveCertificado()}
+            loading={busyChave}
+            disabled={chaveSetup.trim().length < 16}
+          />
+        </Card>
+      ) : null}
+
       <Card style={styles.card}>
         <Text style={styles.h}>2. Certificado digital A1</Text>
         <Text style={styles.sub}>
@@ -335,8 +391,9 @@ export default function NfeConfigScreen() {
           placeholder="Obrigatória ao enviar novo certificado"
         />
         <Text style={styles.certHint}>
-          Selecione o .pfx, informe a senha e clique em Salvar tudo. O arquivo fica no Storage; a senha é
-          criptografada no Supabase (migration 031) ou via API Vercel.
+          {chaveConfigurada
+            ? 'Selecione o .pfx, informe a senha do certificado e clique em Salvar tudo.'
+            : 'Defina a chave de segurança acima antes de enviar o certificado.'}
         </Text>
       </Card>
 
