@@ -1,5 +1,8 @@
 import { DatePickerField } from '@/components/DatePickerField';
+import { ContaReceberAcoesModal } from '@/components/contas-receber/ContaReceberAcoesModal';
+import { ContaReceberPagarParcelaVendaModal } from '@/components/contas-receber/ContaReceberPagarParcelaVendaModal';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
+import { MarcarPagamentoMensalidadeGeradaModal } from '@/components/mensalidades/MarcarPagamentoMensalidadeGeradaModal';
 import { useAuth } from '@/context/AuthContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import {
@@ -8,8 +11,25 @@ import {
   sincronizarCarnesMensalidadesFaltantes,
   sincronizarCarnesVendasFaltantes,
 } from '@/services/boletoParcelaService';
+import {
+  fetchMensalidadeGeradaById,
+  registrarPagamentoMensalidadeGerada,
+} from '@/services/mensalidadeGeradaService';
+import {
+  fetchNotaFiscalPorMensalidade,
+  fetchNotaFiscalPorVenda,
+  gerarNotaFiscalParaVenda,
+  gerarNotasFiscaisParaMensalidades,
+} from '@/services/notaFiscalService';
 import { sincronizarBoletosPendentes } from '@/services/sicoobBoletoService';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
+import {
+  fetchParcelaVendaById,
+  fetchVendaParaNotaFiscal,
+  registrarPagamentoVenda,
+} from '@/services/vendasService';
+import type { MensalidadeGerada } from '@/types/mensalidadeGerada';
+import { centavosParaReais, reaisParaCentavos } from '@/utils/vendasParcelas';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { ContaReceberListRow, ContaReceberOrigem } from '@/types/contasReceber';
 import type { ContaReceberSituacao } from '@/utils/contaReceberCobranca';
@@ -106,6 +126,15 @@ export default function ContasReceberScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [pdfId, setPdfId] = useState<string | null>(null);
   const [nomeBeneficiario, setNomeBeneficiario] = useState<string | null>(null);
+  const [acoesItem, setAcoesItem] = useState<ContaReceberListRow | null>(null);
+  const [payMensalidade, setPayMensalidade] = useState<MensalidadeGerada | null>(null);
+  const [payVendaCtx, setPayVendaCtx] = useState<{
+    vendaId: string;
+    parcelaId: string;
+    referenciaLabel: string;
+    saldoMax: number;
+  } | null>(null);
+  const [nfBusy, setNfBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -284,6 +313,20 @@ export default function ContasReceberScreen() {
     }
   };
 
+  const refreshLista = useCallback(async () => {
+    if (!user?.id) return;
+    const list = await fetchContasReceberLista(user.id);
+    setAllRows(list);
+  }, [user?.id]);
+
+  const abrirAcoes = (item: ContaReceberListRow) => {
+    setAcoesItem(item);
+  };
+
+  const fecharAcoes = () => {
+    setAcoesItem(null);
+  };
+
   const abrirPdf = async (boletoId: string) => {
     if (!user?.id) return;
     setPdfId(boletoId);
@@ -319,6 +362,147 @@ export default function ContasReceberScreen() {
     }
   };
 
+  const iniciarPagamento = async (itemOverride?: ContaReceberListRow) => {
+    const item = itemOverride ?? acoesItem;
+    if (!user?.id || !item) return;
+    fecharAcoes();
+    try {
+      if (item.origem === 'mensalidade' && item.mensalidade_id) {
+        const m = await fetchMensalidadeGeradaById(user.id, item.mensalidade_id);
+        if (!m) {
+          Toast.show({ type: 'error', text1: 'Mensalidade não encontrada.' });
+          return;
+        }
+        setPayMensalidade(m);
+        return;
+      }
+      if (item.origem === 'venda' && item.venda_id && item.parcela_id) {
+        const p = await fetchParcelaVendaById(item.parcela_id);
+        if (!p) {
+          Toast.show({ type: 'error', text1: 'Parcela não encontrada.' });
+          return;
+        }
+        const saldoCent = Math.max(0, reaisParaCentavos(p.valor) - reaisParaCentavos(p.valor_pago));
+        if (saldoCent <= 0) {
+          Toast.show({ type: 'info', text1: 'Esta parcela já está quitada.' });
+          await refreshLista();
+          return;
+        }
+        setPayVendaCtx({
+          vendaId: item.venda_id,
+          parcelaId: item.parcela_id,
+          referenciaLabel: item.referencia_label,
+          saldoMax: centavosParaReais(saldoCent),
+        });
+        return;
+      }
+      Toast.show({ type: 'error', text1: 'Não foi possível identificar a origem do documento.' });
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    }
+  };
+
+  const confirmarPagamentoMensalidade = async (payload: {
+    data_pagamento: string;
+    valor_pago: number;
+    forma_pagamento: string;
+    observacao: string;
+  }) => {
+    if (!user?.id || !payMensalidade) return;
+    await registrarPagamentoMensalidadeGerada(user.id, payMensalidade.id, payload);
+    setPayMensalidade(null);
+    await refreshLista();
+  };
+
+  const confirmarPagamentoVenda = async (payload: {
+    data_pagamento: string;
+    valor_pago: number;
+    observacao: string;
+  }) => {
+    if (!user?.id || !payVendaCtx) return;
+    await registrarPagamentoVenda(user.id, payVendaCtx.vendaId, {
+      ...payload,
+      alocacao_manual: [{ parcela_id: payVendaCtx.parcelaId, valor: payload.valor_pago }],
+    });
+    setPayVendaCtx(null);
+    await refreshLista();
+  };
+
+  const emitirNotaFiscal = async () => {
+    if (!user?.id || !acoesItem) return;
+    const item = acoesItem;
+    if (item.nota_fiscal_id) {
+      fecharAcoes();
+      router.push('/(app)/notas-fiscais');
+      return;
+    }
+    setNfBusy(true);
+    try {
+      if (item.origem === 'mensalidade' && item.mensalidade_id) {
+        const existente = await fetchNotaFiscalPorMensalidade(user.id, item.mensalidade_id);
+        if (existente) {
+          Toast.show({ type: 'info', text1: 'Já existe NFS-e para esta mensalidade.' });
+          fecharAcoes();
+          router.push('/(app)/notas-fiscais');
+          return;
+        }
+        const m = await fetchMensalidadeGeradaById(user.id, item.mensalidade_id);
+        if (!m) throw new Error('Mensalidade não encontrada.');
+        const res = await gerarNotasFiscaisParaMensalidades(user.id, [
+          { id: m.id, cliente_id: m.cliente_id, valor: m.valor, competencia: m.competencia },
+        ]);
+        if (res.emitidas > 0) {
+          Toast.show({ type: 'success', text1: 'NFS-e emitida com sucesso.' });
+        } else if (res.ignoradas > 0) {
+          Toast.show({ type: 'info', text1: 'Cliente marcado como Sem NF no cadastro.' });
+        } else {
+          Toast.show({
+            type: 'error',
+            text1: res.erros[0] ?? 'Não foi possível emitir a NFS-e.',
+          });
+        }
+      } else if (item.origem === 'venda' && item.venda_id) {
+        const existente = await fetchNotaFiscalPorVenda(user.id, item.venda_id);
+        if (existente) {
+          Toast.show({ type: 'info', text1: 'Já existe NFS-e para esta venda.' });
+          fecharAcoes();
+          router.push('/(app)/notas-fiscais');
+          return;
+        }
+        const venda = await fetchVendaParaNotaFiscal(user.id, item.venda_id);
+        if (!venda) throw new Error('Venda não encontrada.');
+        const res = await gerarNotaFiscalParaVenda(user.id, venda);
+        if (res.success) {
+          Toast.show({ type: 'success', text1: 'NFS-e emitida com sucesso.' });
+        } else {
+          Toast.show({ type: 'error', text1: res.message ?? 'NFS-e rejeitada.' });
+        }
+      } else {
+        throw new Error('Origem do documento não identificada.');
+      }
+      fecharAcoes();
+      await refreshLista();
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setNfBusy(false);
+    }
+  };
+
+  const verOrigem = () => {
+    if (!acoesItem) return;
+    fecharAcoes();
+    if (acoesItem.origem === 'venda' && acoesItem.venda_id) {
+      router.push(`/(app)/vendas/${acoesItem.venda_id}`);
+      return;
+    }
+    if (acoesItem.cliente_id) {
+      router.push(`/(app)/mensalidades?cliente=${acoesItem.cliente_id}`);
+      return;
+    }
+    router.push('/(app)/mensalidades');
+  };
+
   const renderItem = ({ item, index }: { item: ContaReceberListRow; index: number }) => {
     const pdfBusy = pdfId === item.id;
     const stOrig = origemStyle(item.origem);
@@ -332,7 +516,7 @@ export default function ContasReceberScreen() {
       <View style={[styles.row, isLast && styles.rowLast]}>
         <Pressable
           style={({ pressed }) => [styles.rowMain, pressed && styles.rowPressed]}
-          onPress={() => void abrirPdf(item.id)}
+          onPress={() => abrirAcoes(item)}
           disabled={pdfBusy}
         >
           <View style={styles.colCliente}>
@@ -384,6 +568,15 @@ export default function ContasReceberScreen() {
           <Text style={styles.colValor}>{formatBRL(item.valor_documento)}</Text>
         </Pressable>
         <View style={styles.colAcoes}>
+          {item.situacao_cobranca === 'aberto' ? (
+            <Pressable
+              style={[styles.acaoBtn, styles.acaoPagar]}
+              onPress={() => void iniciarPagamento(item)}
+              accessibilityLabel="Marcar como pago"
+            >
+              <Ionicons name="cash-outline" size={18} color={colors.white} />
+            </Pressable>
+          ) : null}
           <Pressable
             style={[styles.acaoBtn, styles.acaoWa, !temWhats && styles.acaoBtnDisabled]}
             onPress={() => enviarWhatsApp(item)}
@@ -394,15 +587,10 @@ export default function ContasReceberScreen() {
           </Pressable>
           <Pressable
             style={styles.acaoBtn}
-            onPress={() => void abrirPdf(item.id)}
-            disabled={pdfBusy}
-            accessibilityLabel="Abrir PDF do carnê"
+            onPress={() => abrirAcoes(item)}
+            accessibilityLabel="Mais ações"
           >
-            {pdfBusy ? (
-              <ActivityIndicator size="small" color={colors.petroleum} />
-            ) : (
-              <Ionicons name="document-text-outline" size={18} color={colors.petroleum} />
-            )}
+            <Ionicons name="ellipsis-horizontal" size={18} color={colors.petroleum} />
           </Pressable>
         </View>
       </View>
@@ -447,8 +635,8 @@ export default function ContasReceberScreen() {
       </View>
 
       <Text style={styles.lead}>
-        Botão verde abre o WhatsApp na conversa do número cadastrado do cliente, com a mensagem de cobrança pronta. Toque
-        na linha abre o PDF.
+        Toque na linha para pagar, emitir NFS-e, abrir PDF ou enviar cobrança por WhatsApp. O botão laranja registra
+        pagamento rápido.
       </Text>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.situacaoChips}>
@@ -534,6 +722,43 @@ export default function ContasReceberScreen() {
               : 'Nenhum resultado para os filtros atuais.'}
           </Text>
         }
+      />
+
+      <ContaReceberAcoesModal
+        visible={acoesItem != null}
+        item={acoesItem}
+        onClose={fecharAcoes}
+        onPagar={() => void iniciarPagamento()}
+        onEmitirNf={() => void emitirNotaFiscal()}
+        onVerNota={() => {
+          fecharAcoes();
+          router.push('/(app)/notas-fiscais');
+        }}
+        onPdf={() => {
+          if (acoesItem) void abrirPdf(acoesItem.id);
+        }}
+        onWhatsApp={() => {
+          if (acoesItem) enviarWhatsApp(acoesItem);
+        }}
+        onVerOrigem={verOrigem}
+        temNota={Boolean(acoesItem?.nota_fiscal_id)}
+        nfBusy={nfBusy}
+        pdfBusy={acoesItem != null && pdfId === acoesItem.id}
+      />
+
+      <MarcarPagamentoMensalidadeGeradaModal
+        visible={payMensalidade != null}
+        registro={payMensalidade}
+        onClose={() => setPayMensalidade(null)}
+        onConfirm={confirmarPagamentoMensalidade}
+      />
+
+      <ContaReceberPagarParcelaVendaModal
+        visible={payVendaCtx != null}
+        referenciaLabel={payVendaCtx?.referenciaLabel ?? ''}
+        saldoMax={payVendaCtx?.saldoMax ?? 0}
+        onClose={() => setPayVendaCtx(null)}
+        onConfirm={confirmarPagamentoVenda}
       />
 
       <Modal visible={filterOpen} animationType="slide" transparent onRequestClose={() => setFilterOpen(false)}>
@@ -781,6 +1006,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#25D366',
     borderColor: '#1da851',
   },
+  acaoPagar: {
+    backgroundColor: colors.orange,
+    borderColor: colors.orangeDark,
+  },
   acaoBtnDisabled: {
     backgroundColor: colors.gray100,
     borderColor: colors.gray200,
@@ -801,7 +1030,7 @@ const styles = StyleSheet.create({
   tipoTxt: { fontSize: 9, fontWeight: '800' },
   colVenc: { width: 64, fontSize: 11, color: colors.gray600, textAlign: 'center' },
   colValor: { flex: 1, fontSize: 12, fontWeight: '700', color: colors.gray800, textAlign: 'right' },
-  thAcoes: { width: 76 },
+  thAcoes: { width: 112 },
   empty: {
     textAlign: 'center',
     color: colors.gray600,

@@ -60,6 +60,20 @@ export async function fetchMensalidadesGeradasHistorico(userId: string): Promise
   );
 }
 
+export async function fetchMensalidadeGeradaById(
+  userId: string,
+  mensalidadeId: string,
+): Promise<MensalidadeGerada | null> {
+  const { data, error } = await supabase
+    .from('mensalidades')
+    .select('*')
+    .eq('id', mensalidadeId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as MensalidadeGerada | null) ?? null;
+}
+
 export async function fetchMensalidadesGeradasPorCliente(
   userId: string,
   clienteId: string,

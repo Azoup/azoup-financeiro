@@ -244,7 +244,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
           {showPay ? (
             <Pressable style={styles.btnSmPago} onPress={() => setRegistroPagamento(m)}>
               <Ionicons name="checkmark" size={14} color={colors.white} />
-              <Text style={styles.btnSmPagoTxt}>Pago</Text>
+              <Text style={styles.btnSmPagoTxt}>Pagar</Text>
             </Pressable>
           ) : null}
           <Pressable style={styles.btnSmGhost} onPress={() => toggleExpand(m.id)}>

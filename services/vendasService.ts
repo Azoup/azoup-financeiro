@@ -407,6 +407,37 @@ export async function fetchVendaDetail(userId: string, vendaId: string): Promise
   };
 }
 
+export async function fetchParcelaVendaById(parcelaId: string): Promise<ParcelaVenda | null> {
+  const { data, error } = await supabase
+    .from('parcelas_venda')
+    .select('*')
+    .eq('id', parcelaId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as ParcelaVenda | null) ?? null;
+}
+
+export async function fetchVendaParaNotaFiscal(
+  userId: string,
+  vendaId: string,
+): Promise<{ id: string; cliente_id: string; valor_total: number; descricao: string } | null> {
+  const { data, error } = await supabase
+    .from('vendas')
+    .select('id, cliente_id, valor_total, descricao')
+    .eq('id', vendaId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  const row = data as { id: string; cliente_id: string; valor_total: number; descricao: string | null };
+  return {
+    id: row.id,
+    cliente_id: row.cliente_id,
+    valor_total: row.valor_total,
+    descricao: row.descricao ?? '',
+  };
+}
+
 function nextParcelaDbStatus(valor: number, valorPago: number): ParcelaVendaStatus {
   const vc = reaisParaCentavos(valor);
   const pc = reaisParaCentavos(valorPago);

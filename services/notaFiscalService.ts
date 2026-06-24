@@ -44,6 +44,26 @@ export async function fetchNotasFiscaisLista(userId: string): Promise<NotaFiscal
   );
 }
 
+export async function fetchNotaFiscalPorMensalidade(
+  userId: string,
+  mensalidadeId: string,
+): Promise<NotaFiscalListRow | null> {
+  const { data, error } = await supabase
+    .from('nota_fiscal')
+    .select('*, clientes(nome_fantasia, nome)')
+    .eq('user_id', userId)
+    .eq('mensalidade_id', mensalidadeId)
+    .in('status', ['rascunho', 'processando', 'autorizada'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  const row = data as NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null };
+  const { clientes, ...rest } = row;
+  return { ...rest, cliente: mapClienteJoinEmbed(clientes) };
+}
+
 export async function fetchNotaFiscalPorVenda(
   userId: string,
   vendaId: string,

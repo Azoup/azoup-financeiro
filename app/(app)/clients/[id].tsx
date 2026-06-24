@@ -435,7 +435,7 @@ export default function ClientDetailScreen() {
                 </View>
                 {showPay ? (
                   <Pressable style={styles.btnMiniPago} onPress={() => setRegistroPagamento(m)}>
-                    <Text style={styles.btnMiniPagoTxt}>Pago</Text>
+                    <Text style={styles.btnMiniPagoTxt}>Pagar</Text>
                   </Pressable>
                 ) : null}
               </View>
