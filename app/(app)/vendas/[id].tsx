@@ -5,6 +5,10 @@ import { buildVendaDetailExport } from '@/utils/exportReportBuilders';
 import { BaixaPagamentoModal } from '@/components/vendas/BaixaPagamentoModal';
 import { useAuth } from '@/context/AuthContext';
 import {
+  countBoletosVenda,
+  regenerarCarneVenda,
+} from '@/services/boletoParcelaService';
+import {
   fetchNotaFiscalPorVenda,
   gerarNotaFiscalParaVenda,
 } from '@/services/notaFiscalService';
@@ -63,19 +67,23 @@ export default function VendaDetailScreen() {
   const [baixaOpen, setBaixaOpen] = useState(false);
   const [notaFiscal, setNotaFiscal] = useState<NotaFiscalListRow | null>(null);
   const [emittingNf, setEmittingNf] = useState(false);
+  const [qtdCarne, setQtdCarne] = useState(0);
+  const [gerandoCarne, setGerandoCarne] = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.id || !id) return;
     setLoading(true);
     try {
-      const [d, lg, nf] = await Promise.all([
+      const [d, lg, nf, carne] = await Promise.all([
         fetchVendaDetail(user.id, id),
         fetchVendasFinanceiroLog(id),
         fetchNotaFiscalPorVenda(user.id, id).catch(() => null),
+        countBoletosVenda(user.id, id).catch(() => 0),
       ]);
       setDetail(d);
       setLogs(lg);
       setNotaFiscal(nf);
+      setQtdCarne(carne);
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
       setDetail(null);
@@ -117,6 +125,29 @@ export default function VendaDetailScreen() {
         },
       },
     ]);
+  };
+
+  const avisoBoletoLog = logs.find((l) => l.tipo === 'aviso_boleto');
+  const avisoBoletoMsg =
+    avisoBoletoLog?.detalhe &&
+    typeof avisoBoletoLog.detalhe === 'object' &&
+    avisoBoletoLog.detalhe !== null &&
+    'mensagem' in avisoBoletoLog.detalhe
+      ? String((avisoBoletoLog.detalhe as { mensagem?: string }).mensagem ?? '')
+      : '';
+
+  const onGerarCarne = async () => {
+    if (!user?.id || !id) return;
+    setGerandoCarne(true);
+    try {
+      await regenerarCarneVenda(user.id, id);
+      Toast.show({ type: 'success', text1: 'Carnê gerado.', text2: 'Veja em A receber.' });
+      await load();
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message, visibilityTime: 8000 });
+    } finally {
+      setGerandoCarne(false);
+    }
   };
 
   const onEmitirNf = () => {
@@ -228,7 +259,29 @@ export default function VendaDetailScreen() {
           <Text style={styles.meta}>Criada em {formatDateTimeBRFromISO(detail.created_at)}</Text>
         </Card>
 
+        {avisoBoletoMsg && qtdCarne === 0 ? (
+          <Card style={styles.avisoCard}>
+            <Text style={styles.avisoTit}>Carnê não foi gerado na venda</Text>
+            <Text style={styles.avisoTxt}>{avisoBoletoMsg}</Text>
+          </Card>
+        ) : null}
+
         <View style={styles.actions}>
+          {qtdCarne === 0 && detail.status !== 'cancelada' ? (
+            <PrimaryButton
+              title={gerandoCarne ? 'Gerando carnê…' : 'Gerar carnê em A receber'}
+              onPress={() => void onGerarCarne()}
+              disabled={gerandoCarne}
+            />
+          ) : null}
+          {qtdCarne > 0 ? (
+            <Pressable style={styles.nfLink} onPress={() => router.push('/(app)/contas-receber')}>
+              <Text style={styles.nfLinkTxt}>
+                {qtdCarne} carnê(s) em A receber — abrir lista
+              </Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.orange} />
+            </Pressable>
+          ) : null}
           {!notaFiscal && detail.status !== 'cancelada' ? (
             <PrimaryButton
               title={emittingNf ? 'Emitindo NFS-e…' : 'Emitir NFS-e'}
@@ -386,6 +439,14 @@ const styles = StyleSheet.create({
   rVal: { fontSize: 16, fontWeight: '800', color: colors.petroleum, marginTop: 4 },
   meta: { marginTop: spacing.md, fontSize: 12, color: colors.gray400 },
   actions: { gap: spacing.sm, marginBottom: spacing.md },
+  avisoCard: {
+    marginBottom: spacing.md,
+    borderColor: colors.orange,
+    borderWidth: 1,
+    backgroundColor: '#fff8e1',
+  },
+  avisoTit: { fontSize: 14, fontWeight: '800', color: colors.petroleum, marginBottom: spacing.xs },
+  avisoTxt: { fontSize: 13, color: colors.gray800, lineHeight: 18 },
   nfLink: {
     flexDirection: 'row',
     alignItems: 'center',

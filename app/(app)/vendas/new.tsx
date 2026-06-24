@@ -247,9 +247,10 @@ export default function NovaVendaScreen() {
       const result = await createVendaWithParcelas(user.id, input);
       if (result.avisoBoleto) {
         Toast.show({
-          type: 'info',
-          text1: 'Venda registrada.',
+          type: 'error',
+          text1: 'Venda salva, mas o carnê falhou.',
           text2: result.avisoBoleto,
+          visibilityTime: 10000,
         });
       } else {
         Toast.show({ type: 'success', text1: 'Venda registrada.' });

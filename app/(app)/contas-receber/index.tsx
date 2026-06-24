@@ -6,6 +6,7 @@ import {
   fetchBoletoParcelaById,
   fetchContasReceberLista,
   sincronizarCarnesMensalidadesFaltantes,
+  sincronizarCarnesVendasFaltantes,
 } from '@/services/boletoParcelaService';
 import { sincronizarBoletosPendentes } from '@/services/sicoobBoletoService';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
@@ -95,12 +96,12 @@ export default function ContasReceberScreen() {
   const [vencimentoDe, setVencimentoDe] = useState<string | null>(null);
   const [vencimentoAte, setVencimentoAte] = useState<string | null>(null);
   const [origemFilter, setOrigemFilter] = useState<OrigemFiltro>('todos');
-  const [situacaoFilter, setSituacaoFilter] = useState<SituacaoFiltro>('aberto');
+  const [situacaoFilter, setSituacaoFilter] = useState<SituacaoFiltro>('todos');
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftVencDe, setDraftVencDe] = useState<string | null>(null);
   const [draftVencAte, setDraftVencAte] = useState<string | null>(null);
   const [draftOrigem, setDraftOrigem] = useState<OrigemFiltro>('todos');
-  const [draftSituacao, setDraftSituacao] = useState<SituacaoFiltro>('aberto');
+  const [draftSituacao, setDraftSituacao] = useState<SituacaoFiltro>('todos');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [pdfId, setPdfId] = useState<string | null>(null);
@@ -111,16 +112,37 @@ export default function ContasReceberScreen() {
     setLoading(true);
     try {
       try {
-        const sync = await sincronizarCarnesMensalidadesFaltantes(user.id);
-        if (sync.gerados > 0) {
+        const [syncMen, syncVen] = await Promise.all([
+          sincronizarCarnesMensalidadesFaltantes(user.id).catch((e) => {
+            const msg = (e as Error).message;
+            if (/mensalidade_id|018|019|034|boletos_parcela/i.test(msg)) {
+              Toast.show({ type: 'error', text1: 'Banco desatualizado', text2: msg, visibilityTime: 8000 });
+            }
+            return { gerados: 0 };
+          }),
+          sincronizarCarnesVendasFaltantes(user.id).catch((e) => {
+            const msg = (e as Error).message;
+            if (/034|boletos_parcela|does not exist/i.test(msg)) {
+              Toast.show({ type: 'error', text1: 'Banco desatualizado', text2: msg, visibilityTime: 8000 });
+            }
+            return { gerados: 0 };
+          }),
+        ]);
+        if (syncMen.gerados > 0) {
           Toast.show({
             type: 'info',
-            text1: `${sync.gerados} carnê(s) de mensalidade incluído(s) em A receber.`,
+            text1: `${syncMen.gerados} carnê(s) de mensalidade incluído(s) em A receber.`,
+          });
+        }
+        if (syncVen.gerados > 0) {
+          Toast.show({
+            type: 'success',
+            text1: `${syncVen.gerados} carnê(s) de venda incluído(s) em A receber.`,
           });
         }
       } catch (syncErr) {
         const msg = (syncErr as Error).message;
-        if (/mensalidade_id|018|019/i.test(msg)) {
+        if (/mensalidade_id|018|019|034|boletos_parcela/i.test(msg)) {
           Toast.show({ type: 'error', text1: 'Banco desatualizado', text2: msg, visibilityTime: 8000 });
         }
       }
@@ -162,6 +184,7 @@ export default function ContasReceberScreen() {
     setRefreshing(true);
     try {
       await sincronizarCarnesMensalidadesFaltantes(user.id).catch(() => undefined);
+      await sincronizarCarnesVendasFaltantes(user.id).catch(() => undefined);
       await sincronizarBoletosPendentes().catch(() => undefined);
       const [list, perfil] = await Promise.all([
         fetchContasReceberLista(user.id),

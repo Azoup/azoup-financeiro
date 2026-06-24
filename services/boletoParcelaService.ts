@@ -7,14 +7,19 @@ import { CLIENTE_EMBED_SELECT, mapClienteEnderecoFiscal, type ClienteDbRow } fro
 import { clienteDocFiscal } from '@/utils/cnpj';
 import { toISODate } from '@/utils/date';
 
-const SQL_MIGRATION_018_HINT =
-  'Execute no Supabase (SQL Editor) o arquivo supabase/migrations/018_boletos_mensalidade_contas_receber.sql — ' +
-  'se já tentou antes, rode também 019_boletos_mensalidade_repair.sql.';
+const SQL_MIGRATION_BOLETOS_HINT =
+  'Execute no Supabase (SQL Editor) o arquivo supabase/migrations/034_contas_receber_boletos_setup.sql';
 
-function wrapBoletoDbError(error: { message?: string } | null): Error {
+function wrapBoletoDbError(error: { message?: string; code?: string } | null): Error {
   const msg = error?.message ?? 'Erro ao gravar carnê em contas a receber.';
+  if (
+    error?.code === '42P01' ||
+    /does not exist|boletos_parcela_venda/i.test(msg)
+  ) {
+    return new Error(`${SQL_MIGRATION_BOLETOS_HINT}\n\n${msg}`);
+  }
   if (/mensalidade_id|origem|chk_boletos_parc_origem/i.test(msg)) {
-    return new Error(`${SQL_MIGRATION_018_HINT}\n\n${msg}`);
+    return new Error(`${SQL_MIGRATION_BOLETOS_HINT}\n\n${msg}`);
   }
   return new Error(msg);
 }
@@ -337,6 +342,86 @@ export async function sincronizarCarnesMensalidadesFaltantes(
 
   await gerarBoletosParaMensalidades(userId, faltantes);
   return { gerados: faltantes.length };
+}
+
+/** Recria carnês em A receber para vendas que foram salvas sem boleto/carnê. */
+export async function sincronizarCarnesVendasFaltantes(
+  userId: string,
+): Promise<{ gerados: number }> {
+  const { data: vendas, error: e0 } = await supabase
+    .from('vendas')
+    .select('id, descricao')
+    .eq('user_id', userId)
+    .neq('status', 'cancelada');
+  if (e0) throw wrapBoletoDbError(e0);
+  const vlist = (vendas ?? []) as { id: string; descricao: string }[];
+  if (!vlist.length) return { gerados: 0 };
+
+  const { data: boletos, error: e1 } = await supabase
+    .from('boletos_parcela_venda')
+    .select('venda_id')
+    .eq('user_id', userId)
+    .not('venda_id', 'is', null);
+  if (e1) throw wrapBoletoDbError(e1);
+
+  const comCarne = new Set(
+    ((boletos ?? []) as { venda_id: string | null }[])
+      .map((b) => b.venda_id)
+      .filter((id): id is string => Boolean(id)),
+  );
+
+  let gerados = 0;
+  for (const v of vlist) {
+    if (comCarne.has(v.id)) continue;
+
+    const { data: parcs, error: e2 } = await supabase
+      .from('parcelas_venda')
+      .select('id')
+      .eq('venda_id', v.id)
+      .limit(1);
+    if (e2) throw new Error(e2.message);
+    if (!parcs?.length) continue;
+
+    await gerarBoletosParaVendaCriada(userId, v.id, {
+      descricao: v.descricao?.trim() || 'Venda',
+    });
+    gerados += 1;
+  }
+
+  return { gerados };
+}
+
+export async function countBoletosVenda(userId: string, vendaId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('boletos_parcela_venda')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('venda_id', vendaId);
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
+export async function regenerarCarneVenda(userId: string, vendaId: string): Promise<void> {
+  const { data: venda, error: e0 } = await supabase
+    .from('vendas')
+    .select('descricao, status')
+    .eq('id', vendaId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (e0) throw new Error(e0.message);
+  if (!venda) throw new Error('Venda não encontrada.');
+  if ((venda as { status: string }).status === 'cancelada') {
+    throw new Error('Venda cancelada.');
+  }
+
+  const qtd = await countBoletosVenda(userId, vendaId);
+  if (qtd > 0) {
+    throw new Error('Esta venda já possui carnê em A receber.');
+  }
+
+  await gerarBoletosParaVendaCriada(userId, vendaId, {
+    descricao: ((venda as { descricao: string }).descricao ?? '').trim() || 'Venda',
+  });
 }
 
 export async function fetchContasReceberLista(userId: string): Promise<ContaReceberListRow[]> {
