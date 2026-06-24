@@ -1,5 +1,5 @@
 const { getAdmin, getUserFromBearer } = require('./_lib/supabaseAdmin');
-const { encrypt } = require('./_lib/crypto');
+const { encrypt, syncCertEncryptionKeyToDb } = require('./_lib/crypto');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -24,6 +24,8 @@ module.exports = async function handler(req, res) {
     }
 
     const senhaCriptografada = encrypt(String(senha));
+
+    await syncCertEncryptionKeyToDb(admin);
 
     const { error: secErr } = await admin.from('empresa_certificado_secreto').upsert(
       { certificado_id: certificadoId, senha_criptografada: senhaCriptografada },

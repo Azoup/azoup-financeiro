@@ -88,67 +88,122 @@ export async function fetchCertificadoAtivo(userId: string): Promise<EmpresaCert
   return (data as EmpresaCertificado | null) ?? null;
 }
 
+export type CertificadoFilePick = {
+  uri: string;
+  name: string;
+  mimeType?: string;
+  /** Arquivo nativo no browser (evita falha ao ler blob URL). */
+  webFile?: File;
+};
+
+async function readCertificadoBytes(file: CertificadoFilePick): Promise<ArrayBuffer> {
+  if (Platform.OS === 'web' && file.webFile instanceof File) {
+    return file.webFile.arrayBuffer();
+  }
+  const response = await fetch(file.uri);
+  if (!response.ok) {
+    throw new Error('Não foi possível ler o arquivo do certificado (.pfx / .p12).');
+  }
+  return response.arrayBuffer();
+}
+
+async function salvarSenhaCertificado(
+  certificadoId: string,
+  senha: string,
+): Promise<void> {
+  const trimmed = senha.trim();
+  if (!trimmed) throw new Error('Informe a senha do certificado A1.');
+
+  const { error: rpcErr } = await supabase.rpc('salvar_senha_certificado_a1', {
+    p_certificado_id: certificadoId,
+    p_senha: trimmed,
+  });
+  if (!rpcErr) return;
+
+  const rpcMsg = rpcErr.message ?? '';
+  const precisaApi =
+    /chave de criptografia/i.test(rpcMsg) ||
+    /cert_encryption_key/i.test(rpcMsg) ||
+    /function.*does not exist/i.test(rpcMsg);
+
+  if (!precisaApi) {
+    throw new Error(rpcMsg || 'Falha ao salvar senha do certificado.');
+  }
+
+  const base = nfeApiBaseUrl();
+  if (!base) {
+    throw new Error(
+      `${rpcMsg} Configure CERT_ENCRYPTION_KEY na Vercel ou rode a migration 031 e insira a chave em app_runtime_config.`,
+    );
+  }
+
+  const token = (await supabase.auth.getSession()).data.session?.access_token ?? '';
+  const res = await fetch(`${base}/api/nfe/certificado`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ certificadoId, senha: trimmed }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error(
+        'API NFS-e não encontrada. Faça deploy na Vercel com SUPABASE_SERVICE_ROLE_KEY e CERT_ENCRYPTION_KEY, ou aplique a migration 031 no Supabase.',
+      );
+    }
+    throw new Error(body.error ?? rpcMsg ?? `Falha ao salvar senha (${res.status}).`);
+  }
+}
+
 export async function uploadCertificadoA1(
   userId: string,
-  file: { uri: string; name: string; mimeType?: string },
+  file: CertificadoFilePick,
   senha: string,
 ): Promise<void> {
   if (!senha.trim()) throw new Error('Informe a senha do certificado A1.');
 
-  const path = `${userId}/certificado-${Date.now()}.pfx`;
-  const response = await fetch(file.uri);
-  const blob = await response.blob();
+  const bytes = await readCertificadoBytes(file);
+  if (!bytes.byteLength) {
+    throw new Error('O arquivo do certificado está vazio. Selecione novamente o .pfx / .p12.');
+  }
 
-  const { error: upErr } = await supabase.storage.from('empresa_certificados').upload(path, blob, {
+  const path = `${userId}/certificado-${Date.now()}.pfx`;
+
+  const { error: upErr } = await supabase.storage.from('empresa_certificados').upload(path, bytes, {
     contentType: file.mimeType ?? 'application/x-pkcs12',
     upsert: true,
   });
   if (upErr) throw new Error(upErr.message);
 
-  await supabase
+  const { error: offErr } = await supabase
     .from('empresa_certificado')
     .update({ ativo: false })
     .eq('user_id', userId)
     .eq('ativo', true);
+  if (offErr) throw new Error(offErr.message);
 
   const { data: cert, error: insErr } = await supabase
     .from('empresa_certificado')
     .insert({ user_id: userId, storage_path: path, ativo: true })
     .select('id')
     .single();
-  if (insErr || !cert) throw new Error(insErr?.message ?? 'Falha ao registrar certificado.');
+  if (insErr || !cert) {
+    await supabase.storage.from('empresa_certificados').remove([path]).catch(() => undefined);
+    throw new Error(insErr?.message ?? 'Falha ao registrar certificado.');
+  }
 
-  const { error: secErr } = await fetch(`${nfeApiBaseUrl()}/api/nfe/certificado`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token ?? ''}`,
-    },
-    body: JSON.stringify({ certificadoId: cert.id, senha: senha.trim() }),
-  }).then(async (r) => {
-    const b = (await r.json().catch(() => ({}))) as { error?: string };
-    if (!r.ok) {
-      const msg = b.error ?? r.statusText;
-      if (r.status === 404) {
-        return {
-          error: {
-            message:
-              'API NFS-e não encontrada. Em produção, faça deploy na Vercel. Em desenvolvimento, use "vercel dev" com as variáveis do .env.',
-          },
-        };
-      }
-      return { error: { message: msg } };
-    }
-    return { error: null };
-  });
-
-  if (secErr) {
+  try {
+    await salvarSenhaCertificado(cert.id as string, senha);
+  } catch (e) {
     await supabase.from('empresa_certificado').delete().eq('id', cert.id);
-    throw new Error(secErr.message ?? 'Falha ao salvar senha do certificado no servidor.');
+    await supabase.storage.from('empresa_certificados').remove([path]).catch(() => undefined);
+    throw e;
   }
 }
 
-export async function pickCertificadoFile(): Promise<{ uri: string; name: string; mimeType?: string } | null> {
+export async function pickCertificadoFile(): Promise<CertificadoFilePick | null> {
   if (Platform.OS === 'web') {
     return new Promise((resolve) => {
       const input = document.createElement('input');
@@ -160,7 +215,12 @@ export async function pickCertificadoFile(): Promise<{ uri: string; name: string
           resolve(null);
           return;
         }
-        resolve({ uri: URL.createObjectURL(f), name: f.name, mimeType: f.type });
+        resolve({
+          uri: URL.createObjectURL(f),
+          name: f.name,
+          mimeType: f.type || 'application/x-pkcs12',
+          webFile: f,
+        });
       };
       input.click();
     });

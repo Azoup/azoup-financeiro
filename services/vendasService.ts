@@ -15,7 +15,7 @@ import type {
   VendaStatus,
 } from '@/types/vendas';
 import { formatDateTimeBRFromISO, toISODate } from '@/utils/date';
-import { mapClienteJoinEmbed } from '@/utils/clientesDbMapping';
+import { mapClienteJoinEmbed, isClienteCancelado } from '@/utils/clientesDbMapping';
 import { serializeVendaDescricaoItens } from '@/utils/vendasDescricao';
 import { centavosParaReais, reaisParaCentavos } from '@/utils/vendasParcelas';
 
@@ -34,7 +34,7 @@ export async function searchClientesVenda(
 ): Promise<ClienteVendaOption[]> {
   let query = supabase
     .from('clientes')
-    .select('id, nome_fantasia, nome')
+    .select('id, nome_fantasia, nome, cancelado, ativo, data_cancelamento')
     .order('nome_fantasia', { ascending: true })
     .limit(limit);
   const t = q.trim();
@@ -44,16 +44,25 @@ export async function searchClientesVenda(
   }
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return ((data ?? []) as { id: string | number; nome_fantasia?: string | null; nome?: string | null }[]).map(
-    (c) => {
+  return (
+    (data ?? []) as {
+      id: string | number;
+      nome_fantasia?: string | null;
+      nome?: string | null;
+      cancelado?: boolean | null;
+      ativo?: string | null;
+      data_cancelamento?: string | null;
+    }[]
+  )
+    .filter((c) => !isClienteCancelado(c))
+    .map((c) => {
       const join = mapClienteJoinEmbed(c);
       return {
         id: String(c.id),
         nome_cliente: join?.nome_cliente ?? '',
         nome_empresa: join?.nome_empresa ?? null,
       };
-    },
-  );
+    });
 }
 
 function assertSomaParcelas(total: number, parcelas: NovaVendaInput['parcelas']) {

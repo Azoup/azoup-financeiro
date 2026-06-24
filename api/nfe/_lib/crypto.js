@@ -28,4 +28,24 @@ function decrypt(payload) {
   return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
 }
 
-module.exports = { encrypt, decrypt };
+/** Senhas gravadas via RPC Supabase (prefixo pgp1:) ou legado AES Node. */
+async function decryptCertPassword(admin, payload) {
+  const s = String(payload ?? '');
+  if (!s) throw new Error('Senha do certificado ausente.');
+  if (s.startsWith('pgp1:')) {
+    const { data, error } = await admin.rpc('descriptografar_senha_certificado', { p_enc: s });
+    if (error) throw new Error(error.message);
+    return data;
+  }
+  return decrypt(s);
+}
+
+async function syncCertEncryptionKeyToDb(admin) {
+  const raw = process.env.CERT_ENCRYPTION_KEY;
+  if (!raw || raw.length < 16) return;
+  await admin
+    .from('app_runtime_config')
+    .upsert({ key: 'cert_encryption_key', value: raw }, { onConflict: 'key' });
+}
+
+module.exports = { encrypt, decrypt, decryptCertPassword, syncCertEncryptionKeyToDb };

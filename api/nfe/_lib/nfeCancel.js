@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { decrypt } = require('./crypto');
+const { decryptCertPassword } = require('./crypto');
 
 async function loadNfeWizard() {
   try {
@@ -31,7 +31,7 @@ async function createNfeWizard({ admin, cert, senhaEnc, ambiente }) {
   if (!NFeWizard) {
     throw new Error('Pacote nfewizard-io não instalado no servidor.');
   }
-  const senha = decrypt(senhaEnc);
+  const senha = await decryptCertPassword(admin, senhaEnc);
   const certPath = await downloadCertToTemp(admin, cert.storage_path);
   const wizard = new NFeWizard();
   await wizard.NFE_LoadEnvironment({

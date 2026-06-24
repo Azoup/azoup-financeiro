@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { decrypt } = require('./crypto');
+const { decryptCertPassword } = require('./crypto');
 
 async function loadNfseWizardClass() {
   try {
@@ -40,7 +40,7 @@ async function createNfseWizard({ admin, cert, senhaEnc, perfil, ambiente = 2 })
     throw new Error('Pacote @nfewizard/nfse não instalado no servidor.');
   }
 
-  const senha = decrypt(senhaEnc);
+  const senha = await decryptCertPassword(admin, senhaEnc);
   const certPath = await downloadCertToTemp(admin, cert.storage_path);
   const doc = onlyDigits(perfil.documento);
   const uf = String(perfil.uf ?? 'SP')

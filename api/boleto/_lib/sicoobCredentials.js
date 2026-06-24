@@ -1,4 +1,4 @@
-const { decrypt } = require('../../nfe/_lib/crypto');
+const { decryptCertPassword } = require('../../nfe/_lib/crypto');
 const { cleanupCert, downloadCertToTemp } = require('./sicoobClient');
 
 async function loadSicoobCredentials(admin, userId) {
@@ -28,7 +28,7 @@ async function loadSicoobCredentials(admin, userId) {
   }
 
   const certPath = await downloadCertToTemp(admin, cert.storage_path);
-  const senha = decrypt(sec.senha_criptografada);
+  const senha = await decryptCertPassword(admin, sec.senha_criptografada);
   return { config, certPath, senha };
 }
 

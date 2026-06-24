@@ -158,6 +158,14 @@ export default function NfeConfigScreen() {
       Toast.show({ type: 'error', text1: 'Informe o código IBGE do município.' });
       return;
     }
+    if (pendingCertFile && !senhaCert.trim()) {
+      Toast.show({
+        type: 'error',
+        text1: 'Informe a senha do certificado A1.',
+        text2: 'Ela é obrigatória junto com o arquivo .pfx / .p12.',
+      });
+      return;
+    }
 
     setBusy(true);
     try {
@@ -194,15 +202,6 @@ export default function NfeConfigScreen() {
       });
 
       if (pendingCertFile) {
-        if (!senhaCert.trim()) {
-          Toast.show({
-            type: 'info',
-            text1: 'Dados da NFS-e salvos.',
-            text2: 'Informe a senha do certificado A1 para concluir o envio do .pfx.',
-          });
-          setBusy(false);
-          return;
-        }
         try {
           await uploadCertificadoA1(user.id, pendingCertFile, senhaCert);
           setPendingCertFile(null);
@@ -215,8 +214,8 @@ export default function NfeConfigScreen() {
           });
         } catch (certErr) {
           Toast.show({
-            type: 'info',
-            text1: 'Dados da NFS-e salvos no Supabase.',
+            type: 'error',
+            text1: 'Certificado não foi salvo.',
             text2: (certErr as Error).message,
           });
         }
@@ -336,7 +335,8 @@ export default function NfeConfigScreen() {
           placeholder="Obrigatória ao enviar novo certificado"
         />
         <Text style={styles.certHint}>
-          A senha é gravada de forma segura no servidor (Vercel). O arquivo fica no Storage do Supabase.
+          Selecione o .pfx, informe a senha e clique em Salvar tudo. O arquivo fica no Storage; a senha é
+          criptografada no Supabase (migration 031) ou via API Vercel.
         </Text>
       </Card>
 
