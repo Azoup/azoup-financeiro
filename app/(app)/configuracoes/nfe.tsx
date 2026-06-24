@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -350,6 +351,9 @@ export default function NfeConfigScreen() {
           <Text style={styles.sub}>
             Antes de enviar o .pfx, invente uma senha longa (mín. 16 caracteres) para criptografar a senha do
             certificado no banco. Guarde essa chave — use a mesma em CERT_ENCRYPTION_KEY na Vercel ao emitir NFS-e.
+            {'\n\n'}
+            Se ainda não rodou: execute no Supabase SQL Editor o arquivo{' '}
+            <Text style={styles.mono}>033_certificado_sem_rpc.sql</Text>.
           </Text>
           <FormTextInput
             label="Chave de segurança (definir uma vez)"
@@ -514,6 +518,7 @@ const styles = StyleSheet.create({
   },
   fileBtnTxt: { fontSize: 14, fontWeight: '600', color: colors.petroleum, flex: 1 },
   certHint: { fontSize: 11, color: colors.gray600, lineHeight: 16, marginTop: -spacing.sm },
+  mono: { fontFamily: Platform.OS === 'web' ? 'monospace' : undefined, fontSize: 11 },
   ambiente: {
     fontSize: 12,
     color: colors.petroleum,

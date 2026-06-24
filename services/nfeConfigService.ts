@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import type { EmpresaCertificado, NfeConfig, NfeConfigInput } from '@/types/notaFiscal';
 import { AMBIENTE_FISCAL_HOMOLOGACAO } from '@/types/notaFiscal';
+import { encryptCertificadoSenha } from '@/utils/certificadoCrypto';
 import * as DocumentPicker from 'expo-document-picker';
 import { Platform } from 'react-native';
 
@@ -107,43 +108,54 @@ async function readCertificadoBytes(file: CertificadoFilePick): Promise<ArrayBuf
   return response.arrayBuffer();
 }
 
+async function fetchChaveCertificado(): Promise<string> {
+  const { data, error } = await supabase
+    .from('app_runtime_config')
+    .select('value')
+    .eq('key', 'cert_encryption_key')
+    .maybeSingle();
+  if (error) {
+    if (/permission|policy|42501|404/i.test(error.message)) {
+      throw new Error(
+        'Rode a migration 033 no Supabase SQL Editor (supabase/migrations/033_certificado_sem_rpc.sql).',
+      );
+    }
+    throw new Error(error.message);
+  }
+  const value = (data as { value?: string } | null)?.value?.trim();
+  if (!value || value.length < 16) {
+    throw new Error('Defina a chave de segurança do certificado (mín. 16 caracteres) antes de enviar o .pfx.');
+  }
+  return value;
+}
+
 async function salvarSenhaCertificado(
   certificadoId: string,
   senha: string,
 ): Promise<void> {
-  const trimmed = senha.trim();
-  if (!trimmed) throw new Error('Informe a senha do certificado A1.');
-
-  const { error: rpcErr } = await supabase.rpc('salvar_senha_certificado_a1', {
-    p_certificado_id: certificadoId,
-    p_senha: trimmed,
-  });
-  if (!rpcErr) return;
-
-  const rpcMsg = rpcErr.message ?? 'Falha ao salvar senha do certificado.';
-
-  if (/function.*does not exist/i.test(rpcMsg) || /salvar_senha_certificado_a1/i.test(rpcMsg)) {
-    throw new Error(
-      'Migration 031 não aplicada no Supabase. Rode os arquivos 031 e 032 em SQL Editor (supabase/migrations).',
-    );
+  const chave = await fetchChaveCertificado();
+  const senhaCriptografada = await encryptCertificadoSenha(senha, chave);
+  const { error } = await supabase.from('empresa_certificado_secreto').upsert(
+    { certificado_id: certificadoId, senha_criptografada: senhaCriptografada },
+    { onConflict: 'certificado_id' },
+  );
+  if (error) {
+    if (/permission|policy|42501/i.test(error.message)) {
+      throw new Error(
+        'Sem permissão para gravar a senha. Rode a migration 033 no Supabase SQL Editor.',
+      );
+    }
+    throw new Error(error.message || 'Falha ao salvar senha do certificado.');
   }
-
-  if (/chave de criptografia/i.test(rpcMsg) || /cert_encryption_key/i.test(rpcMsg)) {
-    throw new Error(
-      'Defina a chave de segurança do certificado na seção abaixo (mín. 16 caracteres) e tente enviar o .pfx novamente.',
-    );
-  }
-
-  throw new Error(rpcMsg);
 }
 
 export async function fetchCertificadoChaveConfigurada(): Promise<boolean> {
-  const { data, error } = await supabase.rpc('certificado_chave_configurada');
-  if (error) {
-    if (/function.*does not exist/i.test(error.message)) return false;
-    throw new Error(error.message);
+  try {
+    const chave = await fetchChaveCertificado();
+    return chave.length >= 16;
+  } catch {
+    return false;
   }
-  return Boolean(data);
 }
 
 export async function definirChaveCertificado(chave: string): Promise<void> {
@@ -151,10 +163,18 @@ export async function definirChaveCertificado(chave: string): Promise<void> {
   if (trimmed.length < 16) {
     throw new Error('Use uma chave com no mínimo 16 caracteres.');
   }
-  const { error } = await supabase.rpc('definir_chave_certificado', { p_chave: trimmed });
+  const { error } = await supabase.from('app_runtime_config').insert({
+    key: 'cert_encryption_key',
+    value: trimmed,
+  });
   if (error) {
-    if (/function.*does not exist/i.test(error.message)) {
-      throw new Error('Rode a migration 032 no Supabase SQL Editor e tente novamente.');
+    if (error.code === '23505') {
+      throw new Error('Chave já definida. Para alterar, use o SQL Editor do Supabase.');
+    }
+    if (/permission|policy|42501/i.test(error.message)) {
+      throw new Error(
+        'Sem permissão para definir a chave. Rode a migration 033 no Supabase SQL Editor.',
+      );
     }
     throw new Error(error.message);
   }
