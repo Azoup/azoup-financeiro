@@ -47,6 +47,7 @@ export type NotaFiscal = {
   id: string;
   user_id: string;
   mensalidade_id: string | null;
+  venda_id: string | null;
   cliente_id: string;
   serie: string;
   numero: number;

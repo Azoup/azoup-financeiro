@@ -58,6 +58,17 @@ export async function vincularNotaFiscalAoBoletoMensalidade(
   if (error) throw new Error(error.message);
 }
 
+export async function vincularNotaFiscalAoBoletoVenda(
+  vendaId: string,
+  notaFiscalId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('boletos_parcela_venda')
+    .update({ nota_fiscal_id: notaFiscalId })
+    .eq('venda_id', vendaId);
+  if (error) throw new Error(error.message);
+}
+
 export async function sincronizarBoletosPendentes(): Promise<{
   consultados: number;
   baixados: number;

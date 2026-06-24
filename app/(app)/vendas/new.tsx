@@ -244,9 +244,17 @@ export default function NovaVendaScreen() {
     };
     setSaving(true);
     try {
-      const { id } = await createVendaWithParcelas(user.id, input);
-      Toast.show({ type: 'success', text1: 'Venda registrada.' });
-      router.replace(`/(app)/vendas/${id}`);
+      const result = await createVendaWithParcelas(user.id, input);
+      if (result.avisoBoleto) {
+        Toast.show({
+          type: 'info',
+          text1: 'Venda registrada.',
+          text2: result.avisoBoleto,
+        });
+      } else {
+        Toast.show({ type: 'success', text1: 'Venda registrada.' });
+      }
+      router.replace(`/(app)/vendas/${result.id}`);
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {

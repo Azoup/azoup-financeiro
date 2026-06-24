@@ -67,7 +67,7 @@ function assertSomaParcelas(total: number, parcelas: NovaVendaInput['parcelas'])
 export async function createVendaWithParcelas(
   userId: string,
   input: NovaVendaInput,
-): Promise<{ id: string }> {
+): Promise<{ id: string; avisoBoleto?: string }> {
   assertSomaParcelas(input.valor_total, input.parcelas);
   if (!input.parcelas.length) throw new Error('Inclua ao menos uma parcela.');
 
@@ -108,11 +108,17 @@ export async function createVendaWithParcelas(
     throw new Error(e2.message);
   }
 
+  let avisoBoleto: string | undefined;
   try {
     await gerarBoletosParaVendaCriada(userId, vendaId, { descricao });
   } catch (eb) {
-    await supabase.from('vendas').delete().eq('id', vendaId).eq('user_id', userId);
-    throw new Error((eb as Error).message ?? 'Falha ao gerar boletos das parcelas.');
+    avisoBoleto = (eb as Error).message ?? 'Não foi possível gerar os carnês em A receber.';
+    await supabase.from('vendas_financeiro_log').insert({
+      venda_id: vendaId,
+      user_id: userId,
+      tipo: 'aviso_boleto',
+      detalhe: { mensagem: avisoBoleto },
+    });
   }
 
   await supabase.from('vendas_financeiro_log').insert({
@@ -122,7 +128,7 @@ export async function createVendaWithParcelas(
     detalhe: { parcelas: input.parcelas.length, boletos_parcelas: input.parcelas.length },
   });
 
-  return { id: vendaId };
+  return avisoBoleto ? { id: vendaId, avisoBoleto } : { id: vendaId };
 }
 
 function intersectVendaIdSets(sets: string[][]): string[] {

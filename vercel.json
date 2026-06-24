@@ -19,7 +19,7 @@
   "crons": [
     {
       "path": "/api/boleto/consultar-pendentes",
-      "schedule": "*/30 * * * *"
+      "schedule": "0 11 * * *"
     }
   ]
 }

@@ -5,6 +5,10 @@ import { buildVendaDetailExport } from '@/utils/exportReportBuilders';
 import { BaixaPagamentoModal } from '@/components/vendas/BaixaPagamentoModal';
 import { useAuth } from '@/context/AuthContext';
 import {
+  fetchNotaFiscalPorVenda,
+  gerarNotaFiscalParaVenda,
+} from '@/services/notaFiscalService';
+import {
   cancelarVenda,
   fetchVendaDetail,
   fetchVendasFinanceiroLog,
@@ -12,6 +16,7 @@ import {
   registrarPagamentoVenda,
 } from '@/services/vendasService';
 import { colors, radius, spacing } from '@/theme/colors';
+import type { NotaFiscalListRow } from '@/types/notaFiscal';
 import type { VendaDetail } from '@/types/vendas';
 import { formatBRL } from '@/utils/currency';
 import { formatDateTimeBRFromISO } from '@/utils/date';
@@ -19,7 +24,7 @@ import { vendaDescricaoLinhas } from '@/utils/vendasDescricao';
 import { centavosParaReais, reaisParaCentavos } from '@/utils/vendasParcelas';
 import { CONSULTA, goToConsulta, useHardwareBackToConsulta } from '@/utils/navigationConsulta';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -56,17 +61,21 @@ export default function VendaDetailScreen() {
   const [logs, setLogs] = useState<{ id: string; tipo: string; detalhe: unknown; created_at: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [baixaOpen, setBaixaOpen] = useState(false);
+  const [notaFiscal, setNotaFiscal] = useState<NotaFiscalListRow | null>(null);
+  const [emittingNf, setEmittingNf] = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.id || !id) return;
     setLoading(true);
     try {
-      const [d, lg] = await Promise.all([
+      const [d, lg, nf] = await Promise.all([
         fetchVendaDetail(user.id, id),
         fetchVendasFinanceiroLog(id),
+        fetchNotaFiscalPorVenda(user.id, id).catch(() => null),
       ]);
       setDetail(d);
       setLogs(lg);
+      setNotaFiscal(nf);
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
       setDetail(null);
@@ -108,6 +117,50 @@ export default function VendaDetailScreen() {
         },
       },
     ]);
+  };
+
+  const onEmitirNf = () => {
+    if (!user?.id || !detail || !id) return;
+    const descricao = vendaDescricaoLinhas(detail).join(' · ');
+    Alert.alert(
+      'Emitir NFS-e',
+      `Gerar nota fiscal de ${formatBRL(detail.valor_total)} para esta venda?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Emitir',
+          onPress: async () => {
+            setEmittingNf(true);
+            try {
+              const res = await gerarNotaFiscalParaVenda(user.id, {
+                id,
+                cliente_id: detail.cliente_id,
+                valor_total: Number(detail.valor_total),
+                descricao,
+              });
+              if (res.success) {
+                Toast.show({
+                  type: 'success',
+                  text1: 'NFS-e autorizada.',
+                  text2: 'Veja em Notas fiscais.',
+                });
+                await load();
+              } else {
+                Toast.show({
+                  type: 'error',
+                  text1: res.message ?? 'NFS-e rejeitada.',
+                });
+                await load();
+              }
+            } catch (e) {
+              Toast.show({ type: 'error', text1: (e as Error).message });
+            } finally {
+              setEmittingNf(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   if (loading && !detail) {
@@ -176,6 +229,21 @@ export default function VendaDetailScreen() {
         </Card>
 
         <View style={styles.actions}>
+          {!notaFiscal && detail.status !== 'cancelada' ? (
+            <PrimaryButton
+              title={emittingNf ? 'Emitindo NFS-e…' : 'Emitir NFS-e'}
+              onPress={onEmitirNf}
+              disabled={emittingNf}
+            />
+          ) : null}
+          {notaFiscal ? (
+            <Pressable style={styles.nfLink} onPress={() => router.push('/(app)/notas-fiscais')}>
+              <Text style={styles.nfLinkTxt}>
+                NFS-e {notaFiscal.serie}/{notaFiscal.numero} — {notaFiscal.status}
+              </Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.orange} />
+            </Pressable>
+          ) : null}
           <PrimaryButton
             title="Dar baixa"
             onPress={() => setBaixaOpen(true)}
@@ -318,6 +386,17 @@ const styles = StyleSheet.create({
   rVal: { fontSize: 16, fontWeight: '800', color: colors.petroleum, marginTop: 4 },
   meta: { marginTop: spacing.md, fontSize: 12, color: colors.gray400 },
   actions: { gap: spacing.sm, marginBottom: spacing.md },
+  nfLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.gray50,
+    borderWidth: 1,
+    borderColor: colors.gray100,
+  },
+  nfLinkTxt: { fontSize: 14, fontWeight: '600', color: colors.petroleum, flex: 1 },
   sec: {
     fontSize: 16,
     fontWeight: '800',

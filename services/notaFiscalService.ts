@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { ensureNfeConfig, fetchCertificadoAtivo, nfeApiBaseUrl } from '@/services/nfeConfigService';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
-import { vincularNotaFiscalAoBoletoMensalidade } from '@/services/sicoobBoletoService';
+import { vincularNotaFiscalAoBoletoMensalidade, vincularNotaFiscalAoBoletoVenda } from '@/services/sicoobBoletoService';
 import type { CancelarNfeResult, EmitirNfeResult, NotaFiscalListRow } from '@/types/notaFiscal';
 import { AMBIENTE_FISCAL_HOMOLOGACAO } from '@/types/notaFiscal';
 import { CLIENTE_EMBED_SELECT, mapClienteEnderecoFiscal, mapClienteJoinEmbed } from '@/utils/clientesDbMapping';
@@ -11,6 +11,13 @@ type MensalidadeNfInput = {
   cliente_id: string;
   valor: number;
   competencia: string | null;
+};
+
+type VendaNfInput = {
+  id: string;
+  cliente_id: string;
+  valor_total: number;
+  descricao: string;
 };
 
 function onlyDigits(s: string): string {
@@ -37,18 +44,34 @@ export async function fetchNotasFiscaisLista(userId: string): Promise<NotaFiscal
   );
 }
 
-export async function criarNotaFiscalRascunhoMensalidade(
+export async function fetchNotaFiscalPorVenda(
   userId: string,
-  mensalidade: MensalidadeNfInput,
-): Promise<string> {
+  vendaId: string,
+): Promise<NotaFiscalListRow | null> {
+  const { data, error } = await supabase
+    .from('nota_fiscal')
+    .select('*, clientes(nome_fantasia, nome)')
+    .eq('user_id', userId)
+    .eq('venda_id', vendaId)
+    .in('status', ['rascunho', 'processando', 'autorizada'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  const row = data as NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null };
+  const { clientes, ...rest } = row;
+  return { ...rest, cliente: mapClienteJoinEmbed(clientes) };
+}
+
+async function validarPreEmissaoNfse(
+  userId: string,
+  clienteId: string,
+): Promise<{ config: Awaited<ReturnType<typeof ensureNfeConfig>> }> {
   const [config, perfil, clienteRes] = await Promise.all([
     ensureNfeConfig(userId),
     fetchPerfilCobranca(userId),
-    supabase
-      .from('clientes')
-      .select(CLIENTE_EMBED_SELECT)
-      .eq('id', mensalidade.cliente_id)
-      .single(),
+    supabase.from('clientes').select(CLIENTE_EMBED_SELECT).eq('id', clienteId).single(),
   ]);
 
   if (clienteRes.error || !clienteRes.data) {
@@ -68,6 +91,51 @@ export async function criarNotaFiscalRascunhoMensalidade(
     throw new Error('Informe o código de tributação nacional do serviço em Configurações › NFS-e.');
   }
 
+  return { config };
+}
+
+async function inserirItensNotaFiscal(
+  notaId: string,
+  config: Awaited<ReturnType<typeof ensureNfeConfig>>,
+  descricao: string,
+  valor: number,
+): Promise<void> {
+  const { error: itemErr } = await supabase.from('nota_fiscal_item').insert({
+    nota_fiscal_id: notaId,
+    numero_item: 1,
+    descricao,
+    ncm: config.codigo_tributacao_nacional,
+    cfop: config.codigo_nbs,
+    unidade: 'UN',
+    quantidade: 1,
+    valor_unitario: valor,
+    valor_total: valor,
+    cst_icms: config.cst_icms,
+    csosn: config.csosn,
+    perc_icms: 0,
+  });
+  if (itemErr) {
+    await supabase.from('nota_fiscal').delete().eq('id', notaId);
+    throw new Error(itemErr.message);
+  }
+
+  const { error: pagErr } = await supabase.from('nota_fiscal_pagamento').insert({
+    nota_fiscal_id: notaId,
+    forma_pagamento: '99',
+    valor,
+  });
+  if (pagErr) {
+    await supabase.from('nota_fiscal').delete().eq('id', notaId);
+    throw new Error(pagErr.message);
+  }
+}
+
+export async function criarNotaFiscalRascunhoMensalidade(
+  userId: string,
+  mensalidade: MensalidadeNfInput,
+): Promise<string> {
+  const { config } = await validarPreEmissaoNfse(userId, mensalidade.cliente_id);
+
   const numero = config.proximo_numero;
   const descricao = descricaoItem(mensalidade.competencia, config.descricao_servico_padrao);
 
@@ -76,6 +144,7 @@ export async function criarNotaFiscalRascunhoMensalidade(
     .insert({
       user_id: userId,
       mensalidade_id: mensalidade.id,
+      venda_id: null,
       cliente_id: mensalidade.cliente_id,
       serie: config.serie,
       numero,
@@ -91,35 +160,7 @@ export async function criarNotaFiscalRascunhoMensalidade(
   if (nfErr || !nf) throw new Error(nfErr?.message ?? 'Falha ao criar rascunho da NFS-e.');
 
   const notaId = nf.id as string;
-
-  const { error: itemErr } = await supabase.from('nota_fiscal_item').insert({
-    nota_fiscal_id: notaId,
-    numero_item: 1,
-    descricao,
-    ncm: config.codigo_tributacao_nacional,
-    cfop: config.codigo_nbs,
-    unidade: 'UN',
-    quantidade: 1,
-    valor_unitario: mensalidade.valor,
-    valor_total: mensalidade.valor,
-    cst_icms: config.cst_icms,
-    csosn: config.csosn,
-    perc_icms: 0,
-  });
-  if (itemErr) {
-    await supabase.from('nota_fiscal').delete().eq('id', notaId);
-    throw new Error(itemErr.message);
-  }
-
-  const { error: pagErr } = await supabase.from('nota_fiscal_pagamento').insert({
-    nota_fiscal_id: notaId,
-    forma_pagamento: '99',
-    valor: mensalidade.valor,
-  });
-  if (pagErr) {
-    await supabase.from('nota_fiscal').delete().eq('id', notaId);
-    throw new Error(pagErr.message);
-  }
+  await inserirItensNotaFiscal(notaId, config, descricao, mensalidade.valor);
 
   await supabase
     .from('nfe_config')
@@ -127,6 +168,69 @@ export async function criarNotaFiscalRascunhoMensalidade(
     .eq('user_id', userId);
 
   return notaId;
+}
+
+export async function criarNotaFiscalRascunhoVenda(
+  userId: string,
+  venda: VendaNfInput,
+): Promise<string> {
+  const existente = await fetchNotaFiscalPorVenda(userId, venda.id);
+  if (existente) {
+    throw new Error('Já existe uma NFS-e em andamento ou autorizada para esta venda.');
+  }
+
+  const { config } = await validarPreEmissaoNfse(userId, venda.cliente_id);
+
+  const numero = config.proximo_numero;
+  const descricao =
+    venda.descricao.trim().slice(0, 2000) || config.descricao_servico_padrao;
+
+  const { data: nf, error: nfErr } = await supabase
+    .from('nota_fiscal')
+    .insert({
+      user_id: userId,
+      mensalidade_id: null,
+      venda_id: venda.id,
+      cliente_id: venda.cliente_id,
+      serie: config.serie,
+      numero,
+      status: 'rascunho',
+      valor_total: venda.valor_total,
+      natureza_operacao: config.natureza_operacao,
+      ambiente: AMBIENTE_FISCAL_HOMOLOGACAO,
+      tipo_documento: 'nfse',
+      competencia: null,
+    })
+    .select('id')
+    .single();
+  if (nfErr || !nf) throw new Error(nfErr?.message ?? 'Falha ao criar rascunho da NFS-e.');
+
+  const notaId = nf.id as string;
+  await inserirItensNotaFiscal(notaId, config, descricao, venda.valor_total);
+
+  await supabase
+    .from('nfe_config')
+    .update({ proximo_numero: numero + 1 })
+    .eq('user_id', userId);
+
+  return notaId;
+}
+
+export async function gerarNotaFiscalParaVenda(
+  userId: string,
+  venda: VendaNfInput,
+): Promise<{ success: boolean; notaId?: string; message?: string }> {
+  const cert = await fetchCertificadoAtivo(userId);
+  if (!cert) {
+    throw new Error('Cadastre o certificado A1 em Configurações › NFS-e antes de emitir notas fiscais.');
+  }
+
+  const notaId = await criarNotaFiscalRascunhoVenda(userId, venda);
+  const res = await emitirNotaFiscalSefaz(notaId);
+  if (res.success) {
+    return { success: true, notaId };
+  }
+  return { success: false, notaId, message: res.message };
 }
 
 export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<EmitirNfeResult> {
@@ -163,11 +267,14 @@ export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emiti
 
   const { data: notaRow } = await supabase
     .from('nota_fiscal')
-    .select('mensalidade_id')
+    .select('mensalidade_id, venda_id')
     .eq('id', notaFiscalId)
     .maybeSingle();
   if (notaRow?.mensalidade_id) {
     await vincularNotaFiscalAoBoletoMensalidade(notaRow.mensalidade_id, notaFiscalId).catch(() => undefined);
+  }
+  if (notaRow?.venda_id) {
+    await vincularNotaFiscalAoBoletoVenda(notaRow.venda_id, notaFiscalId).catch(() => undefined);
   }
 
   return body;

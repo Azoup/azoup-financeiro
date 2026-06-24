@@ -243,7 +243,11 @@ export async function gerarBoletosParaVendaCriada(
 
   const boletoIds = ((inserted ?? []) as { id: string }[]).map((r) => r.id);
   if (boletoIds.length) {
-    await emitirBoletosSicoobLote(userId, boletoIds);
+    try {
+      await emitirBoletosSicoobLote(userId, boletoIds);
+    } catch {
+      // Carnê informativo permanece em A receber; Sicoob pode ser reemitido depois.
+    }
   }
 }
 

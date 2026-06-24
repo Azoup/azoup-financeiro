@@ -56,7 +56,7 @@ function targetsFromSelection(rows: ClienteListItem[], selected: Set<string>): s
 }
 
 export default function GerarMensalidadeScreen() {
-  const { user } = useAuth();
+  const { user, loading: authLoading, session } = useAuth();
   const router = useRouter();
   useHardwareBackToConsulta(CONSULTA.mensalidades);
   const { cliente: clienteParam } = useLocalSearchParams<{ cliente?: string | string[] }>();
@@ -67,10 +67,11 @@ export default function GerarMensalidadeScreen() {
   const [segmento, setSegmento] = useState<string | 'todos'>('todos');
   const [incluirCancelados, setIncluirCancelados] = useState(false);
   const [mesReajusteStr, setMesReajusteStr] = useState(mesAnoAtualBR);
-  const [filtrarPorMesReajuste, setFiltrarPorMesReajuste] = useState(true);
+  const [filtrarPorMesReajuste, setFiltrarPorMesReajuste] = useState(false);
   const [segmentos, setSegmentos] = useState<SegmentoClienteRow[]>([]);
   const [rows, setRows] = useState<ClienteListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [enviarModalOpen, setEnviarModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -104,18 +105,27 @@ export default function GerarMensalidadeScreen() {
   );
 
   const load = useCallback(async () => {
-    if (!user?.id) return;
+    if (authLoading) return;
+    if (!session?.user?.id) {
+      setRows([]);
+      setFetchError(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setFetchError(null);
     try {
-      const list = await fetchClientesParaGerarMensalidades(user.id, filters);
+      const list = await fetchClientesParaGerarMensalidades(session.user.id, filters);
       setRows(list);
     } catch (e) {
-      Toast.show({ type: 'error', text1: (e as Error).message });
+      const message = (e as Error).message;
+      setFetchError(message);
+      Toast.show({ type: 'error', text1: message });
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [user?.id, filters]);
+  }, [authLoading, session?.user?.id, filters]);
 
   useEffect(() => {
     fetchSegmentosCliente().then(setSegmentos);
@@ -426,10 +436,28 @@ export default function GerarMensalidadeScreen() {
           </Pressable>
         </View>
 
+        {fetchError ? <Text style={styles.fetchError}>{fetchError}</Text> : null}
+
+        {!loading && rows.length === 0 && filtrarPorMesReajuste ? (
+          <Pressable
+            style={styles.emptyAction}
+            onPress={() => setFiltrarPorMesReajuste(false)}
+          >
+            <Text style={styles.emptyActionTxt}>
+              Nenhum cliente com reajuste em {mesReajusteLabel ?? mesReajusteStr}. Toque aqui para listar
+              todos os clientes.
+            </Text>
+          </Pressable>
+        ) : null}
+
         {loading ? (
           <ActivityIndicator color={colors.orange} style={{ marginVertical: spacing.lg }} />
         ) : rows.length === 0 ? (
-          <Text style={styles.empty}>Nenhum cliente com os filtros atuais.</Text>
+          <Text style={styles.empty}>
+            {filtrarPorMesReajuste
+              ? 'Nenhum cliente com reajuste neste mês. Desative o filtro por mês ou altere MM/AAAA.'
+              : 'Nenhum cliente com os filtros atuais.'}
+          </Text>
         ) : (
           rows.map((r) => {
             const seg = r.segmento_cliente?.nome ?? r.segmento_cliente_codigo ?? '—';
@@ -617,6 +645,29 @@ const styles = StyleSheet.create({
   linkBtn: { padding: spacing.sm },
   linkTxt: { color: colors.orange, fontWeight: '700', fontSize: 14 },
   empty: { textAlign: 'center', color: colors.gray400, marginVertical: spacing.lg },
+  fetchError: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    color: colors.danger,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  emptyAction: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(232, 106, 36, 0.12)',
+    borderWidth: 1,
+    borderColor: colors.orange,
+  },
+  emptyActionTxt: {
+    color: colors.petroleum,
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
   rowCard: {
     flexDirection: 'row',
     backgroundColor: colors.white,

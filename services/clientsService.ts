@@ -14,7 +14,6 @@ import { parseBRLMasked } from '@/utils/currency';
 import { toISODate } from '@/utils/date';
 import {
   CLIENTE_DETAIL_SELECT,
-  CLIENTE_GERAR_MENSALIDADES_SELECT,
   CLIENTE_LIST_SELECT,
   isClienteCancelado,
   mapClienteFormToDbRow,
@@ -470,41 +469,38 @@ export type GerarMensalidadeFiltrosClientes = {
   mesReajusteAte: string | null;
 };
 
-const GERAR_MENSALIDADES_CLIENTES_SELECT = CLIENTE_GERAR_MENSALIDADES_SELECT;
-
 export async function fetchClientesParaGerarMensalidades(
   userId: string,
   filters: GerarMensalidadeFiltrosClientes,
 ): Promise<ClienteListItem[]> {
-  let q = supabase
-    .from('clientes')
-    .select(GERAR_MENSALIDADES_CLIENTES_SELECT)
-    .order('nome_fantasia', { ascending: true })
-    .limit(800);
+  let rows = await fetchClientsExportAll({
+    userId,
+    search: filters.search,
+    sortField: 'nome_cliente',
+    sortOrder: 'asc',
+    situacao: 'todos',
+  });
 
   if (!filters.incluirCancelados) {
-    q = q.eq('cancelado', false);
-  }
-  if (filters.segmentoCodigo !== 'todos') {
-    q = q.eq('segmento_cliente_codigo', filters.segmentoCodigo);
-  }
-  const term = filters.search.trim().replace(/[%_,()]/g, '');
-  if (term) {
-    const esc = term.replace(/%/g, '\\%').replace(/,/g, '');
-    q = q.or(`nome_fantasia.ilike.%${esc}%,nome.ilike.%${esc}%,documento.ilike.%${esc}%,cnpj.ilike.%${esc}%`);
-  }
-  if (filters.mesReajusteDe && filters.mesReajusteAte) {
-    q = q
-      .not('data_reajuste', 'is', null)
-      .gte('data_reajuste', filters.mesReajusteDe)
-      .lte('data_reajuste', filters.mesReajusteAte);
+    rows = rows.filter((r) => !r.cancelado);
   }
 
-  const { data, error } = await q;
-  if (error) throw new Error(error.message);
-  const rows = (data ?? []) as ClienteDbRow[];
-  const nomeMap = await getSegmentoNomePorCodigo();
-  return rows.map((row) => enrichClienteSegmento(mapDbRowToClienteListItem(row), nomeMap));
+  if (filters.segmentoCodigo !== 'todos') {
+    rows = rows.filter(
+      (r) => (r.segmento_cliente_codigo ?? '').trim() === filters.segmentoCodigo.trim(),
+    );
+  }
+
+  if (filters.mesReajusteDe && filters.mesReajusteAte) {
+    rows = rows.filter((r) => {
+      if (!r.data_reajuste) return false;
+      return (
+        r.data_reajuste >= filters.mesReajusteDe! && r.data_reajuste <= filters.mesReajusteAte!
+      );
+    });
+  }
+
+  return rows;
 }
 
 export async function applyReajusteMensalidadePercentual(
