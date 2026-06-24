@@ -165,7 +165,7 @@ export async function resolverVencimentoMensalidadeCliente(
 export async function criarMensalidadeGerada(
   userId: string,
   input: CriarMensalidadeGeradaInput,
-): Promise<{ id: string }> {
+): Promise<{ id: string; avisoBoleto?: string }> {
   const dataVencimento =
     input.data_vencimento?.trim() ||
     (await resolverVencimentoMensalidadeCliente(userId, input.cliente_id));
@@ -188,7 +188,7 @@ export async function criarMensalidadeGerada(
   const mensalidadeId = data.id as string;
 
   try {
-    await gerarBoletosParaMensalidades(userId, [
+    const { avisoSicoob } = await gerarBoletosParaMensalidades(userId, [
       {
         id: mensalidadeId,
         cliente_id: input.cliente_id,
@@ -197,12 +197,11 @@ export async function criarMensalidadeGerada(
         competencia: input.competencia ?? null,
       },
     ]);
+    return { id: mensalidadeId, avisoBoleto: avisoSicoob };
   } catch (eb) {
     await supabase.from('mensalidades').delete().eq('id', mensalidadeId).eq('user_id', userId);
-    throw new Error((eb as Error).message ?? 'Falha ao gerar boleto em contas a receber.');
+    throw new Error((eb as Error).message ?? 'Falha ao gerar carnê em contas a receber.');
   }
-
-  return { id: mensalidadeId };
 }
 
 export async function criarMensalidadesGeradasLote(params: {
@@ -217,6 +216,7 @@ export async function criarMensalidadesGeradasLote(params: {
   criados: number;
   ignorados: number;
   semVencimento: number;
+  avisoBoleto?: string;
   nf?: { emitidas: number; rejeitadas: number; ignoradas: number; erros: string[] };
 }> {
   const comp = params.competencia?.trim() || null;
@@ -289,9 +289,10 @@ export async function criarMensalidadesGeradasLote(params: {
     competencia: string | null;
   }[];
 
+  let avisoBoleto: string | undefined;
   if (criadosRows.length) {
     try {
-      await gerarBoletosParaMensalidades(
+      const boletoRes = await gerarBoletosParaMensalidades(
         params.userId,
         criadosRows.map((m) => ({
           id: m.id,
@@ -301,10 +302,11 @@ export async function criarMensalidadesGeradasLote(params: {
           competencia: m.competencia,
         })),
       );
+      avisoBoleto = boletoRes.avisoSicoob;
     } catch (eb) {
       const ids = criadosRows.map((m) => m.id);
       await supabase.from('mensalidades').delete().in('id', ids).eq('user_id', params.userId);
-      throw new Error((eb as Error).message ?? 'Falha ao gerar boletos em contas a receber.');
+      throw new Error((eb as Error).message ?? 'Falha ao gerar carnês em contas a receber.');
     }
   }
 
@@ -321,7 +323,7 @@ export async function criarMensalidadesGeradasLote(params: {
     );
   }
 
-  return { criados: criadosRows.length, ignorados, semVencimento, nf: nfResult };
+  return { criados: criadosRows.length, ignorados, semVencimento, avisoBoleto, nf: nfResult };
 }
 
 export async function registrarPagamentoMensalidadeGerada(

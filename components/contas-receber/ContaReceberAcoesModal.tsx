@@ -131,7 +131,7 @@ export function ContaReceberAcoesModal({
             ) : !cancelado ? (
               <AcaoRow
                 icon="receipt-outline"
-                label={nfBusy ? 'Emitindo NFS-e…' : 'Emitir NFS-e'}
+                label={nfBusy ? 'Emitindo NFS-e…' : 'Gerar e emitir NFS-e'}
                 onPress={onEmitirNf}
                 disabled={nfBusy}
                 busy={nfBusy}

@@ -15,6 +15,7 @@ import {
   criarMensalidadesGeradasLote,
   fetchUltimoVencimentoMensalidadePorCliente,
 } from '@/services/mensalidadeGeradaService';
+import { sincronizarCarnesMensalidadesFaltantes } from '@/services/boletoParcelaService';
 import { fetchSegmentosCliente } from '@/services/segmentoClienteService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { ClienteListItem, SegmentoClienteRow } from '@/types/models';
@@ -256,7 +257,7 @@ export default function GerarMensalidadeScreen() {
         setPercentStr('');
         await load();
       }
-      const { criados, ignorados, semVencimento, nf } = await criarMensalidadesGeradasLote({
+      const { criados, ignorados, semVencimento, avisoBoleto, nf } = await criarMensalidadesGeradasLote({
         userId: user.id,
         clienteIds: ids,
         dataVencimentoOverride: usarMesmaDataTodos && vencimento ? toISODate(vencimento) : null,
@@ -271,6 +272,15 @@ export default function GerarMensalidadeScreen() {
         if (nf.rejeitadas > 0) extras.push(`${nf.rejeitadas} NF rejeitada(s)`);
         if (nf.ignoradas > 0) extras.push(`${nf.ignoradas} sem NF no cadastro`);
       }
+      if (avisoBoleto) {
+        Toast.show({
+          type: 'info',
+          text1: 'Carnê informativo em A receber',
+          text2: avisoBoleto,
+          visibilityTime: 9000,
+        });
+      }
+      await sincronizarCarnesMensalidadesFaltantes(user.id).catch(() => undefined);
       Toast.show({
         type: 'success',
         text1: `${criados} mensalidade(s) gerada(s).${extras.length ? ` ${extras.join('; ')}.` : ''}`,

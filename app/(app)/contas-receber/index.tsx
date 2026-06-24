@@ -1,6 +1,7 @@
 import { DatePickerField } from '@/components/DatePickerField';
 import { ContaReceberAcoesModal } from '@/components/contas-receber/ContaReceberAcoesModal';
 import { ContaReceberPagarParcelaVendaModal } from '@/components/contas-receber/ContaReceberPagarParcelaVendaModal';
+import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmitirNfseModal';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { MarcarPagamentoMensalidadeGeradaModal } from '@/components/mensalidades/MarcarPagamentoMensalidadeGeradaModal';
 import { useAuth } from '@/context/AuthContext';
@@ -17,9 +18,8 @@ import {
 } from '@/services/mensalidadeGeradaService';
 import {
   fetchNotaFiscalPorMensalidade,
-  fetchNotaFiscalPorVenda,
+  gerarNotaFiscalParaMensalidade,
   gerarNotaFiscalParaVenda,
-  gerarNotasFiscaisParaMensalidades,
 } from '@/services/notaFiscalService';
 import { sincronizarBoletosPendentes } from '@/services/sicoobBoletoService';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
@@ -135,6 +135,9 @@ export default function ContasReceberScreen() {
     saldoMax: number;
   } | null>(null);
   const [nfBusy, setNfBusy] = useState(false);
+  const [nfBusyId, setNfBusyId] = useState<string | null>(null);
+  const [nfPosPagamentoMensalidade, setNfPosPagamentoMensalidade] = useState<MensalidadeGerada | null>(null);
+  const [nfEmitindoPosPagamento, setNfEmitindoPosPagamento] = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -409,9 +412,14 @@ export default function ContasReceberScreen() {
     observacao: string;
   }) => {
     if (!user?.id || !payMensalidade) return;
-    await registrarPagamentoMensalidadeGerada(user.id, payMensalidade.id, payload);
+    const mensalidade = payMensalidade;
+    await registrarPagamentoMensalidadeGerada(user.id, mensalidade.id, payload);
     setPayMensalidade(null);
     await refreshLista();
+    const existente = await fetchNotaFiscalPorMensalidade(user.id, mensalidade.id).catch(() => null);
+    if (!existente) {
+      setNfPosPagamentoMensalidade(mensalidade);
+    }
   };
 
   const confirmarPagamentoVenda = async (payload: {
@@ -428,47 +436,34 @@ export default function ContasReceberScreen() {
     await refreshLista();
   };
 
-  const emitirNotaFiscal = async () => {
-    if (!user?.id || !acoesItem) return;
-    const item = acoesItem;
+  const emitirNotaFiscal = async (itemOverride?: ContaReceberListRow) => {
+    const item = itemOverride ?? acoesItem;
+    if (!user?.id || !item) return;
     if (item.nota_fiscal_id) {
       fecharAcoes();
       router.push('/(app)/notas-fiscais');
       return;
     }
     setNfBusy(true);
+    setNfBusyId(item.id);
     try {
       if (item.origem === 'mensalidade' && item.mensalidade_id) {
-        const existente = await fetchNotaFiscalPorMensalidade(user.id, item.mensalidade_id);
-        if (existente) {
-          Toast.show({ type: 'info', text1: 'Já existe NFS-e para esta mensalidade.' });
-          fecharAcoes();
-          router.push('/(app)/notas-fiscais');
-          return;
-        }
         const m = await fetchMensalidadeGeradaById(user.id, item.mensalidade_id);
         if (!m) throw new Error('Mensalidade não encontrada.');
-        const res = await gerarNotasFiscaisParaMensalidades(user.id, [
-          { id: m.id, cliente_id: m.cliente_id, valor: m.valor, competencia: m.competencia },
-        ]);
-        if (res.emitidas > 0) {
-          Toast.show({ type: 'success', text1: 'NFS-e emitida com sucesso.' });
-        } else if (res.ignoradas > 0) {
-          Toast.show({ type: 'info', text1: 'Cliente marcado como Sem NF no cadastro.' });
+        const res = await gerarNotaFiscalParaMensalidade(user.id, {
+          id: m.id,
+          cliente_id: m.cliente_id,
+          valor: m.valor,
+          competencia: m.competencia,
+        });
+        if (res.success) {
+          Toast.show({ type: 'success', text1: res.message ?? 'NFS-e emitida com sucesso.' });
+        } else if (res.ignorada) {
+          Toast.show({ type: 'info', text1: res.message ?? 'Cliente marcado como Sem NF no cadastro.' });
         } else {
-          Toast.show({
-            type: 'error',
-            text1: res.erros[0] ?? 'Não foi possível emitir a NFS-e.',
-          });
+          Toast.show({ type: 'error', text1: res.message ?? 'Não foi possível emitir a NFS-e.' });
         }
       } else if (item.origem === 'venda' && item.venda_id) {
-        const existente = await fetchNotaFiscalPorVenda(user.id, item.venda_id);
-        if (existente) {
-          Toast.show({ type: 'info', text1: 'Já existe NFS-e para esta venda.' });
-          fecharAcoes();
-          router.push('/(app)/notas-fiscais');
-          return;
-        }
         const venda = await fetchVendaParaNotaFiscal(user.id, item.venda_id);
         if (!venda) throw new Error('Venda não encontrada.');
         const res = await gerarNotaFiscalParaVenda(user.id, venda);
@@ -486,6 +481,33 @@ export default function ContasReceberScreen() {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setNfBusy(false);
+      setNfBusyId(null);
+    }
+  };
+    if (!user?.id || !nfPosPagamentoMensalidade) return;
+    setNfEmitindoPosPagamento(true);
+    try {
+      const m = nfPosPagamentoMensalidade;
+      const res = await gerarNotaFiscalParaMensalidade(user.id, {
+        id: m.id,
+        cliente_id: m.cliente_id,
+        valor: m.valor,
+        competencia: m.competencia,
+      });
+      if (res.success) {
+        Toast.show({ type: 'success', text1: res.message ?? 'NFS-e emitida com sucesso.' });
+        router.push('/(app)/notas-fiscais');
+      } else if (res.ignorada) {
+        Toast.show({ type: 'info', text1: res.message ?? 'Cliente sem NF no cadastro.' });
+      } else {
+        Toast.show({ type: 'error', text1: res.message ?? 'Não foi possível emitir a NFS-e.' });
+      }
+      await refreshLista();
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setNfEmitindoPosPagamento(false);
+      setNfPosPagamentoMensalidade(null);
     }
   };
 
@@ -511,6 +533,8 @@ export default function ContasReceberScreen() {
     const atrasado =
       item.situacao_cobranca === 'aberto' && item.parcela_status === 'atrasado';
     const temWhats = Boolean(item.whatsapp?.trim());
+    const podeEmitirNf = item.situacao_cobranca !== 'cancelado' && !item.nota_fiscal_id;
+    const nfBusyRow = nfBusyId === item.id;
 
     return (
       <View style={[styles.row, isLast && styles.rowLast]}>
@@ -577,6 +601,20 @@ export default function ContasReceberScreen() {
               <Ionicons name="cash-outline" size={18} color={colors.white} />
             </Pressable>
           ) : null}
+          {podeEmitirNf ? (
+            <Pressable
+              style={[styles.acaoBtn, styles.acaoNf]}
+              onPress={() => void emitirNotaFiscal(item)}
+              disabled={nfBusy}
+              accessibilityLabel="Gerar e emitir NFS-e"
+            >
+              {nfBusyRow ? (
+                <ActivityIndicator size="small" color={colors.white} />
+              ) : (
+                <Ionicons name="receipt-outline" size={18} color={colors.white} />
+              )}
+            </Pressable>
+          ) : null}
           <Pressable
             style={[styles.acaoBtn, styles.acaoWa, !temWhats && styles.acaoBtnDisabled]}
             onPress={() => enviarWhatsApp(item)}
@@ -635,8 +673,7 @@ export default function ContasReceberScreen() {
       </View>
 
       <Text style={styles.lead}>
-        Toque na linha para pagar, emitir NFS-e, abrir PDF ou enviar cobrança por WhatsApp. O botão laranja registra
-        pagamento rápido.
+        Toque na linha para pagar, gerar NFS-e, abrir PDF ou enviar cobrança. Botão laranja = pagamento; azul = NFS-e.
       </Text>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.situacaoChips}>
@@ -759,6 +796,14 @@ export default function ContasReceberScreen() {
         saldoMax={payVendaCtx?.saldoMax ?? 0}
         onClose={() => setPayVendaCtx(null)}
         onConfirm={confirmarPagamentoVenda}
+      />
+
+      <ConfirmarEmitirNfseModal
+        visible={nfPosPagamentoMensalidade != null}
+        loading={nfEmitindoPosPagamento}
+        onClose={() => setNfPosPagamentoMensalidade(null)}
+        onEmitir={() => void emitirNfPosPagamento()}
+        onDepois={() => setNfPosPagamentoMensalidade(null)}
       />
 
       <Modal visible={filterOpen} animationType="slide" transparent onRequestClose={() => setFilterOpen(false)}>
@@ -1010,6 +1055,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.orange,
     borderColor: colors.orangeDark,
   },
+  acaoNf: {
+    backgroundColor: colors.petroleum,
+    borderColor: colors.petroleum,
+  },
   acaoBtnDisabled: {
     backgroundColor: colors.gray100,
     borderColor: colors.gray200,
@@ -1030,7 +1079,7 @@ const styles = StyleSheet.create({
   tipoTxt: { fontSize: 9, fontWeight: '800' },
   colVenc: { width: 64, fontSize: 11, color: colors.gray600, textAlign: 'center' },
   colValor: { flex: 1, fontSize: 12, fontWeight: '700', color: colors.gray800, textAlign: 'right' },
-  thAcoes: { width: 112 },
+  thAcoes: { width: 148 },
   empty: {
     textAlign: 'center',
     color: colors.gray600,

@@ -268,8 +268,8 @@ export type MensalidadeParaBoleto = {
 export async function gerarBoletosParaMensalidades(
   userId: string,
   mensalidades: MensalidadeParaBoleto[],
-): Promise<void> {
-  if (!mensalidades.length) return;
+): Promise<{ avisoSicoob?: string }> {
+  if (!mensalidades.length) return {};
 
   const perfil = await fetchPerfilCobranca(userId).catch(() => null);
   const snapCache = new Map<string, SnapshotBenefPag>();
@@ -309,8 +309,17 @@ export async function gerarBoletosParaMensalidades(
 
   const boletoIds = ((inserted ?? []) as { id: string }[]).map((r) => r.id);
   if (boletoIds.length) {
-    await emitirBoletosSicoobLote(userId, boletoIds);
+    try {
+      await emitirBoletosSicoobLote(userId, boletoIds);
+    } catch (e) {
+      return {
+        avisoSicoob:
+          (e as Error).message ??
+          'Carnê informativo criado em A receber; registro bancário Sicoob não concluído.',
+      };
+    }
   }
+  return {};
 }
 
 /** Recria carnês em A receber para mensalidades que foram geradas sem boleto (ex.: falha na migration 018). */

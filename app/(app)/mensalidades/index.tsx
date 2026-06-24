@@ -1,10 +1,12 @@
 import { Card } from '@/components/Card';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
+import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmitirNfseModal';
 import { buildMensalidadesExport } from '@/utils/exportReportBuilders';
 import { MarcarPagamentoMensalidadeGeradaModal } from '@/components/mensalidades/MarcarPagamentoMensalidadeGeradaModal';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
 import { useDebounce } from '@/hooks/useDebounce';
+import { sincronizarCarnesMensalidadesFaltantes } from '@/services/boletoParcelaService';
 import {
   fetchMensalidadesGeradasHistorico,
   fetchPagamentosMensalidadeGerada,
@@ -12,6 +14,10 @@ import {
   podeRegistrarPagamentoMensalidadeGerada,
   registrarPagamentoMensalidadeGerada,
 } from '@/services/mensalidadeGeradaService';
+import {
+  fetchNotaFiscalPorMensalidade,
+  gerarNotaFiscalParaMensalidade,
+} from '@/services/notaFiscalService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type {
   MensalidadeGerada,
@@ -103,9 +109,13 @@ export default function HistoricoMensalidadesGeradasScreen() {
   const [pagamentos, setPagamentos] = useState<Record<string, PagamentoMensalidadeGerada[]>>({});
   const [loadingPay, setLoadingPay] = useState<string | null>(null);
   const [registroPagamento, setRegistroPagamento] = useState<MensalidadeGerada | null>(null);
+  const [nfPosPagamento, setNfPosPagamento] = useState<MensalidadeGerada | null>(null);
+  const [nfBusyId, setNfBusyId] = useState<string | null>(null);
+  const [nfEmitindoPosPagamento, setNfEmitindoPosPagamento] = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
+    await sincronizarCarnesMensalidadesFaltantes(user.id).catch(() => undefined);
     const all = await fetchMensalidadesGeradasHistorico(user.id);
     setAllRows(all);
   }, [user?.id]);
@@ -175,11 +185,52 @@ export default function HistoricoMensalidadesGeradasScreen() {
 
   const onMarcarPago = async (payload: Parameters<typeof registrarPagamentoMensalidadeGerada>[2]) => {
     if (!user?.id || !registroPagamento) return;
-    await registrarPagamentoMensalidadeGerada(user.id, registroPagamento.id, payload);
+    const mensalidade = registroPagamento;
+    await registrarPagamentoMensalidadeGerada(user.id, mensalidade.id, payload);
     setRegistroPagamento(null);
     setPagamentos({});
     setExpanded(null);
     await load();
+    const existente = await fetchNotaFiscalPorMensalidade(user.id, mensalidade.id).catch(() => null);
+    if (!existente && mensalidade.status !== 'cancelado') {
+      setNfPosPagamento(mensalidade);
+    }
+  };
+
+  const emitirNfMensalidade = async (m: MensalidadeGerada) => {
+    if (!user?.id) return;
+    setNfBusyId(m.id);
+    try {
+      const res = await gerarNotaFiscalParaMensalidade(user.id, {
+        id: m.id,
+        cliente_id: m.cliente_id,
+        valor: m.valor,
+        competencia: m.competencia,
+      });
+      if (res.success) {
+        Toast.show({ type: 'success', text1: res.message ?? 'NFS-e emitida com sucesso.' });
+        router.push('/(app)/notas-fiscais');
+      } else if (res.ignorada) {
+        Toast.show({ type: 'info', text1: res.message ?? 'Cliente sem NF no cadastro.' });
+      } else {
+        Toast.show({ type: 'error', text1: res.message ?? 'Não foi possível emitir a NFS-e.' });
+      }
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setNfBusyId(null);
+    }
+  };
+
+  const emitirNfPosPagamento = async () => {
+    if (!nfPosPagamento) return;
+    setNfEmitindoPosPagamento(true);
+    try {
+      await emitirNfMensalidade(nfPosPagamento);
+    } finally {
+      setNfEmitindoPosPagamento(false);
+      setNfPosPagamento(null);
+    }
   };
 
   const irGerarMensalidade = () => {
@@ -210,6 +261,8 @@ export default function HistoricoMensalidadesGeradasScreen() {
     const st = statusColor(vis);
     const pend = Math.max(0, reaisParaCentavos(m.valor) - reaisParaCentavos(m.valor_pago)) / 100;
     const showPay = podeRegistrarPagamentoMensalidadeGerada(m);
+    const showNf = m.status !== 'cancelado';
+    const nfBusy = nfBusyId === m.id;
     const exp = expanded === m.id;
     const pays = pagamentos[m.id];
     const venc = m.data_vencimento.split('-').reverse().join('/');
@@ -245,6 +298,22 @@ export default function HistoricoMensalidadesGeradasScreen() {
             <Pressable style={styles.btnSmPago} onPress={() => setRegistroPagamento(m)}>
               <Ionicons name="checkmark" size={14} color={colors.white} />
               <Text style={styles.btnSmPagoTxt}>Pagar</Text>
+            </Pressable>
+          ) : null}
+          {showNf ? (
+            <Pressable
+              style={styles.btnSmNf}
+              onPress={() => void emitirNfMensalidade(m)}
+              disabled={nfBusy}
+            >
+              {nfBusy ? (
+                <ActivityIndicator size="small" color={colors.white} />
+              ) : (
+                <>
+                  <Ionicons name="receipt-outline" size={14} color={colors.white} />
+                  <Text style={styles.btnSmNfTxt}>NFS-e</Text>
+                </>
+              )}
             </Pressable>
           ) : null}
           <Pressable style={styles.btnSmGhost} onPress={() => toggleExpand(m.id)}>
@@ -370,6 +439,14 @@ export default function HistoricoMensalidadesGeradasScreen() {
         registro={registroPagamento}
         onClose={() => setRegistroPagamento(null)}
         onConfirm={onMarcarPago}
+      />
+
+      <ConfirmarEmitirNfseModal
+        visible={nfPosPagamento != null}
+        loading={nfEmitindoPosPagamento}
+        onClose={() => setNfPosPagamento(null)}
+        onEmitir={() => void emitirNfPosPagamento()}
+        onDepois={() => setNfPosPagamento(null)}
       />
     </View>
   );
@@ -532,6 +609,23 @@ const styles = StyleSheet.create({
     minHeight: 32,
   },
   btnSmPagoTxt: {
+    color: colors.white,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  btnSmNf: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    backgroundColor: colors.petroleum,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    minHeight: 32,
+  },
+  btnSmNfTxt: {
     color: colors.white,
     fontWeight: '700',
     fontSize: 12,

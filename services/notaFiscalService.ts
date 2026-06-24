@@ -253,6 +253,40 @@ export async function gerarNotaFiscalParaVenda(
   return { success: false, notaId, message: res.message };
 }
 
+export async function gerarNotaFiscalParaMensalidade(
+  userId: string,
+  mensalidade: MensalidadeNfInput,
+): Promise<{ success: boolean; notaId?: string; message?: string; ignorada?: boolean }> {
+  const existente = await fetchNotaFiscalPorMensalidade(userId, mensalidade.id);
+  if (existente) {
+    return {
+      success: true,
+      notaId: existente.id,
+      message: 'NFS-e já existente para esta mensalidade.',
+    };
+  }
+
+  const cert = await fetchCertificadoAtivo(userId);
+  if (!cert) {
+    throw new Error('Cadastre o certificado A1 em Configurações › NFS-e antes de emitir notas fiscais.');
+  }
+
+  try {
+    const notaId = await criarNotaFiscalRascunhoMensalidade(userId, mensalidade);
+    const res = await emitirNotaFiscalSefaz(notaId);
+    if (res.success) {
+      return { success: true, notaId };
+    }
+    return { success: false, notaId, message: res.message };
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (/Sem NF/i.test(msg)) {
+      return { success: false, message: msg, ignorada: true };
+    }
+    throw e;
+  }
+}
+
 export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<EmitirNfeResult> {
   const { data: session } = await supabase.auth.getSession();
   const token = session.session?.access_token;
