@@ -31,19 +31,20 @@ if (url && key) {
   process.exit(0);
 }
 
-console.warn(
+console.error(
   [
     '',
-    '[vercel] AVISO: Supabase não configurado neste build.',
-    'O site sobe, mas login não funciona até você adicionar:',
+    '[vercel] ERRO: Supabase não configurado neste build.',
+    'O site sobe sem conectar ao banco até você adicionar:',
     '',
     '  EXPO_PUBLIC_SUPABASE_URL',
     '  EXPO_PUBLIC_SUPABASE_ANON_KEY',
     '',
     'Vercel → Project → Settings → Environment Variables',
-    '(Production + Preview + Development) → Redeploy',
+    'Marque Production + Preview + Development',
+    'Depois: Deployments → Redeploy (sem cache, se já tinha variáveis)',
     '',
   ].join('\n'),
 );
 
-process.exit(0);
+process.exit(1);

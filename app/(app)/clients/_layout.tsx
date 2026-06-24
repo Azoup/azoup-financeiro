@@ -6,6 +6,7 @@ export default function ClientsStackLayout() {
   return (
     <Stack
       screenOptions={{
+        contentStyle: { flex: 1 },
         headerStyle: { backgroundColor: colors.petroleum },
         headerTintColor: colors.white,
         headerTitleStyle: { fontWeight: '700' },

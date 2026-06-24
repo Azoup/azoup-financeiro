@@ -52,8 +52,9 @@ export default function LoginScreen() {
         {!configured ? (
           <View style={styles.banner}>
             <Text style={styles.bannerText}>
-              Crie um arquivo .env na raiz com EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY
-              (valores do painel do Supabase).
+              {Platform.OS === 'web'
+                ? 'Supabase não configurado neste deploy. Na Vercel: Settings → Environment Variables → adicione EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY → faça Redeploy.'
+                : 'Crie um arquivo .env na raiz com EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY (valores do painel do Supabase).'}
             </Text>
           </View>
         ) : null}

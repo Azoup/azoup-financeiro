@@ -20,8 +20,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -47,7 +49,7 @@ const SORT_PRESETS: { label: string; field: SortField; order: SortOrder }[] = [
 ];
 
 export default function ClientsListScreen() {
-  const { user } = useAuth();
+  const { user, loading: authLoading, session, configured } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [search, setSearch] = useState('');
@@ -62,6 +64,7 @@ export default function ClientsListScreen() {
   const [pageLoading, setPageLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const reqId = useRef(0);
 
   const sortLabel = useMemo(() => {
@@ -84,10 +87,12 @@ export default function ClientsListScreen() {
 
   const runFetch = useCallback(
     async (pageNum: number) => {
-      if (!user?.id) return;
+      if (!session?.user?.id) {
+        throw new Error('Sessão não encontrada. Faça login novamente.');
+      }
       const id = ++reqId.current;
       const { items: chunk, totalCount: total } = await fetchClientsPage({
-        userId: user.id,
+        userId: session.user.id,
         search: debounced,
         sortField,
         sortOrder,
@@ -98,21 +103,44 @@ export default function ClientsListScreen() {
       setItems(chunk);
       setTotalCount(total);
       setPage(pageNum);
+      setFetchError(null);
     },
-    [user?.id, debounced, sortField, sortOrder, situacao],
+    [session?.user?.id, debounced, sortField, sortOrder, situacao],
   );
 
   useEffect(() => {
+    if (authLoading) return;
+
     let cancelled = false;
     (async () => {
+      if (!configured) {
+        setItems([]);
+        setTotalCount(0);
+        setFetchError(
+          'Supabase não configurado neste deploy. Na Vercel, adicione EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY e faça Redeploy.',
+        );
+        setLoading(false);
+        return;
+      }
+      if (!session) {
+        setItems([]);
+        setTotalCount(0);
+        setFetchError(null);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       setPage(0);
       setTotalCount(0);
+      setFetchError(null);
       try {
         await runFetch(0);
       } catch (e) {
         if (!cancelled) {
-          Toast.show({ type: 'error', text1: (e as Error).message });
+          const message = (e as Error).message;
+          setFetchError(message);
+          Toast.show({ type: 'error', text1: message });
           setItems([]);
           setTotalCount(0);
         }
@@ -123,7 +151,7 @@ export default function ClientsListScreen() {
     return () => {
       cancelled = true;
     };
-  }, [debounced, sortField, sortOrder, situacao, runFetch]);
+  }, [authLoading, configured, session, debounced, sortField, sortOrder, situacao, runFetch]);
 
   const goToPage = useCallback(
     async (nextPage: number) => {
@@ -257,16 +285,16 @@ export default function ClientsListScreen() {
           })}
         </View>
         <Text style={styles.sortTitle}>Ordenação: {sortLabel}</Text>
-        <FlatList
+        <ScrollView
           horizontal
-          data={SORT_PRESETS}
-          keyExtractor={(i) => `${i.field}-${i.order}`}
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.chipsRow}
-          renderItem={({ item: p }) => {
+        >
+          {SORT_PRESETS.map((p) => {
             const active = p.field === sortField && p.order === sortOrder;
             return (
               <Pressable
+                key={`${p.field}-${p.order}`}
                 onPress={() => {
                   setSortField(p.field);
                   setSortOrder(p.order);
@@ -276,14 +304,15 @@ export default function ClientsListScreen() {
                 <Text style={[styles.chipText, active && styles.chipTextActive]}>{p.label}</Text>
               </Pressable>
             );
-          }}
-        />
+          })}
+        </ScrollView>
       </View>
 
       <View style={styles.summaryBar}>
         <Text style={styles.summaryText}>
           {loading && items.length === 0 ? 'Carregando…' : rangeLabel}
         </Text>
+        {fetchError ? <Text style={styles.errorText}>{fetchError}</Text> : null}
       </View>
 
       {loading && items.length === 0 ? (
@@ -292,10 +321,15 @@ export default function ClientsListScreen() {
         </View>
       ) : (
         <FlatList
+          style={styles.listFlex}
           data={items}
           keyExtractor={(i) => i.id}
           renderItem={renderItem}
-          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 88 }]}
+          nestedScrollEnabled={Platform.OS === 'web'}
+          contentContainerStyle={[
+            styles.list,
+            { paddingBottom: insets.bottom + 88, flexGrow: 1 },
+          ]}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.orange} />
           }
@@ -355,6 +389,7 @@ export default function ClientsListScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
+    minHeight: 0,
     backgroundColor: colors.gray50,
   },
   toolbar: {
@@ -453,6 +488,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: colors.petroleum,
+  },
+  errorText: {
+    marginTop: spacing.xs,
+    fontSize: 13,
+    color: colors.danger,
+    lineHeight: 18,
+  },
+  listFlex: {
+    flex: 1,
+    minHeight: 0,
   },
   pagerFooter: {
     flexDirection: 'row',
