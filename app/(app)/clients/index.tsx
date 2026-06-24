@@ -2,7 +2,12 @@ import { Card } from '@/components/Card';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { ImportClientsModal } from '@/components/ImportClientsModal';
 import { useAuth } from '@/context/AuthContext';
-import { fetchClientsExportAll, fetchClientsPage, type ClienteSituacaoFiltro } from '@/services/clientsService';
+import {
+  fetchClientsExportAll,
+  fetchClientsPage,
+  PAGE_SIZE,
+  type ClienteSituacaoFiltro,
+} from '@/services/clientsService';
 import { buildClientsListExport } from '@/utils/exportReportBuilders';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { ClienteListItem, SortField, SortOrder } from '@/types/models';
@@ -52,9 +57,9 @@ export default function ClientsListScreen() {
   const [situacao, setSituacao] = useState<ClienteSituacaoFiltro>('todos');
   const [items, setItems] = useState<ClienteListItem[]>([]);
   const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [pageLoading, setPageLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const reqId = useRef(0);
@@ -64,11 +69,24 @@ export default function ClientsListScreen() {
     return p?.label ?? 'Ordenar';
   }, [sortField, sortOrder]);
 
+  const totalPages = useMemo(
+    () => (totalCount > 0 ? Math.ceil(totalCount / PAGE_SIZE) : 0),
+    [totalCount],
+  );
+
+  const rangeLabel = useMemo(() => {
+    if (totalCount === 0) return '0 clientes';
+    const start = page * PAGE_SIZE + 1;
+    const end = Math.min((page + 1) * PAGE_SIZE, totalCount);
+    const noun = totalCount === 1 ? 'cliente' : 'clientes';
+    return `Exibindo ${start}–${end} de ${totalCount} ${noun}`;
+  }, [page, totalCount]);
+
   const runFetch = useCallback(
-    async (pageNum: number, mode: 'replace' | 'append') => {
+    async (pageNum: number) => {
       if (!user?.id) return;
       const id = ++reqId.current;
-      const { items: chunk, hasMore: more } = await fetchClientsPage({
+      const { items: chunk, totalCount: total } = await fetchClientsPage({
         userId: user.id,
         search: debounced,
         sortField,
@@ -77,9 +95,9 @@ export default function ClientsListScreen() {
         situacao,
       });
       if (id !== reqId.current) return;
-      if (mode === 'replace') setItems(chunk);
-      else setItems((prev) => [...prev, ...chunk]);
-      setHasMore(more);
+      setItems(chunk);
+      setTotalCount(total);
+      setPage(pageNum);
     },
     [user?.id, debounced, sortField, sortOrder, situacao],
   );
@@ -89,13 +107,14 @@ export default function ClientsListScreen() {
     (async () => {
       setLoading(true);
       setPage(0);
-      setHasMore(true);
+      setTotalCount(0);
       try {
-        await runFetch(0, 'replace');
+        await runFetch(0);
       } catch (e) {
         if (!cancelled) {
           Toast.show({ type: 'error', text1: (e as Error).message });
           setItems([]);
+          setTotalCount(0);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -106,40 +125,39 @@ export default function ClientsListScreen() {
     };
   }, [debounced, sortField, sortOrder, situacao, runFetch]);
 
+  const goToPage = useCallback(
+    async (nextPage: number) => {
+      if (nextPage < 0 || nextPage >= totalPages || pageLoading || loading) return;
+      setPageLoading(true);
+      try {
+        await runFetch(nextPage);
+      } catch (e) {
+        Toast.show({ type: 'error', text1: (e as Error).message });
+      } finally {
+        setPageLoading(false);
+      }
+    },
+    [totalPages, pageLoading, loading, runFetch],
+  );
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setPage(0);
     try {
-      await runFetch(0, 'replace');
+      await runFetch(page);
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setRefreshing(false);
     }
-  }, [runFetch]);
+  }, [runFetch, page]);
 
   const onImported = useCallback(async () => {
-    setPage(0);
     try {
-      await runFetch(0, 'replace');
+      await runFetch(0);
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     }
   }, [runFetch]);
-
-  const loadMore = useCallback(async () => {
-    if (!hasMore || loadingMore || loading) return;
-    setLoadingMore(true);
-    const next = page + 1;
-    try {
-      await runFetch(next, 'append');
-      setPage(next);
-    } catch (e) {
-      Toast.show({ type: 'error', text1: (e as Error).message });
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [hasMore, loadingMore, loading, page, runFetch]);
 
   const renderItem = ({ item }: { item: ClienteListItem }) => (
     <Pressable onPress={() => router.push(`/(app)/clients/${item.id}`)}>
@@ -262,6 +280,12 @@ export default function ClientsListScreen() {
         />
       </View>
 
+      <View style={styles.summaryBar}>
+        <Text style={styles.summaryText}>
+          {loading && items.length === 0 ? 'Carregando…' : rangeLabel}
+        </Text>
+      </View>
+
       {loading && items.length === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.orange} />
@@ -275,14 +299,37 @@ export default function ClientsListScreen() {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.orange} />
           }
-          onEndReachedThreshold={0.35}
-          onEndReached={loadMore}
           ListEmptyComponent={
             <Text style={styles.empty}>Nenhum cliente encontrado.</Text>
           }
           ListFooterComponent={
-            loadingMore ? (
+            pageLoading ? (
               <ActivityIndicator style={{ marginVertical: 16 }} color={colors.orange} />
+            ) : totalPages > 1 ? (
+              <View style={styles.pagerFooter}>
+                <Pressable
+                  style={[styles.pagerBtn, (page === 0 || pageLoading) && styles.pagerBtnDisabled]}
+                  onPress={() => goToPage(page - 1)}
+                  disabled={page === 0 || pageLoading}
+                >
+                  <Ionicons name="chevron-back" size={18} color={colors.petroleum} />
+                  <Text style={styles.pagerBtnText}>Anterior</Text>
+                </Pressable>
+                <Text style={styles.pagerInfo}>
+                  Página {page + 1} de {totalPages}
+                </Text>
+                <Pressable
+                  style={[
+                    styles.pagerBtn,
+                    (page >= totalPages - 1 || pageLoading) && styles.pagerBtnDisabled,
+                  ]}
+                  onPress={() => goToPage(page + 1)}
+                  disabled={page >= totalPages - 1 || pageLoading}
+                >
+                  <Text style={styles.pagerBtnText}>Próxima</Text>
+                  <Ionicons name="chevron-forward" size={18} color={colors.petroleum} />
+                </Pressable>
+              </View>
             ) : null
           }
         />
@@ -397,6 +444,47 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: colors.petroleum,
+  },
+  summaryBar: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  summaryText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.petroleum,
+  },
+  pagerFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  pagerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+  },
+  pagerBtnDisabled: {
+    opacity: 0.45,
+  },
+  pagerBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.petroleum,
+  },
+  pagerInfo: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.gray600,
   },
   list: {
     paddingHorizontal: spacing.md,

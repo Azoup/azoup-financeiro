@@ -24,9 +24,38 @@ import {
   type ClienteDbRow,
 } from '@/utils/clientesDbMapping';
 
-export const PAGE_SIZE = 20;
+export const PAGE_SIZE = 100;
 
 export type ClienteSituacaoFiltro = 'todos' | 'ativos' | 'cancelados';
+
+export type ClientesListQuery = {
+  search: string;
+  sortField: SortField;
+  sortOrder: SortOrder;
+  situacao?: ClienteSituacaoFiltro;
+};
+
+function applyClientesListFilters<T extends { eq: Function; or: Function }>(
+  q: T,
+  params: ClientesListQuery,
+): T {
+  const situacao = params.situacao ?? 'todos';
+  let next = q;
+  if (situacao === 'ativos') {
+    next = next.eq('cancelado', false) as T;
+  } else if (situacao === 'cancelados') {
+    next = next.eq('cancelado', true) as T;
+  }
+
+  const term = params.search.trim().replace(/[%_,()]/g, '');
+  if (term) {
+    const esc = term.replace(/%/g, '\\%').replace(/,/g, '');
+    next = next.or(
+      `nome_fantasia.ilike.%${esc}%,nome.ilike.%${esc}%,documento.ilike.%${esc}%,cnpj.ilike.%${esc}%,cep.ilike.%${esc}%,cidade.ilike.%${esc}%,segmento_cliente_codigo.ilike.%${esc}%,tipo_cliente.ilike.%${esc}%`,
+    ) as T;
+  }
+  return next;
+}
 
 function mapClienteDbError(message: string, code?: string): string {
   if (code === '23505' || message.includes('duplicate') || message.includes('unique')) {
@@ -107,14 +136,10 @@ function enrichClienteSegmento<T extends { segmento_cliente_codigo?: string }>(
 const LIST_SELECT = `${CLIENTE_LIST_SELECT}, contatos_cliente(count)`;
 const DETAIL_SELECT = CLIENTE_DETAIL_SELECT;
 
-export async function fetchClientsPage(params: {
+export async function fetchClientsPage(params: ClientesListQuery & {
   userId: string;
-  search: string;
-  sortField: SortField;
-  sortOrder: SortOrder;
   page: number;
-  situacao?: ClienteSituacaoFiltro;
-}): Promise<{ items: ClienteListItem[]; hasMore: boolean }> {
+}): Promise<{ items: ClienteListItem[]; totalCount: number; hasMore: boolean }> {
   const from = params.page * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
 
@@ -124,22 +149,9 @@ export async function fetchClientsPage(params: {
     .order(SORT_FIELD_DB[params.sortField], { ascending: params.sortOrder === 'asc' })
     .range(from, to);
 
-  const situacao = params.situacao ?? 'todos';
-  if (situacao === 'ativos') {
-    q = q.eq('cancelado', false);
-  } else if (situacao === 'cancelados') {
-    q = q.eq('cancelado', true);
-  }
+  q = applyClientesListFilters(q, params);
 
-  const term = params.search.trim().replace(/[%_,()]/g, '');
-  if (term) {
-    const esc = term.replace(/%/g, '\\%').replace(/,/g, '');
-    q = q.or(
-      `nome_fantasia.ilike.%${esc}%,nome.ilike.%${esc}%,documento.ilike.%${esc}%,cnpj.ilike.%${esc}%,cep.ilike.%${esc}%,cidade.ilike.%${esc}%,segmento_cliente_codigo.ilike.%${esc}%,tipo_cliente.ilike.%${esc}%`,
-    );
-  }
-
-  const { data, error } = await q;
+  const { data, error, count } = await q;
   if (error) throw new Error(error.message);
 
   const rows = (data ?? []) as (ClienteDbRow & {
@@ -152,11 +164,12 @@ export async function fetchClientsPage(params: {
     contatos_count: mapContatoCount(row),
   }));
 
-  const hasMore = rows.length === PAGE_SIZE;
-  return { items, hasMore };
+  const totalCount = count ?? 0;
+  const hasMore = from + items.length < totalCount;
+  return { items, totalCount, hasMore };
 }
 
-/** Carrega todas as páginas para exportação (limite de segurança: 100 páginas). */
+/** Carrega todas as páginas para exportação (limite de segurança: 200 páginas × 100). */
 export async function fetchClientsExportAll(params: {
   userId: string;
   search: string;
@@ -167,7 +180,7 @@ export async function fetchClientsExportAll(params: {
   const all: ClienteListItem[] = [];
   let page = 0;
   let hasMore = true;
-  while (hasMore && page < 100) {
+  while (hasMore && page < 200) {
     const { items, hasMore: more } = await fetchClientsPage({ ...params, page });
     all.push(...items);
     hasMore = more;
