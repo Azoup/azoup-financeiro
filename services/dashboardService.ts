@@ -66,8 +66,7 @@ export async function fetchDashboardOverview(userId: string): Promise<DashboardO
   ] = await Promise.all([
     supabase
       .from('clientes')
-      .select('cancelado, ativo, data_cancelamento, mensalidade, segmento_cliente_codigo, tipo_cliente')
-      .eq('user_id', userId),
+      .select('cancelado, ativo, data_cancelamento, mensalidade, segmento_cliente_codigo, tipo_cliente'),
     supabase
       .from('mensalidades')
       .select('valor, valor_pago, data_vencimento, status')

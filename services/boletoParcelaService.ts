@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
+import { emitirBoletosSicoobLote } from '@/services/sicoobBoletoService';
 import type { BoletoParcelaVendaRow, ContaReceberListRow, PerfilCobranca } from '@/types/contasReceber';
 import { situacaoCobrancaDeStatus } from '@/utils/contaReceberCobranca';
 import { CLIENTE_EMBED_SELECT, mapClienteEnderecoFiscal, type ClienteDbRow } from '@/utils/clientesDbMapping';
@@ -126,7 +127,6 @@ async function fetchClienteAddr(userId: string, clienteId: string): Promise<Clie
     .from('clientes')
     .select(CLIENTE_EMBED_SELECT)
     .eq('id', clienteId)
-    .eq('user_id', userId)
     .maybeSingle();
 
   if (error) throw new Error(error.message);
@@ -238,8 +238,13 @@ export async function gerarBoletosParaVendaCriada(
     };
   });
 
-  const { error: e3 } = await supabase.from('boletos_parcela_venda').insert(rows);
+  const { data: inserted, error: e3 } = await supabase.from('boletos_parcela_venda').insert(rows).select('id');
   if (e3) throw wrapBoletoDbError(e3);
+
+  const boletoIds = ((inserted ?? []) as { id: string }[]).map((r) => r.id);
+  if (boletoIds.length) {
+    await emitirBoletosSicoobLote(userId, boletoIds);
+  }
 }
 
 export type MensalidadeParaBoleto = {
@@ -290,8 +295,13 @@ export async function gerarBoletosParaMensalidades(
     });
   }
 
-  const { error } = await supabase.from('boletos_parcela_venda').insert(rows);
+  const { data: inserted, error } = await supabase.from('boletos_parcela_venda').insert(rows).select('id');
   if (error) throw wrapBoletoDbError(error);
+
+  const boletoIds = ((inserted ?? []) as { id: string }[]).map((r) => r.id);
+  if (boletoIds.length) {
+    await emitirBoletosSicoobLote(userId, boletoIds);
+  }
 }
 
 /** Recria carnês em A receber para mensalidades que foram geradas sem boleto (ex.: falha na migration 018). */

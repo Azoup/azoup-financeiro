@@ -130,7 +130,6 @@ export async function resolverVencimentoMensalidadeCliente(
         .from('clientes')
         .select('data_inicio')
         .eq('id', clienteId)
-        .eq('user_id', userId)
         .maybeSingle();
       if (error) throw new Error(error.message);
       dataInicio = (c as { data_inicio: string | null } | null)?.data_inicio ?? null;
@@ -226,7 +225,6 @@ export async function criarMensalidadesGeradasLote(params: {
       .from('clientes')
       .select('mensalidade, data_inicio')
       .eq('id', clienteId)
-      .eq('user_id', params.userId)
       .maybeSingle();
     if (e0) throw new Error(e0.message);
     const cli = c as { mensalidade: number | null; data_inicio: string | null } | null;
@@ -360,6 +358,13 @@ export async function registrarPagamentoMensalidadeGerada(
     .eq('id', mensalidadeId)
     .eq('user_id', userId);
   if (e2) throw new Error(e2.message);
+
+  await supabase
+    .from('boletos_parcela_venda')
+    .update({ status_registro: 'pago', data_liquidacao_sicoob: input.data_pagamento })
+    .eq('mensalidade_id', mensalidadeId)
+    .eq('user_id', userId)
+    .in('status_registro', ['registrado', 'pendente', 'informativo']);
 }
 
 export async function fetchResumoMensalidadesGeradasDashboard(userId: string): Promise<{

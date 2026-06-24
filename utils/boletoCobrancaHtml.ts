@@ -13,8 +13,13 @@ function brl(n: number): string {
   return esc(formatBRL(n));
 }
 
-/** Carnê no estilo boleto (campos do PDF de referência); documento informativo — sem linha digitável válida. */
+/** Carnê no estilo boleto; quando registrado no Sicoob exibe linha digitável e código de barras. */
 export function buildBoletoCobrancaHtml(row: BoletoParcelaVendaRow): string {
+  const registrado = row.status_registro === 'registrado';
+  const nossoNumero = registrado && row.nosso_numero_banco ? row.nosso_numero_banco : row.nosso_numero;
+  const avisoTopo = registrado
+    ? 'Boleto registrado no Sicoob — utilize a linha digitável ou o PDF oficial para pagamento.'
+    : 'Documento de cobrança para controle interno — não é boleto registrado em instituição financeira (sem compensação automática).';
   const venc = esc(row.data_vencimento.split('-').reverse().join('/'));
   const doc = esc(row.data_documento.split('-').reverse().join('/'));
   const desconto = brl(0);
@@ -46,7 +51,17 @@ export function buildBoletoCobrancaHtml(row: BoletoParcelaVendaRow): string {
   </style>
 </head>
 <body>
-  <p class="muted">Documento de cobrança para controle interno — não é boleto registrado em instituição financeira (sem compensação automática).</p>
+  <p class="muted">${avisoTopo}</p>
+  ${
+    registrado && row.linha_digitavel
+      ? `<div class="full"><div class="lbl">Linha digitável</div><strong style="font-size:13px;letter-spacing:0.5px">${esc(row.linha_digitavel)}</strong></div>`
+      : ''
+  }
+  ${
+    registrado && row.codigo_barras
+      ? `<div class="full"><div class="lbl">Código de barras</div><span style="font-family:monospace;font-size:11px">${esc(row.codigo_barras)}</span></div>`
+      : ''
+  }
 
   <div class="grid3">
     <div><div class="lbl">Beneficiário</div><div>${esc(row.beneficiario_razao_social)}<br/><span style="font-weight:400;font-size:10px">${esc(row.beneficiario_documento)}</span></div></div>
@@ -87,7 +102,7 @@ export function buildBoletoCobrancaHtml(row: BoletoParcelaVendaRow): string {
   </div>
   <div class="row2">
     <div><div class="lbl">Data do documento</div>${doc}</div>
-    <div><div class="lbl">Nosso número</div><strong>${esc(row.nosso_numero)}</strong></div>
+    <div><div class="lbl">Nosso número</div><strong>${esc(nossoNumero)}</strong></div>
   </div>
   <div class="full">
     <div class="lbl">Uso do banco / Espécie</div>Real &nbsp;·&nbsp; Quantidade: 1 &nbsp;·&nbsp; Valor: ${brl(0)}
@@ -111,10 +126,10 @@ export function buildBoletoCobrancaHtml(row: BoletoParcelaVendaRow): string {
   }
 
   <div class="ficha">
-    <div class="tit">Ficha de compensação (informativa)</div>
+    <div class="tit">${registrado ? 'Ficha de compensação (Sicoob)' : 'Ficha de compensação (informativa)'}</div>
     <div class="grid3">
       <div><div class="lbl">Vencimento</div><div class="val">${venc}</div></div>
-      <div><div class="lbl">Nosso número</div><strong>${esc(row.nosso_numero)}</strong></div>
+      <div><div class="lbl">Nosso número</div><strong>${esc(nossoNumero)}</strong></div>
       <div><div class="lbl">Valor documento</div><div class="val">${brl(row.valor_documento)}</div></div>
     </div>
     <div class="row2">

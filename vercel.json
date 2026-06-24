@@ -15,5 +15,11 @@
       "source": "/:path*",
       "destination": "/"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/boleto/consultar-pendentes",
+      "schedule": "*/30 * * * *"
+    }
   ]
 }

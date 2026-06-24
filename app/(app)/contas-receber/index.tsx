@@ -7,6 +7,7 @@ import {
   fetchContasReceberLista,
   sincronizarCarnesMensalidadesFaltantes,
 } from '@/services/boletoParcelaService';
+import { sincronizarBoletosPendentes } from '@/services/sicoobBoletoService';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { ContaReceberListRow, ContaReceberOrigem } from '@/types/contasReceber';
@@ -66,6 +67,23 @@ function origemStyle(origem: ContaReceberOrigem): { bg: string; fg: string } {
     : { bg: '#e3f2fd', fg: colors.petroleum };
 }
 
+function boletoRegistroLabel(status?: ContaReceberListRow['status_registro']): string {
+  switch (status ?? 'informativo') {
+    case 'registrado':
+      return 'Sicoob';
+    case 'pendente':
+      return 'Registrando…';
+    case 'erro':
+      return 'Erro Sicoob';
+    case 'pago':
+      return 'Pago (Sicoob)';
+    case 'baixado':
+      return 'Baixado';
+    default:
+      return 'Informativo';
+  }
+}
+
 export default function ContasReceberScreen() {
   const { user } = useAuth();
   const router = useRouter();
@@ -106,6 +124,19 @@ export default function ContasReceberScreen() {
           Toast.show({ type: 'error', text1: 'Banco desatualizado', text2: msg, visibilityTime: 8000 });
         }
       }
+
+      try {
+        const sicoobSync = await sincronizarBoletosPendentes();
+        if (sicoobSync.baixados > 0) {
+          Toast.show({
+            type: 'success',
+            text1: `${sicoobSync.baixados} boleto(s) quitado(s) automaticamente via Sicoob.`,
+          });
+        }
+      } catch {
+        /* Sicoob inativo ou API indisponível em dev */
+      }
+
       const [list, perfil] = await Promise.all([
         fetchContasReceberLista(user.id),
         fetchPerfilCobranca(user.id).catch(() => null),
@@ -131,6 +162,7 @@ export default function ContasReceberScreen() {
     setRefreshing(true);
     try {
       await sincronizarCarnesMensalidadesFaltantes(user.id).catch(() => undefined);
+      await sincronizarBoletosPendentes().catch(() => undefined);
       const [list, perfil] = await Promise.all([
         fetchContasReceberLista(user.id),
         fetchPerfilCobranca(user.id).catch(() => null),
@@ -238,6 +270,16 @@ export default function ContasReceberScreen() {
         Toast.show({ type: 'error', text1: 'Registro não encontrado.' });
         return;
       }
+      if (row.pdf_url && row.status_registro === 'registrado') {
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.open(row.pdf_url, '_blank', 'noopener,noreferrer');
+        } else {
+          const ok = await Linking.canOpenURL(row.pdf_url);
+          if (ok) await Linking.openURL(row.pdf_url);
+          else Toast.show({ type: 'error', text1: 'Não foi possível abrir o PDF do Sicoob.' });
+        }
+        return;
+      }
       const html = buildBoletoCobrancaHtml(row);
       const { uri } = await Print.printToFileAsync({ html });
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -285,6 +327,35 @@ export default function ContasReceberScreen() {
           </View>
           <View style={[styles.tipoBadge, { backgroundColor: stOrig.bg }]}>
             <Text style={[styles.tipoTxt, { color: stOrig.fg }]}>{origemLabel(item.origem)}</Text>
+          </View>
+          <View
+            style={[
+              styles.tipoBadge,
+              {
+                backgroundColor:
+                  item.status_registro === 'registrado'
+                    ? '#e8f5e9'
+                    : item.status_registro === 'erro'
+                      ? '#ffebee'
+                      : '#f1f5f9',
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.tipoTxt,
+                {
+                  color:
+                    item.status_registro === 'registrado'
+                      ? '#2e7d32'
+                      : item.status_registro === 'erro'
+                        ? '#c62828'
+                        : colors.gray600,
+                },
+              ]}
+            >
+              {boletoRegistroLabel(item.status_registro ?? 'informativo')}
+            </Text>
           </View>
           <Text style={styles.colVenc}>{venc}</Text>
           <Text style={styles.colValor}>{formatBRL(item.valor_documento)}</Text>

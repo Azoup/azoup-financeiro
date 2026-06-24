@@ -41,6 +41,8 @@ import type { ContaReceberSituacao } from '@/utils/contaReceberCobranca';
 
 export type ContaReceberOrigem = 'venda' | 'mensalidade';
 
+import type { BoletoStatusRegistro, BoletoTipoEmissao } from '@/types/sicoob';
+
 export type BoletoParcelaVendaRow = {
   id: string;
   user_id: string;
@@ -69,6 +71,19 @@ export type BoletoParcelaVendaRow = {
   local_pagamento: string;
   instrucoes: string;
   cooperativa_rodape: string | null;
+  tipo_emissao: BoletoTipoEmissao;
+  status_registro: BoletoStatusRegistro;
+  linha_digitavel: string | null;
+  codigo_barras: string | null;
+  nosso_numero_banco: string | null;
+  sicoob_seu_numero: string | null;
+  pdf_storage_path: string | null;
+  pdf_url: string | null;
+  mensagem_erro_registro: string | null;
+  data_registro: string | null;
+  data_liquidacao_sicoob: string | null;
+  ultima_consulta_sicoob: string | null;
+  nota_fiscal_id: string | null;
   created_at: string;
 };
 

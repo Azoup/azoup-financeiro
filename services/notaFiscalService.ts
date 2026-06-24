@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { ensureNfeConfig, fetchCertificadoAtivo, nfeApiBaseUrl } from '@/services/nfeConfigService';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
+import { vincularNotaFiscalAoBoletoMensalidade } from '@/services/sicoobBoletoService';
 import type { CancelarNfeResult, EmitirNfeResult, NotaFiscalListRow } from '@/types/notaFiscal';
 import { AMBIENTE_FISCAL_HOMOLOGACAO } from '@/types/notaFiscal';
 import { CLIENTE_EMBED_SELECT, mapClienteEnderecoFiscal, mapClienteJoinEmbed } from '@/utils/clientesDbMapping';
@@ -47,7 +48,6 @@ export async function criarNotaFiscalRascunhoMensalidade(
       .from('clientes')
       .select(CLIENTE_EMBED_SELECT)
       .eq('id', mensalidade.cliente_id)
-      .eq('user_id', userId)
       .single(),
   ]);
 
@@ -159,6 +159,15 @@ export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emiti
       .update({ status: 'rejeitada', motivo_rejeicao: msg, status_sefaz: body.status ?? null })
       .eq('id', notaFiscalId);
     return { success: false, message: msg, status: body.status };
+  }
+
+  const { data: notaRow } = await supabase
+    .from('nota_fiscal')
+    .select('mensalidade_id')
+    .eq('id', notaFiscalId)
+    .maybeSingle();
+  if (notaRow?.mensalidade_id) {
+    await vincularNotaFiscalAoBoletoMensalidade(notaRow.mensalidade_id, notaFiscalId).catch(() => undefined);
   }
 
   return body;

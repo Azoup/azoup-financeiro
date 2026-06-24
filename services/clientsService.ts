@@ -121,7 +121,6 @@ export async function fetchClientsPage(params: {
   let q = supabase
     .from('clientes')
     .select(LIST_SELECT, { count: 'exact' })
-    .eq('user_id', params.userId)
     .order(SORT_FIELD_DB[params.sortField], { ascending: params.sortOrder === 'asc' })
     .range(from, to);
 
@@ -185,7 +184,6 @@ export async function fetchClienteDetail(
     .from('clientes')
     .select(DETAIL_SELECT)
     .eq('id', id)
-    .eq('user_id', userId)
     .maybeSingle();
 
   if (error) throw new Error(error.message);
@@ -259,8 +257,7 @@ export async function createCliente(
     const { error: e3 } = await supabase
       .from('clientes')
       .update({ pdf_path: path })
-      .eq('id', clienteId)
-      .eq('user_id', userId);
+      .eq('id', clienteId);
     if (e3) throw new Error(e3.message);
   }
 
@@ -276,7 +273,6 @@ export async function updateCliente(
     .from('clientes')
     .select('pdf_path, data_reajuste, ultimo_reajuste, documento, mensalidade, cancelado, ativo, data_cancelamento')
     .eq('id', clienteId)
-    .eq('user_id', userId)
     .maybeSingle();
 
   if (e0) throw new Error(e0.message);
@@ -351,8 +347,7 @@ export async function updateCliente(
   const { error } = await supabase
     .from('clientes')
     .update(row)
-    .eq('id', clienteId)
-    .eq('user_id', userId);
+    .eq('id', clienteId);
 
   if (error) throw new Error(mapClienteDbError(error.message, error.code));
 
@@ -408,8 +403,7 @@ export async function setClienteCancelado(
       ativo: cancelado ? 'N' : 'S',
       data_cancelamento: cancelado ? toISODate(new Date()) : null,
     })
-    .eq('id', clienteId)
-    .eq('user_id', userId);
+    .eq('id', clienteId);
   if (error) throw new Error(error.message);
 }
 
@@ -418,7 +412,6 @@ export async function deleteCliente(userId: string, clienteId: string): Promise<
     .from('clientes')
     .select('pdf_path')
     .eq('id', clienteId)
-    .eq('user_id', userId)
     .maybeSingle();
 
   if (e0) throw new Error(e0.message);
@@ -427,8 +420,7 @@ export async function deleteCliente(userId: string, clienteId: string): Promise<
   const { error } = await supabase
     .from('clientes')
     .delete()
-    .eq('id', clienteId)
-    .eq('user_id', userId);
+    .eq('id', clienteId);
 
   if (error) throw new Error(error.message);
 
@@ -443,8 +435,7 @@ export async function fetchDashboardStats(userId: string): Promise<{
 }> {
   const { data, error } = await supabase
     .from('clientes')
-    .select('mensalidade, cancelado, ativo, data_cancelamento')
-    .eq('user_id', userId);
+    .select('mensalidade, cancelado, ativo, data_cancelamento');
 
   if (error) throw new Error(error.message);
   const rows = (data ?? []) as Pick<ClienteDbRow, 'mensalidade' | 'cancelado' | 'ativo' | 'data_cancelamento'>[];
@@ -475,7 +466,6 @@ export async function fetchClientesParaGerarMensalidades(
   let q = supabase
     .from('clientes')
     .select(GERAR_MENSALIDADES_CLIENTES_SELECT)
-    .eq('user_id', userId)
     .order('nome_fantasia', { ascending: true })
     .limit(800);
 
@@ -522,7 +512,6 @@ export async function applyReajusteMensalidadePercentual(
       .from('clientes')
       .select('mensalidade')
       .eq('id', clienteId)
-      .eq('user_id', userId)
       .maybeSingle();
     if (e0) throw new Error(e0.message);
     const old = Number((cur as { mensalidade: number | null } | null)?.mensalidade);
@@ -534,8 +523,7 @@ export async function applyReajusteMensalidadePercentual(
         valor_mensalidade_anterior: old,
         mensalidade: novo,
       })
-      .eq('id', clienteId)
-      .eq('user_id', userId);
+      .eq('id', clienteId);
     if (e1) throw new Error(e1.message);
   }
 }

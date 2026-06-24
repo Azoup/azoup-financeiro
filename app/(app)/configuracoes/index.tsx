@@ -77,6 +77,21 @@ export default function ConfiguracoesIndexScreen() {
       </Card>
 
       <Card style={styles.card}>
+        <Pressable style={styles.row} onPress={() => router.push('/(app)/configuracoes/sicoob')}>
+          <View style={styles.rowIcon}>
+            <Ionicons name="barcode-outline" size={22} color={colors.orange} />
+          </View>
+          <View style={styles.rowBody}>
+            <Text style={styles.rowTitle}>Boleto Sicoob (API V3)</Text>
+            <Text style={styles.rowSub}>
+              Emissão automática ao gerar parcelas de venda ou mensalidades — com ou sem NFS-e.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.gray400} />
+        </Pressable>
+      </Card>
+
+      <Card style={styles.card}>
         <Pressable
           style={styles.row}
           onPress={() => router.push('/(app)/configuracoes/segmentos')}

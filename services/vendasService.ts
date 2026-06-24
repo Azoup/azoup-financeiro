@@ -35,7 +35,6 @@ export async function searchClientesVenda(
   let query = supabase
     .from('clientes')
     .select('id, nome_fantasia, nome')
-    .eq('user_id', userId)
     .order('nome_fantasia', { ascending: true })
     .limit(limit);
   const t = q.trim();
@@ -244,7 +243,6 @@ export async function fetchVendasPage(params: {
     const { data: cliRows, error: ec } = await supabase
       .from('clientes')
       .select('id, nome_fantasia, nome')
-      .eq('user_id', params.userId)
       .in('id', clienteIds);
     if (ec) throw new Error(ec.message);
     for (const c of (cliRows ?? []) as {
@@ -337,7 +335,6 @@ export async function fetchVendaDetail(userId: string, vendaId: string): Promise
     .from('clientes')
     .select('id, nome_fantasia, nome')
     .eq('id', vr.cliente_id)
-    .eq('user_id', userId)
     .maybeSingle();
   if (ec) throw new Error(ec.message);
   if (!cli) throw new Error('Cliente não encontrado na venda.');
@@ -501,6 +498,15 @@ export async function registrarPagamentoVenda(
       .eq('id', p.id)
       .eq('venda_id', vendaId);
     if (eu) throw new Error(eu.message);
+
+    if (st === 'pago') {
+      await supabase
+        .from('boletos_parcela_venda')
+        .update({ status_registro: 'pago', data_liquidacao_sicoob: input.data_pagamento })
+        .eq('parcela_id', p.id)
+        .eq('user_id', userId)
+        .in('status_registro', ['registrado', 'pendente', 'informativo']);
+    }
   }
 
   await atualizarStatusVenda(vendaId, userId);
