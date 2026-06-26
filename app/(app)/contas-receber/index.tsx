@@ -505,6 +505,8 @@ export default function ContasReceberScreen() {
       setNfBusyId(null);
     }
   };
+
+  const emitirNfPosPagamento = async () => {
     if (!user?.id || !nfPosPagamentoMensalidade) return;
     setNfEmitindoPosPagamento(true);
     try {
