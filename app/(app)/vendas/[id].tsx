@@ -3,6 +3,7 @@ import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { buildVendaDetailExport } from '@/utils/exportReportBuilders';
 import { BaixaPagamentoModal } from '@/components/vendas/BaixaPagamentoModal';
+import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmitirNfseModal';
 import { useAuth } from '@/context/AuthContext';
 import {
   countBoletosVenda,
@@ -67,6 +68,7 @@ export default function VendaDetailScreen() {
   const [baixaOpen, setBaixaOpen] = useState(false);
   const [notaFiscal, setNotaFiscal] = useState<NotaFiscalListRow | null>(null);
   const [emittingNf, setEmittingNf] = useState(false);
+  const [nfConfirmOpen, setNfConfirmOpen] = useState(false);
   const [qtdCarne, setQtdCarne] = useState(0);
   const [gerandoCarne, setGerandoCarne] = useState(false);
 
@@ -152,46 +154,41 @@ export default function VendaDetailScreen() {
 
   const onEmitirNf = () => {
     if (!user?.id || !detail || !id) return;
+    setNfConfirmOpen(true);
+  };
+
+  const executarEmitirNf = async () => {
+    if (!user?.id || !detail || !id) return;
     const descricao = vendaDescricaoLinhas(detail).join(' · ');
-    Alert.alert(
-      'Emitir NFS-e',
-      `Gerar nota fiscal de ${formatBRL(detail.valor_total)} para esta venda?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Emitir',
-          onPress: async () => {
-            setEmittingNf(true);
-            try {
-              const res = await gerarNotaFiscalParaVenda(user.id, {
-                id,
-                cliente_id: detail.cliente_id,
-                valor_total: Number(detail.valor_total),
-                descricao,
-              });
-              if (res.success) {
-                Toast.show({
-                  type: 'success',
-                  text1: 'NFS-e autorizada.',
-                  text2: 'Veja em Notas fiscais.',
-                });
-                await load();
-              } else {
-                Toast.show({
-                  type: 'error',
-                  text1: res.message ?? 'NFS-e rejeitada.',
-                });
-                await load();
-              }
-            } catch (e) {
-              Toast.show({ type: 'error', text1: (e as Error).message });
-            } finally {
-              setEmittingNf(false);
-            }
-          },
-        },
-      ],
-    );
+    setEmittingNf(true);
+    try {
+      const res = await gerarNotaFiscalParaVenda(user.id, {
+        id,
+        cliente_id: detail.cliente_id,
+        valor_total: Number(detail.valor_total),
+        descricao,
+      });
+      if (res.success) {
+        setNfConfirmOpen(false);
+        Toast.show({
+          type: 'success',
+          text1: 'NFS-e autorizada.',
+          text2: 'Veja em Notas fiscais.',
+        });
+        await load();
+        router.push('/(app)/notas-fiscais');
+      } else {
+        Toast.show({
+          type: 'error',
+          text1: res.message ?? 'NFS-e rejeitada.',
+        });
+        await load();
+      }
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setEmittingNf(false);
+    }
   };
 
   if (loading && !detail) {
@@ -386,6 +383,18 @@ export default function VendaDetailScreen() {
         onClose={() => setBaixaOpen(false)}
         parcelas={detail.parcelas}
         onSubmit={onBaixa}
+      />
+
+      <ConfirmarEmitirNfseModal
+        visible={nfConfirmOpen}
+        titulo="Emitir NFS-e"
+        descricao={`Gerar nota fiscal de ${formatBRL(detail.valor_total)} para esta venda?`}
+        botaoPrimario="Emitir NFS-e"
+        botaoSecundario="Cancelar"
+        loading={emittingNf}
+        onClose={() => !emittingNf && setNfConfirmOpen(false)}
+        onEmitir={() => void executarEmitirNf()}
+        onDepois={() => !emittingNf && setNfConfirmOpen(false)}
       />
     </View>
   );

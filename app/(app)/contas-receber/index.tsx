@@ -138,6 +138,7 @@ export default function ContasReceberScreen() {
   const [nfBusyId, setNfBusyId] = useState<string | null>(null);
   const [nfPosPagamentoMensalidade, setNfPosPagamentoMensalidade] = useState<MensalidadeGerada | null>(null);
   const [nfEmitindoPosPagamento, setNfEmitindoPosPagamento] = useState(false);
+  const [nfConfirmItem, setNfConfirmItem] = useState<ContaReceberListRow | null>(null);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -436,6 +437,23 @@ export default function ContasReceberScreen() {
     await refreshLista();
   };
 
+  const solicitarEmitirNf = (item: ContaReceberListRow) => {
+    if (item.nota_fiscal_id) {
+      router.push('/(app)/notas-fiscais');
+      return;
+    }
+    fecharAcoes();
+    setNfConfirmItem(item);
+  };
+
+  const descricaoConfirmNf = (item: ContaReceberListRow): string => {
+    const valor = formatBRL(item.valor_documento);
+    if (item.origem === 'mensalidade') {
+      return `Gerar NFS-e de ${valor} para ${item.referencia_label}?`;
+    }
+    return `Gerar NFS-e de ${valor} para esta venda (${item.referencia_label})?`;
+  };
+
   const emitirNotaFiscal = async (itemOverride?: ContaReceberListRow) => {
     const item = itemOverride ?? acoesItem;
     if (!user?.id || !item) return;
@@ -458,6 +476,7 @@ export default function ContasReceberScreen() {
         });
         if (res.success) {
           Toast.show({ type: 'success', text1: res.message ?? 'NFS-e emitida com sucesso.' });
+          router.push('/(app)/notas-fiscais');
         } else if (res.ignorada) {
           Toast.show({ type: 'info', text1: res.message ?? 'Cliente marcado como Sem NF no cadastro.' });
         } else {
@@ -469,6 +488,7 @@ export default function ContasReceberScreen() {
         const res = await gerarNotaFiscalParaVenda(user.id, venda);
         if (res.success) {
           Toast.show({ type: 'success', text1: 'NFS-e emitida com sucesso.' });
+          router.push('/(app)/notas-fiscais');
         } else {
           Toast.show({ type: 'error', text1: res.message ?? 'NFS-e rejeitada.' });
         }
@@ -476,6 +496,7 @@ export default function ContasReceberScreen() {
         throw new Error('Origem do documento não identificada.');
       }
       fecharAcoes();
+      setNfConfirmItem(null);
       await refreshLista();
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
@@ -604,7 +625,7 @@ export default function ContasReceberScreen() {
           {podeEmitirNf ? (
             <Pressable
               style={[styles.acaoBtn, styles.acaoNf]}
-              onPress={() => void emitirNotaFiscal(item)}
+              onPress={() => solicitarEmitirNf(item)}
               disabled={nfBusy}
               accessibilityLabel="Gerar e emitir NFS-e"
             >
@@ -766,7 +787,7 @@ export default function ContasReceberScreen() {
         item={acoesItem}
         onClose={fecharAcoes}
         onPagar={() => void iniciarPagamento()}
-        onEmitirNf={() => void emitirNotaFiscal()}
+        onEmitirNf={() => acoesItem && solicitarEmitirNf(acoesItem)}
         onVerNota={() => {
           fecharAcoes();
           router.push('/(app)/notas-fiscais');
@@ -796,6 +817,18 @@ export default function ContasReceberScreen() {
         saldoMax={payVendaCtx?.saldoMax ?? 0}
         onClose={() => setPayVendaCtx(null)}
         onConfirm={confirmarPagamentoVenda}
+      />
+
+      <ConfirmarEmitirNfseModal
+        visible={nfConfirmItem != null}
+        titulo="Emitir NFS-e"
+        descricao={nfConfirmItem ? descricaoConfirmNf(nfConfirmItem) : ''}
+        botaoPrimario="Emitir NFS-e"
+        botaoSecundario="Cancelar"
+        loading={nfBusy}
+        onClose={() => !nfBusy && setNfConfirmItem(null)}
+        onEmitir={() => nfConfirmItem && void emitirNotaFiscal(nfConfirmItem)}
+        onDepois={() => !nfBusy && setNfConfirmItem(null)}
       />
 
       <ConfirmarEmitirNfseModal

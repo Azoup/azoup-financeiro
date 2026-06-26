@@ -7,6 +7,8 @@ type Props = {
   visible: boolean;
   titulo?: string;
   descricao?: string;
+  botaoPrimario?: string;
+  botaoSecundario?: string;
   loading?: boolean;
   onClose: () => void;
   onEmitir: () => void;
@@ -17,6 +19,8 @@ export function ConfirmarEmitirNfseModal({
   visible,
   titulo = 'Emitir NFS-e agora?',
   descricao = 'O pagamento foi registrado. Deseja gerar e emitir a NFS-e de serviço para este cliente?',
+  botaoPrimario = 'Gerar e emitir NFS-e',
+  botaoSecundario = 'Depois',
   loading,
   onClose,
   onEmitir,
@@ -32,12 +36,12 @@ export function ConfirmarEmitirNfseModal({
           <Text style={styles.title}>{titulo}</Text>
           <Text style={styles.hint}>{descricao}</Text>
           <PrimaryButton
-            title={loading ? 'Emitindo NFS-e…' : 'Gerar e emitir NFS-e'}
+            title={loading ? 'Emitindo NFS-e…' : botaoPrimario}
             onPress={onEmitir}
             loading={loading}
             disabled={loading}
           />
-          <PrimaryButton title="Depois" variant="ghost" onPress={onDepois} disabled={loading} />
+          <PrimaryButton title={botaoSecundario} variant="ghost" onPress={onDepois} disabled={loading} />
         </Pressable>
       </Pressable>
     </Modal>

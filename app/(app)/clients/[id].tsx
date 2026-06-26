@@ -3,6 +3,7 @@ import { ClientForm, clienteToFormValues } from '@/components/ClientForm';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { buildClientDetailExport, buildClientFormExport } from '@/utils/exportReportBuilders';
 import { MarcarPagamentoMensalidadeGeradaModal } from '@/components/mensalidades/MarcarPagamentoMensalidadeGeradaModal';
+import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmitirNfseModal';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -18,6 +19,10 @@ import {
   podeRegistrarPagamentoMensalidadeGerada,
   registrarPagamentoMensalidadeGerada,
 } from '@/services/mensalidadeGeradaService';
+import {
+  fetchNotaFiscalPorMensalidade,
+  gerarNotaFiscalParaMensalidade,
+} from '@/services/notaFiscalService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { MensalidadeGerada } from '@/types/mensalidadeGerada';
 import type { ClienteFormValues, ContatoClienteInput } from '@/types/models';
@@ -57,6 +62,10 @@ export default function ClientDetailScreen() {
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchClienteDetail>>>(null);
   const [mensalidadesGeradas, setMensalidadesGeradas] = useState<MensalidadeGerada[]>([]);
   const [registroPagamento, setRegistroPagamento] = useState<MensalidadeGerada | null>(null);
+  const [nfConfirmMensalidade, setNfConfirmMensalidade] = useState<MensalidadeGerada | null>(null);
+  const [nfPosPagamento, setNfPosPagamento] = useState<MensalidadeGerada | null>(null);
+  const [nfBusyId, setNfBusyId] = useState<string | null>(null);
+  const [nfEmitindoPosPagamento, setNfEmitindoPosPagamento] = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.id || !id) return;
@@ -148,9 +157,56 @@ export default function ClientDetailScreen() {
     observacao: string;
   }) => {
     if (!user?.id || !registroPagamento) return;
-    await registrarPagamentoMensalidadeGerada(user.id, registroPagamento.id, payload);
+    const mensalidade = registroPagamento;
+    await registrarPagamentoMensalidadeGerada(user.id, mensalidade.id, payload);
     setRegistroPagamento(null);
     await reloadMensalidadesGeradas();
+    const existente = await fetchNotaFiscalPorMensalidade(user.id, mensalidade.id).catch(() => null);
+    if (!existente && mensalidade.status !== 'cancelado') {
+      setNfPosPagamento(mensalidade);
+    }
+  };
+
+  const emitirNfMensalidade = async (m: MensalidadeGerada) => {
+    if (!user?.id) return;
+    setNfBusyId(m.id);
+    try {
+      const res = await gerarNotaFiscalParaMensalidade(user.id, {
+        id: m.id,
+        cliente_id: m.cliente_id,
+        valor: m.valor,
+        competencia: m.competencia,
+      });
+      if (res.success) {
+        Toast.show({ type: 'success', text1: res.message ?? 'NFS-e emitida com sucesso.' });
+        router.push('/(app)/notas-fiscais');
+      } else if (res.ignorada) {
+        Toast.show({ type: 'info', text1: res.message ?? 'Cliente sem NF no cadastro.' });
+      } else {
+        Toast.show({ type: 'error', text1: res.message ?? 'Não foi possível emitir a NFS-e.' });
+      }
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setNfBusyId(null);
+    }
+  };
+
+  const executarNfConfirmada = async () => {
+    if (!nfConfirmMensalidade) return;
+    await emitirNfMensalidade(nfConfirmMensalidade);
+    setNfConfirmMensalidade(null);
+  };
+
+  const emitirNfPosPagamento = async () => {
+    if (!nfPosPagamento) return;
+    setNfEmitindoPosPagamento(true);
+    try {
+      await emitirNfMensalidade(nfPosPagamento);
+    } finally {
+      setNfEmitindoPosPagamento(false);
+      setNfPosPagamento(null);
+    }
   };
 
   const onToggleCancelado = async (cancelado: boolean) => {
@@ -400,7 +456,7 @@ export default function ClientDetailScreen() {
       <Card style={styles.block}>
         <Text style={styles.h}>Mensalidades geradas</Text>
         <Text style={styles.mensalidadeLead}>
-          Controle recebimentos no histórico global ou marque pagamentos por aqui.
+          Marque pagamentos, emita NFS-e ou abra o histórico completo. Carnês ficam em A receber.
         </Text>
         <View style={styles.mensalidadeActions}>
           <PrimaryButton
@@ -422,6 +478,8 @@ export default function ClientDetailScreen() {
             const vis = mensalidadeGeradaStatusVisual(m);
             const pend = Math.max(0, reaisParaCentavos(m.valor) - reaisParaCentavos(m.valor_pago)) / 100;
             const showPay = podeRegistrarPagamentoMensalidadeGerada(m);
+            const showNf = m.status !== 'cancelado';
+            const nfBusy = nfBusyId === m.id;
             return (
               <View key={m.id} style={styles.mensalidadeRow}>
                 <View style={{ flex: 1 }}>
@@ -433,11 +491,26 @@ export default function ClientDetailScreen() {
                   </Text>
                   <Text style={styles.mensalidadeSt}>{vis}</Text>
                 </View>
-                {showPay ? (
-                  <Pressable style={styles.btnMiniPago} onPress={() => setRegistroPagamento(m)}>
-                    <Text style={styles.btnMiniPagoTxt}>Pagar</Text>
-                  </Pressable>
-                ) : null}
+                <View style={styles.mensalidadeBtns}>
+                  {showPay ? (
+                    <Pressable style={styles.btnMiniPago} onPress={() => setRegistroPagamento(m)}>
+                      <Text style={styles.btnMiniPagoTxt}>Pagar</Text>
+                    </Pressable>
+                  ) : null}
+                  {showNf ? (
+                    <Pressable
+                      style={styles.btnMiniNf}
+                      onPress={() => setNfConfirmMensalidade(m)}
+                      disabled={nfBusy}
+                    >
+                      {nfBusy ? (
+                        <ActivityIndicator size="small" color={colors.white} />
+                      ) : (
+                        <Text style={styles.btnMiniNfTxt}>NFS-e</Text>
+                      )}
+                    </Pressable>
+                  ) : null}
+                </View>
               </View>
             );
           })
@@ -474,6 +547,30 @@ export default function ClientDetailScreen() {
         registro={registroPagamento}
         onClose={() => setRegistroPagamento(null)}
         onConfirm={onPagamentoMensalidadeGerada}
+      />
+      <ConfirmarEmitirNfseModal
+        visible={nfPosPagamento != null}
+        loading={nfEmitindoPosPagamento}
+        onClose={() => setNfPosPagamento(null)}
+        onEmitir={() => void emitirNfPosPagamento()}
+        onDepois={() => setNfPosPagamento(null)}
+      />
+      <ConfirmarEmitirNfseModal
+        visible={nfConfirmMensalidade != null}
+        titulo="Emitir NFS-e"
+        descricao={
+          nfConfirmMensalidade
+            ? `Gerar nota fiscal de ${formatBRL(nfConfirmMensalidade.valor)}${
+                nfConfirmMensalidade.competencia ? ` — competência ${nfConfirmMensalidade.competencia}` : ''
+              }?`
+            : ''
+        }
+        botaoPrimario="Emitir NFS-e"
+        botaoSecundario="Cancelar"
+        loading={nfBusyId === nfConfirmMensalidade?.id}
+        onClose={() => !nfBusyId && setNfConfirmMensalidade(null)}
+        onEmitir={() => void executarNfConfirmada()}
+        onDepois={() => !nfBusyId && setNfConfirmMensalidade(null)}
       />
     ) : null}
     <Modal
@@ -739,6 +836,10 @@ const styles = StyleSheet.create({
     borderTopColor: colors.gray100,
     gap: spacing.sm,
   },
+  mensalidadeBtns: {
+    alignItems: 'flex-end',
+    gap: spacing.xs,
+  },
   mensalidadeComp: { fontSize: 13, fontWeight: '600', color: colors.petroleum },
   mensalidadeVals: { fontSize: 12, color: colors.gray600, marginTop: 4 },
   mensalidadeSt: { fontSize: 11, fontWeight: '700', color: colors.orange, marginTop: 4, textTransform: 'capitalize' },
@@ -749,4 +850,13 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
   },
   btnMiniPagoTxt: { color: colors.white, fontWeight: '800', fontSize: 13 },
+  btnMiniNf: {
+    backgroundColor: colors.petroleum,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    minWidth: 72,
+    alignItems: 'center',
+  },
+  btnMiniNfTxt: { color: colors.white, fontWeight: '800', fontSize: 13 },
 });

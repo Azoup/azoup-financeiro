@@ -434,6 +434,17 @@ export async function regenerarCarneVenda(userId: string, vendaId: string): Prom
 }
 
 export async function fetchContasReceberLista(userId: string): Promise<ContaReceberListRow[]> {
+  try {
+    await sincronizarCarnesMensalidadesFaltantes(userId);
+  } catch {
+    /* migration 034 pendente ou Sicoob indisponível */
+  }
+  try {
+    await sincronizarCarnesVendasFaltantes(userId);
+  } catch {
+    /* */
+  }
+
   const { data: boletos, error } = await supabase
     .from('boletos_parcela_venda')
     .select('*')

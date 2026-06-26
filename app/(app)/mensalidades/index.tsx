@@ -112,6 +112,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
   const [nfPosPagamento, setNfPosPagamento] = useState<MensalidadeGerada | null>(null);
   const [nfBusyId, setNfBusyId] = useState<string | null>(null);
   const [nfEmitindoPosPagamento, setNfEmitindoPosPagamento] = useState(false);
+  const [nfConfirmMensalidade, setNfConfirmMensalidade] = useState<MensalidadeGerada | null>(null);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -233,6 +234,12 @@ export default function HistoricoMensalidadesGeradasScreen() {
     }
   };
 
+  const executarNfConfirmada = async () => {
+    if (!nfConfirmMensalidade) return;
+    await emitirNfMensalidade(nfConfirmMensalidade);
+    setNfConfirmMensalidade(null);
+  };
+
   const irGerarMensalidade = () => {
     if (clienteFiltro) {
       router.push(`/(app)/mensalidades/gerar?cliente=${encodeURIComponent(String(clienteFiltro))}`);
@@ -300,22 +307,6 @@ export default function HistoricoMensalidadesGeradasScreen() {
               <Text style={styles.btnSmPagoTxt}>Pagar</Text>
             </Pressable>
           ) : null}
-          {showNf ? (
-            <Pressable
-              style={styles.btnSmNf}
-              onPress={() => void emitirNfMensalidade(m)}
-              disabled={nfBusy}
-            >
-              {nfBusy ? (
-                <ActivityIndicator size="small" color={colors.white} />
-              ) : (
-                <>
-                  <Ionicons name="receipt-outline" size={14} color={colors.white} />
-                  <Text style={styles.btnSmNfTxt}>NFS-e</Text>
-                </>
-              )}
-            </Pressable>
-          ) : null}
           <Pressable style={styles.btnSmGhost} onPress={() => toggleExpand(m.id)}>
             {loadingPay === m.id ? (
               <ActivityIndicator size="small" color={colors.orange} />
@@ -325,6 +316,18 @@ export default function HistoricoMensalidadesGeradasScreen() {
             <Text style={styles.btnSmGhostTxt}>{exp ? 'Ocultar' : 'Pagtos'}</Text>
           </Pressable>
         </View>
+
+        {showNf ? (
+          <PrimaryButton
+            title={nfBusy ? 'Emitindo NFS-e…' : 'Emitir NFS-e'}
+            variant="secondary"
+            size="compact"
+            onPress={() => setNfConfirmMensalidade(m)}
+            loading={nfBusy}
+            disabled={nfBusy}
+            style={styles.btnEmitirNf}
+          />
+        ) : null}
 
         {exp ? (
           <View style={styles.hist}>
@@ -363,6 +366,10 @@ export default function HistoricoMensalidadesGeradasScreen() {
           getReport={() => buildMensalidadesExport(filteredRows, clienteFiltro)}
         />
         <PrimaryButton title="Gerar mensalidade" onPress={irGerarMensalidade} style={styles.btnGerar} />
+        <Text style={styles.nfHint}>
+          Use &quot;Emitir NFS-e&quot; em cada mensalidade ou em A receber (tipo Mensalidade). Cliente precisa estar
+          com NF no cadastro.
+        </Text>
 
         <View style={styles.searchWrap}>
           <Ionicons name="search" size={18} color={colors.gray400} />
@@ -448,6 +455,24 @@ export default function HistoricoMensalidadesGeradasScreen() {
         onEmitir={() => void emitirNfPosPagamento()}
         onDepois={() => setNfPosPagamento(null)}
       />
+
+      <ConfirmarEmitirNfseModal
+        visible={nfConfirmMensalidade != null}
+        titulo="Emitir NFS-e"
+        descricao={
+          nfConfirmMensalidade
+            ? `Gerar nota fiscal de ${formatBRL(nfConfirmMensalidade.valor)}${
+                nfConfirmMensalidade.competencia ? ` — competência ${nfConfirmMensalidade.competencia}` : ''
+              }?`
+            : ''
+        }
+        botaoPrimario="Emitir NFS-e"
+        botaoSecundario="Cancelar"
+        loading={nfBusyId === nfConfirmMensalidade?.id}
+        onClose={() => !nfBusyId && setNfConfirmMensalidade(null)}
+        onEmitir={() => void executarNfConfirmada()}
+        onDepois={() => !nfBusyId && setNfConfirmMensalidade(null)}
+      />
     </View>
   );
 }
@@ -475,6 +500,12 @@ const styles = StyleSheet.create({
   },
   btnGerar: {
     marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  nfHint: {
+    fontSize: 12,
+    color: colors.gray600,
+    lineHeight: 17,
     marginBottom: spacing.sm,
   },
   searchWrap: {
@@ -613,23 +644,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 12,
   },
-  btnSmNf: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    backgroundColor: colors.petroleum,
-    paddingVertical: 6,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.sm,
-    minHeight: 32,
-  },
-  btnSmNfTxt: {
-    color: colors.white,
-    fontWeight: '700',
-    fontSize: 12,
-  },
+  btnEmitirNf: { marginTop: spacing.sm },
   btnSmGhost: {
     flex: 1,
     flexDirection: 'row',
