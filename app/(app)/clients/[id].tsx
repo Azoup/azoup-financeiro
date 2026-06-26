@@ -542,36 +542,38 @@ export default function ClientDetailScreen() {
       ) : null}
     </ScrollView>
     {user?.id ? (
-      <MarcarPagamentoMensalidadeGeradaModal
-        visible={registroPagamento != null}
-        registro={registroPagamento}
-        onClose={() => setRegistroPagamento(null)}
-        onConfirm={onPagamentoMensalidadeGerada}
-      />
-      <ConfirmarEmitirNfseModal
-        visible={nfPosPagamento != null}
-        loading={nfEmitindoPosPagamento}
-        onClose={() => setNfPosPagamento(null)}
-        onEmitir={() => void emitirNfPosPagamento()}
-        onDepois={() => setNfPosPagamento(null)}
-      />
-      <ConfirmarEmitirNfseModal
-        visible={nfConfirmMensalidade != null}
-        titulo="Emitir NFS-e"
-        descricao={
-          nfConfirmMensalidade
-            ? `Gerar nota fiscal de ${formatBRL(nfConfirmMensalidade.valor)}${
-                nfConfirmMensalidade.competencia ? ` — competência ${nfConfirmMensalidade.competencia}` : ''
-              }?`
-            : ''
-        }
-        botaoPrimario="Emitir NFS-e"
-        botaoSecundario="Cancelar"
-        loading={nfBusyId === nfConfirmMensalidade?.id}
-        onClose={() => !nfBusyId && setNfConfirmMensalidade(null)}
-        onEmitir={() => void executarNfConfirmada()}
-        onDepois={() => !nfBusyId && setNfConfirmMensalidade(null)}
-      />
+      <>
+        <MarcarPagamentoMensalidadeGeradaModal
+          visible={registroPagamento != null}
+          registro={registroPagamento}
+          onClose={() => setRegistroPagamento(null)}
+          onConfirm={onPagamentoMensalidadeGerada}
+        />
+        <ConfirmarEmitirNfseModal
+          visible={nfPosPagamento != null}
+          loading={nfEmitindoPosPagamento}
+          onClose={() => setNfPosPagamento(null)}
+          onEmitir={() => void emitirNfPosPagamento()}
+          onDepois={() => setNfPosPagamento(null)}
+        />
+        <ConfirmarEmitirNfseModal
+          visible={nfConfirmMensalidade != null}
+          titulo="Emitir NFS-e"
+          descricao={
+            nfConfirmMensalidade
+              ? `Gerar nota fiscal de ${formatBRL(nfConfirmMensalidade.valor)}${
+                  nfConfirmMensalidade.competencia ? ` — competência ${nfConfirmMensalidade.competencia}` : ''
+                }?`
+              : ''
+          }
+          botaoPrimario="Emitir NFS-e"
+          botaoSecundario="Cancelar"
+          loading={nfBusyId === nfConfirmMensalidade?.id}
+          onClose={() => !nfBusyId && setNfConfirmMensalidade(null)}
+          onEmitir={() => void executarNfConfirmada()}
+          onDepois={() => !nfBusyId && setNfConfirmMensalidade(null)}
+        />
+      </>
     ) : null}
     <Modal
       visible={modalJustificativaVisible}
