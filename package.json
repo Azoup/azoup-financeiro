@@ -16,7 +16,7 @@
     "setup": "node scripts/postinstall-deps.js"
   },
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
