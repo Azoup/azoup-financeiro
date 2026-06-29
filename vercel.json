@@ -7,7 +7,8 @@
   "framework": null,
   "cleanUrls": true,
   "env": {
-    "LD_LIBRARY_PATH": ""
+    "LD_LIBRARY_PATH": "",
+    "NODE_USE_SYSTEM_CA": "1"
   },
   "functions": {
     "api/nfe/**/*.js": {

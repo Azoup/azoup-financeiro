@@ -1,4 +1,6 @@
 /** Ajustes de ambiente para Vercel / AWS Lambda (OpenSSL do SO vs libssl do Node). */
+const { configureTlsForSefaz } = require('./tlsCa');
+
 function prepareServerlessCryptoEnv() {
   if (
     process.env.VERCEL === '1' ||
@@ -7,12 +9,14 @@ function prepareServerlessCryptoEnv() {
   ) {
     process.env.LD_LIBRARY_PATH = '';
   }
+  configureTlsForSefaz();
 }
 
 /** Opções recomendadas da lib nfewizard em serverless (evita `openssl` CLI). */
 const NFEWIZARD_LIB_SERVERLESS = {
   useOpenSSL: false,
   useForSchemaValidation: 'validateSchemaJsBased',
+  connection: { timeout: 60000 },
   log: { exibirLogNoConsole: false, armazenarLogs: false },
 };
 

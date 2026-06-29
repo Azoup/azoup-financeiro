@@ -1,5 +1,8 @@
 const { getAdmin, getUserFromBearer } = require('./_lib/supabaseAdmin');
 const { emitirNfseSefaz } = require('./_lib/nfseEmit');
+const { prepareServerlessCryptoEnv } = require('./_lib/serverlessEnv');
+
+prepareServerlessCryptoEnv();
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {

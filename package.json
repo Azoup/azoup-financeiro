@@ -46,7 +46,8 @@
     "react-native-worklets": "0.5.1",
     "xlsx": "^0.18.5",
     "@nfewizard/nfse": "^1.0.0",
-    "@nfewizard/danfe": "^1.0.0"
+    "@nfewizard/danfe": "^1.0.0",
+    "@nfewizard/shared": "^1.0.2"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",

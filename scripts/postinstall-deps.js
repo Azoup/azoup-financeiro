@@ -86,3 +86,8 @@ try {
 } catch {
   console.warn('[postinstall-deps] npm rebuild libxmljs2 falhou; validação JS pode ainda funcionar.');
 }
+try {
+  require('./bundle-icp-certs');
+} catch (e) {
+  console.warn('[postinstall-deps] bundle ICP-Brasil:', e.message);
+}
