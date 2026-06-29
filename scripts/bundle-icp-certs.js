@@ -6,6 +6,7 @@ const path = require('path');
 
 const root = path.join(__dirname, '..');
 const outFile = path.join(root, 'api', 'nfe', '_lib', 'icp-brasil-ca-bundle.pem');
+const deployCertsDir = path.join(root, 'api', 'nfe', '_lib', 'nfewizard-certs');
 
 function findCertDirs(dir, found = []) {
   if (!fs.existsSync(dir)) return found;
@@ -75,6 +76,19 @@ function main() {
     .join('\n\n');
   fs.writeFileSync(outFile, `${body}\n`);
   console.log(`[bundle-icp-certs] ${parts.length} certificado(s) → ${path.relative(root, outFile)}`);
+
+  const sourceDir = dirs[0];
+  if (sourceDir) {
+    fs.rmSync(deployCertsDir, { recursive: true, force: true });
+    fs.mkdirSync(deployCertsDir, { recursive: true });
+    let copied = 0;
+    for (const name of fs.readdirSync(sourceDir)) {
+      if (!/\.(crt|cer|pem)$/i.test(name)) continue;
+      fs.copyFileSync(path.join(sourceDir, name), path.join(deployCertsDir, name));
+      copied += 1;
+    }
+    console.log(`[bundle-icp-certs] ${copied} arquivo(s) → ${path.relative(root, deployCertsDir)}`);
+  }
 }
 
 main();

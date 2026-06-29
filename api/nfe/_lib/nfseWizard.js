@@ -53,12 +53,18 @@ async function createNfseWizard({ admin, cert, senhaEnc, perfil, ambiente = 2 })
 
   const amb = Number(ambiente) === 1 ? 1 : 2;
 
+  const caCertsDir = path.join(__dirname, 'nfewizard-certs');
+  if (fs.existsSync(caCertsDir)) {
+    process.env.NFEWIZARD_CA_CERTS_DIR = caCertsDir;
+  }
+
   const wizard = new NFSeWizard({
     dfe: {
       pathCertificado: certPath,
       senhaCertificado: senha,
       CPFCNPJ: doc,
       UF: uf,
+      ambiente: amb,
       armazenarXMLAutorizacao: false,
       armazenarXMLRetorno: false,
     },

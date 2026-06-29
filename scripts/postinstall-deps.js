@@ -91,3 +91,8 @@ try {
 } catch (e) {
   console.warn('[postinstall-deps] bundle ICP-Brasil:', e.message);
 }
+try {
+  require('./patch-nfewizard-shared');
+} catch (e) {
+  console.warn('[postinstall-deps] patch nfewizard:', e.message);
+}

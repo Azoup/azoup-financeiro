@@ -12,9 +12,16 @@ module.exports = async function handler(req, res) {
   }
 
   const bundlePath = path.join(__dirname, '_lib', 'icp-brasil-ca-bundle.pem');
+  const deployCertsDir = path.join(__dirname, '_lib', 'nfewizard-certs');
   let icpBundleBytes = 0;
+  let nfewizardCertsCount = 0;
   try {
     icpBundleBytes = fs.statSync(bundlePath).size;
+  } catch {
+    /* */
+  }
+  try {
+    nfewizardCertsCount = fs.readdirSync(deployCertsDir).filter((f) => /\.(crt|cer|pem)$/i.test(f)).length;
   } catch {
     /* */
   }
@@ -25,6 +32,7 @@ module.exports = async function handler(req, res) {
     certEncryptionKey: Boolean(process.env.CERT_ENCRYPTION_KEY?.trim()?.length >= 16),
     nodeUseSystemCa: process.env.NODE_USE_SYSTEM_CA === '1',
     icpBundleBytes,
+    nfewizardCertsCount,
     nfsePackage: false,
   };
 
@@ -53,7 +61,8 @@ module.exports = async function handler(req, res) {
     checks.serviceRoleKey &&
     (checks.certEncryptionKey || dbCertKey) &&
     checks.nfsePackage &&
-    checks.icpBundleBytes > 100;
+    checks.icpBundleBytes > 100 &&
+    checks.nfewizardCertsCount > 50;
 
   return res.status(ok ? 200 : 503).json({
     ok,
