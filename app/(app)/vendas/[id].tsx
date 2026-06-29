@@ -11,6 +11,7 @@ import {
 } from '@/services/boletoParcelaService';
 import {
   fetchNotaFiscalPorVenda,
+  fetchUltimaNotaFiscalVenda,
   gerarNotaFiscalParaVenda,
 } from '@/services/notaFiscalService';
 import {
@@ -67,6 +68,7 @@ export default function VendaDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [baixaOpen, setBaixaOpen] = useState(false);
   const [notaFiscal, setNotaFiscal] = useState<NotaFiscalListRow | null>(null);
+  const [notaFiscalUltima, setNotaFiscalUltima] = useState<NotaFiscalListRow | null>(null);
   const [emittingNf, setEmittingNf] = useState(false);
   const [nfConfirmOpen, setNfConfirmOpen] = useState(false);
   const [qtdCarne, setQtdCarne] = useState(0);
@@ -76,15 +78,17 @@ export default function VendaDetailScreen() {
     if (!user?.id || !id) return;
     setLoading(true);
     try {
-      const [d, lg, nf, carne] = await Promise.all([
+      const [d, lg, nf, nfUlt, carne] = await Promise.all([
         fetchVendaDetail(user.id, id),
         fetchVendasFinanceiroLog(id),
         fetchNotaFiscalPorVenda(user.id, id).catch(() => null),
+        fetchUltimaNotaFiscalVenda(user.id, id).catch(() => null),
         countBoletosVenda(user.id, id).catch(() => 0),
       ]);
       setDetail(d);
       setLogs(lg);
       setNotaFiscal(nf);
+      setNotaFiscalUltima(nfUlt);
       setQtdCarne(carne);
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
@@ -162,12 +166,15 @@ export default function VendaDetailScreen() {
     const descricao = vendaDescricaoLinhas(detail).join(' · ');
     setEmittingNf(true);
     try {
-      const res = await gerarNotaFiscalParaVenda(user.id, {
-        id,
-        cliente_id: detail.cliente_id,
-        valor_total: Number(detail.valor_total),
-        descricao,
-      });
+      const res = await gerarNotaFiscalParaVenda(
+        user.id,
+        {
+          id,
+          cliente_id: detail.cliente_id,
+          valor_total: Number(detail.valor_total),
+          descricao,
+        },
+      );
       if (res.success) {
         setNfConfirmOpen(false);
         Toast.show({
@@ -178,14 +185,19 @@ export default function VendaDetailScreen() {
         await load();
         router.push('/(app)/notas-fiscais');
       } else {
+        setNfConfirmOpen(false);
         Toast.show({
           type: 'error',
           text1: res.message ?? 'NFS-e rejeitada.',
+          text2: res.notaId ? 'Veja o motivo em Notas fiscais.' : undefined,
+          visibilityTime: 10000,
         });
+        if (res.notaId) router.push('/(app)/notas-fiscais');
         await load();
       }
     } catch (e) {
-      Toast.show({ type: 'error', text1: (e as Error).message });
+      setNfConfirmOpen(false);
+      Toast.show({ type: 'error', text1: (e as Error).message, visibilityTime: 10000 });
     } finally {
       setEmittingNf(false);
     }
@@ -214,8 +226,25 @@ export default function VendaDetailScreen() {
         <Card>
           <View style={styles.rowBetween}>
             <Text style={styles.h1}>{detail.cliente.nome_cliente}</Text>
-            <View style={[styles.tag, { backgroundColor: colors.gray100 }]}>
-              <Text style={styles.tagTxt}>{detail.status}</Text>
+            <View style={styles.tagRow}>
+              <View style={[styles.tag, { backgroundColor: colors.gray100 }]}>
+                <Text style={styles.tagTxt}>{detail.status}</Text>
+              </View>
+              <View
+                style={[
+                  styles.tag,
+                  { backgroundColor: detail.cliente.emite_nf ? '#e8f5e9' : '#fff3e0' },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.tagTxt,
+                    { color: detail.cliente.emite_nf ? '#2e7d32' : '#e65100' },
+                  ]}
+                >
+                  {detail.cliente.emite_nf ? 'Com NF' : 'Sem NF'}
+                </Text>
+              </View>
             </View>
           </View>
           {detail.cliente.nome_empresa ? (
@@ -286,12 +315,25 @@ export default function VendaDetailScreen() {
               disabled={emittingNf}
             />
           ) : null}
-          {notaFiscal ? (
+          {notaFiscalUltima ? (
             <Pressable style={styles.nfLink} onPress={() => router.push('/(app)/notas-fiscais')}>
               <Text style={styles.nfLinkTxt}>
-                NFS-e {notaFiscal.serie}/{notaFiscal.numero} — {notaFiscal.status}
+                NFS-e {notaFiscalUltima.serie}/{notaFiscalUltima.numero} — {notaFiscalUltima.status}
+                {notaFiscalUltima.status === 'rejeitada' && notaFiscalUltima.motivo_rejeicao
+                  ? ` · ${notaFiscalUltima.motivo_rejeicao.slice(0, 60)}`
+                  : ''}
               </Text>
               <Ionicons name="chevron-forward" size={18} color={colors.orange} />
+            </Pressable>
+          ) : null}
+          {!detail.cliente.emite_nf ? (
+            <Pressable
+              style={styles.nfHint}
+              onPress={() => router.push(`/(app)/clients/${detail.cliente.id}`)}
+            >
+              <Text style={styles.nfHintTxt}>
+                Cliente marcado como Sem NF — emissão manual permitida. Toque para editar o cadastro.
+              </Text>
             </Pressable>
           ) : null}
           <PrimaryButton
@@ -388,7 +430,11 @@ export default function VendaDetailScreen() {
       <ConfirmarEmitirNfseModal
         visible={nfConfirmOpen}
         titulo="Emitir NFS-e"
-        descricao={`Gerar nota fiscal de ${formatBRL(detail.valor_total)} para esta venda?`}
+        descricao={
+          !detail.cliente.emite_nf
+            ? `Gerar nota fiscal de ${formatBRL(detail.valor_total)} para esta venda? O cliente está como Sem NF no cadastro; a emissão manual será feita mesmo assim.`
+            : `Gerar nota fiscal de ${formatBRL(detail.valor_total)} para esta venda?`
+        }
         botaoPrimario="Emitir NFS-e"
         botaoSecundario="Cancelar"
         loading={emittingNf}
@@ -407,6 +453,7 @@ const styles = StyleSheet.create({
   scroll: { padding: spacing.md, paddingBottom: spacing.xl * 2 },
   h1: { fontSize: 20, fontWeight: '800', color: colors.petroleum, flex: 1 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  tagRow: { flexDirection: 'row', gap: 6, flexShrink: 0 },
   tag: { paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.sm },
   tagTxt: { fontSize: 12, fontWeight: '700', textTransform: 'capitalize' },
   emp: { fontSize: 14, color: colors.gray600, marginTop: 4 },
@@ -467,6 +514,14 @@ const styles = StyleSheet.create({
     borderColor: colors.gray100,
   },
   nfLinkTxt: { fontSize: 14, fontWeight: '600', color: colors.petroleum, flex: 1 },
+  nfHint: {
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: '#fff8e1',
+    borderWidth: 1,
+    borderColor: '#ffe082',
+  },
+  nfHintTxt: { fontSize: 12, color: colors.gray800, lineHeight: 17 },
   sec: {
     fontSize: 16,
     fontWeight: '800',

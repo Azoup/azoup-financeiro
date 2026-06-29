@@ -27,7 +27,16 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
   });
 
   try {
-    const ret = await wizard.Autorizacao(layout);
+    let ret;
+    try {
+      ret = await wizard.Autorizacao(layout);
+    } catch (authErr) {
+      return {
+        success: false,
+        status: 'ERR',
+        message: authErr?.message ?? String(authErr) ?? 'Falha ao comunicar com o webservice NFS-e.',
+      };
+    }
     const chave =
       ret?.response?.chaveAcesso ??
       ret?.response?.chNFSe ??

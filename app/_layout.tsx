@@ -7,6 +7,7 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Toast from 'react-native-toast-message';
+import { appToastConfig } from '@/utils/appToast';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 export default function RootLayout() {
@@ -21,7 +22,7 @@ export default function RootLayout() {
               contentStyle: { backgroundColor: colors.gray50 },
             }}
           />
-          <Toast />
+          <Toast config={appToastConfig} />
         </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

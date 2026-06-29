@@ -6,9 +6,10 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ success: false, message: 'Método não permitido.' });
   }
 
+  const notaFiscalId = req.body?.notaFiscalId;
+
   try {
     const user = await getUserFromBearer(req);
-    const { notaFiscalId } = req.body ?? {};
     if (!notaFiscalId) {
       return res.status(400).json({ success: false, message: 'notaFiscalId é obrigatório.' });
     }
@@ -110,9 +111,26 @@ module.exports = async function handler(req, res) {
     return res.status(200).json(result);
   } catch (e) {
     console.error('nfe/emitir', e);
-    return res.status(500).json({
-      success: false,
-      message: e.message ?? 'Falha na emissão NFS-e.',
-    });
+    const msg =
+      (e && typeof e === 'object' && 'message' in e && e.message) ||
+      (typeof e === 'string' ? e : '') ||
+      'Falha na emissão NFS-e.';
+    if (notaFiscalId) {
+      try {
+        const admin = getAdmin();
+        await admin
+          .from('nota_fiscal')
+          .update({ status: 'rejeitada', motivo_rejeicao: String(msg).slice(0, 2000) })
+          .eq('id', notaFiscalId);
+      } catch {
+        /* ignore secondary failure */
+      }
+    }
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: String(msg),
+      });
+    }
   }
 };

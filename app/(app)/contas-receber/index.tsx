@@ -481,6 +481,7 @@ export default function ContasReceberScreen() {
           Toast.show({ type: 'info', text1: res.message ?? 'Cliente marcado como Sem NF no cadastro.' });
         } else {
           Toast.show({ type: 'error', text1: res.message ?? 'Não foi possível emitir a NFS-e.' });
+          if (res.notaId) router.push('/(app)/notas-fiscais');
         }
       } else if (item.origem === 'venda' && item.venda_id) {
         const venda = await fetchVendaParaNotaFiscal(user.id, item.venda_id);
@@ -491,6 +492,7 @@ export default function ContasReceberScreen() {
           router.push('/(app)/notas-fiscais');
         } else {
           Toast.show({ type: 'error', text1: res.message ?? 'NFS-e rejeitada.' });
+          if (res.notaId) router.push('/(app)/notas-fiscais');
         }
       } else {
         throw new Error('Origem do documento não identificada.');
@@ -524,6 +526,7 @@ export default function ContasReceberScreen() {
         Toast.show({ type: 'info', text1: res.message ?? 'Cliente sem NF no cadastro.' });
       } else {
         Toast.show({ type: 'error', text1: res.message ?? 'Não foi possível emitir a NFS-e.' });
+        if (res.notaId) router.push('/(app)/notas-fiscais');
       }
       await refreshLista();
     } catch (e) {

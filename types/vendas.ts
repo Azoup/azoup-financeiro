@@ -61,7 +61,7 @@ export interface PagamentoParcelaRow {
 }
 
 export interface VendaDetail extends Venda {
-  cliente: { id: string; nome_cliente: string; nome_empresa: string | null };
+  cliente: { id: string; nome_cliente: string; nome_empresa: string | null; emite_nf: boolean };
   parcelas: ParcelaVenda[];
   pagamentos: PagamentoVenda[];
   pagamento_parcelas: PagamentoParcelaRow[];

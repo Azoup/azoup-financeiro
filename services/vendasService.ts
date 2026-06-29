@@ -348,7 +348,7 @@ export async function fetchVendaDetail(userId: string, vendaId: string): Promise
 
   const { data: cli, error: ec } = await supabase
     .from('clientes')
-    .select('id, nome_fantasia, nome')
+    .select('id, nome_fantasia, nome, emite_nf')
     .eq('id', vr.cliente_id)
     .maybeSingle();
   if (ec) throw new Error(ec.message);
@@ -358,6 +358,7 @@ export async function fetchVendaDetail(userId: string, vendaId: string): Promise
     id: String((cli as { id: string | number }).id),
     nome_cliente: join?.nome_cliente ?? '',
     nome_empresa: join?.nome_empresa ?? null,
+    emite_nf: Boolean((cli as { emite_nf?: boolean | null }).emite_nf),
   };
 
   const { data: parcelas, error: e2 } = await supabase
@@ -400,7 +401,7 @@ export async function fetchVendaDetail(userId: string, vendaId: string): Promise
 
   return {
     ...vr,
-    cliente: { id: cliente.id, nome_cliente: cliente.nome_cliente, nome_empresa: cliente.nome_empresa },
+    cliente: { id: cliente.id, nome_cliente: cliente.nome_cliente, nome_empresa: cliente.nome_empresa, emite_nf: cliente.emite_nf },
     parcelas: parcelasNorm,
     pagamentos: (pagamentos as PagamentoVenda[] | null) ?? [],
     pagamento_parcelas: ppRows,

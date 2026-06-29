@@ -54,6 +54,10 @@ export function podeCancelarNotaFiscal(nota: {
   return Boolean(nota.protocolo_autorizacao?.trim());
 }
 
+export function podeReemitirNotaFiscal(nota: { status: string }): boolean {
+  return nota.status === 'rascunho' || nota.status === 'processando' || nota.status === 'rejeitada';
+}
+
 export function isAmbienteHomologacao(ambiente: number): boolean {
   return ambiente !== 1;
 }

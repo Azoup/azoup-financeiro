@@ -2,7 +2,7 @@ import { Card } from '@/components/Card';
 import { CancelarNotaFiscalModal } from '@/components/notas-fiscais/CancelarNotaFiscalModal';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
-import { cancelarNotaFiscalSefaz, fetchNotasFiscaisLista } from '@/services/notaFiscalService';
+import { cancelarNotaFiscalSefaz, fetchNotasFiscaisLista, reemitirNotaFiscalSefaz } from '@/services/notaFiscalService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { NotaFiscalListRow } from '@/types/notaFiscal';
 import { formatBRL } from '@/utils/currency';
@@ -14,9 +14,10 @@ import {
   labelNotaFiscalStatus,
   podeCancelarNotaFiscal,
   podeImprimirDanfe,
+  podeReemitirNotaFiscal,
 } from '@/utils/nfeStatus';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -40,6 +41,7 @@ export default function NotasFiscaisIndexScreen() {
   const [homologacao] = useState(true);
   const [cancelTarget, setCancelTarget] = useState<NotaFiscalListRow | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [reemitBusyId, setReemitBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -63,6 +65,13 @@ export default function NotasFiscaisIndexScreen() {
       alive = false;
     };
   }, [load]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.id) return;
+      void load().catch((e) => Toast.show({ type: 'error', text1: (e as Error).message }));
+    }, [load, user?.id]),
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -105,11 +114,30 @@ export default function NotasFiscaisIndexScreen() {
     }
   };
 
+  const reemitir = async (item: NotaFiscalListRow) => {
+    setReemitBusyId(item.id);
+    try {
+      const res = await reemitirNotaFiscalSefaz(item.id);
+      if (res.success) {
+        Toast.show({ type: 'success', text1: 'NFS-e autorizada.' });
+      } else {
+        Toast.show({ type: 'error', text1: res.message ?? 'NFS-e rejeitada.' });
+      }
+      await load();
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setReemitBusyId(null);
+    }
+  };
+
   const renderItem = ({ item }: { item: NotaFiscalListRow }) => {
     const st = corNotaFiscalStatus(item.status);
     const cli = item.cliente?.nome_cliente ?? '—';
     const podeDanfe = podeImprimirDanfe(item);
     const podeCancelar = podeCancelarNotaFiscal(item);
+    const podeReemitir = podeReemitirNotaFiscal(item);
+    const reemitindo = reemitBusyId === item.id;
 
     return (
       <Card style={styles.card}>
@@ -152,6 +180,14 @@ export default function NotasFiscaisIndexScreen() {
         ) : null}
         <Text style={styles.date}>{formatDateTimeBRFromISO(item.created_at)}</Text>
         <View style={styles.acoes}>
+          {podeReemitir ? (
+            <PrimaryButton
+              title={reemitindo ? 'Reemitindo…' : 'Reemitir NFS-e'}
+              onPress={() => void reemitir(item)}
+              disabled={reemitindo || cancelBusy}
+              style={styles.btnAcao}
+            />
+          ) : null}
           <PrimaryButton
             title="Imprimir DANFSe"
             variant="secondary"
@@ -206,7 +242,9 @@ export default function NotasFiscaisIndexScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
             <Text style={styles.empty}>
-              Nenhuma NFS-e ainda. Use &quot;Gerar mensalidade + NFS-e&quot; na tela de geração.
+              Nenhuma NFS-e ainda. Gere com &quot;Gerar mensalidade + NFS-e&quot;, use o botão Emitir NFS-e em
+              Mensalidades/A receber, ou confira se o cliente está marcado como Com NF e se o certificado A1 está em
+              Configurações › NFS-e.
             </Text>
           }
         />

@@ -312,15 +312,24 @@ export async function criarMensalidadesGeradasLote(params: {
 
   let nfResult;
   if (params.gerarNotaFiscal && criadosRows.length) {
-    nfResult = await gerarNotasFiscaisParaMensalidades(
-      params.userId,
-      criadosRows.map((m) => ({
-        id: m.id,
-        cliente_id: m.cliente_id,
-        valor: m.valor,
-        competencia: m.competencia,
-      })),
-    );
+    try {
+      nfResult = await gerarNotasFiscaisParaMensalidades(
+        params.userId,
+        criadosRows.map((m) => ({
+          id: m.id,
+          cliente_id: m.cliente_id,
+          valor: m.valor,
+          competencia: m.competencia,
+        })),
+      );
+    } catch (e) {
+      nfResult = {
+        emitidas: 0,
+        rejeitadas: criadosRows.length,
+        ignoradas: 0,
+        erros: [(e as Error).message],
+      };
+    }
   }
 
   return { criados: criadosRows.length, ignorados, semVencimento, avisoBoleto, nf: nfResult };

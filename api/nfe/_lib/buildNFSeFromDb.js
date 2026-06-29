@@ -28,6 +28,8 @@ function nomeCliente(cliente) {
 function ufCliente(cliente) {
   return cliente.estado || cliente.uf || '';
 }
+
+function padTribNac(code) {
   return onlyDigits(code).padStart(6, '0').slice(0, 6);
 }
 
@@ -45,8 +47,21 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
 
   const emitDoc = onlyDigits(perfil.documento);
   const destDoc = onlyDigits(cliente.cnpj) || onlyDigits(cliente.documento);
+  if (emitDoc.length !== 11 && emitDoc.length !== 14) {
+    throw new Error('Documento do beneficiário (emitente) inválido. Preencha CPF ou CNPJ em Configurações.');
+  }
+  if (destDoc.length !== 11 && destDoc.length !== 14) {
+    throw new Error(
+      `Cliente "${nomeCliente(cliente)}" sem CPF/CNPJ válido no cadastro. Informe o documento antes de emitir NFS-e.`,
+    );
+  }
   const isCnpjEmit = emitDoc.length === 14;
   const isCnpjDest = destDoc.length === 14;
+
+  const cepTomador = onlyDigits(cliente.cep || perfil.cep);
+  if (cepTomador.length < 8) {
+    throw new Error('CEP do tomador ausente. Preencha o endereço do cliente ou do beneficiário.');
+  }
 
   const descricaoBase = itens[0]?.descricao ?? config.descricao_servico_padrao;
   const xDescServ =
@@ -90,7 +105,7 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
           end: {
             endNac: {
               cMun: ibge,
-              CEP: onlyDigits(cliente.cep || perfil.cep).padStart(8, '0').slice(0, 8),
+              CEP: cepTomador.padStart(8, '0').slice(0, 8),
             },
             xLgr: cliente.logradouro || perfil.logradouro || 'Não informado',
             nro: cliente.numero || perfil.numero || 'S/N',

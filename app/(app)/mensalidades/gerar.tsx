@@ -16,6 +16,7 @@ import {
   fetchUltimoVencimentoMensalidadePorCliente,
 } from '@/services/mensalidadeGeradaService';
 import { sincronizarCarnesMensalidadesFaltantes } from '@/services/boletoParcelaService';
+import { fetchCertificadoAtivo } from '@/services/nfeConfigService';
 import { fetchSegmentosCliente } from '@/services/segmentoClienteService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { ClienteListItem, SegmentoClienteRow } from '@/types/models';
@@ -243,6 +244,44 @@ export default function GerarMensalidadeScreen() {
       Toast.show({ type: 'error', text1: 'Informe a data de vencimento para aplicar a todos.' });
       return;
     }
+
+    const clientesSelecionados = rows.filter((r) => ids.includes(r.id));
+    if (gerarNotaFiscal) {
+      const semNf = clientesSelecionados.filter((r) => !r.emite_nf);
+      if (semNf.length === clientesSelecionados.length) {
+        Toast.show({
+          type: 'error',
+          text1: 'Nenhum cliente selecionado emite NFS-e',
+          text2: `Marque "Com NF" no cadastro: ${semNf.map((c) => c.nome_cliente).join(', ')}`,
+          visibilityTime: 10000,
+        });
+        return;
+      }
+      try {
+        const cert = await fetchCertificadoAtivo(user.id);
+        if (!cert) {
+          Toast.show({
+            type: 'error',
+            text1: 'Certificado A1 não cadastrado',
+            text2: 'Vá em Configurações › NFS-e e envie o certificado antes de emitir notas.',
+            visibilityTime: 10000,
+          });
+          return;
+        }
+      } catch (e) {
+        Toast.show({ type: 'error', text1: (e as Error).message, visibilityTime: 9000 });
+        return;
+      }
+      if (semNf.length > 0) {
+        Toast.show({
+          type: 'info',
+          text1: `${semNf.length} cliente(s) sem NF no cadastro`,
+          text2: 'Serão ignorados na NFS-e; a mensalidade será gerada normalmente.',
+          visibilityTime: 8000,
+        });
+      }
+    }
+
     setBusy(true);
     try {
       const pctRaw = percentStr.trim().replace(',', '.');
@@ -269,7 +308,7 @@ export default function GerarMensalidadeScreen() {
       if (semVencimento > 0) extras.push(`${semVencimento} sem primeiro vencimento no cadastro`);
       if (gerarNotaFiscal && nf) {
         extras.push(`${nf.emitidas} NFS-e autorizada(s)`);
-        if (nf.rejeitadas > 0) extras.push(`${nf.rejeitadas} NF rejeitada(s)`);
+        if (nf.rejeitadas > 0) extras.push(`${nf.rejeitadas} NF rejeitada(s) — veja em Notas fiscais`);
         if (nf.ignoradas > 0) extras.push(`${nf.ignoradas} sem NF no cadastro`);
       }
       if (avisoBoleto) {
@@ -281,10 +320,26 @@ export default function GerarMensalidadeScreen() {
         });
       }
       await sincronizarCarnesMensalidadesFaltantes(user.id).catch(() => undefined);
+
+      const nfFalhou = gerarNotaFiscal && nf && nf.emitidas === 0;
+      const nfDetalhe =
+        nf?.erros?.[0] ??
+        (nf && nf.ignoradas > 0
+          ? 'Cliente marcado como Sem NF no cadastro — edite o cliente e marque Com NF.'
+          : null) ??
+        (nf && nf.rejeitadas > 0
+          ? 'Abra Notas fiscais para ver o motivo da rejeição.'
+          : null);
+
       Toast.show({
-        type: 'success',
+        type: nfFalhou ? 'error' : 'success',
         text1: `${criados} mensalidade(s) gerada(s).${extras.length ? ` ${extras.join('; ')}.` : ''}`,
-        text2: gerarNotaFiscal ? 'Veja as notas em Notas fiscais.' : 'Confira em A receber.',
+        text2: nfFalhou
+          ? nfDetalhe ?? 'Nenhuma NFS-e foi autorizada. Verifique certificado e configurações.'
+          : gerarNotaFiscal
+            ? 'Veja as notas em Notas fiscais.'
+            : 'Confira em A receber.',
+        visibilityTime: nfFalhou ? 12000 : 5000,
       });
       setEnviarModalOpen(false);
       router.replace(gerarNotaFiscal ? '/(app)/notas-fiscais' : '/(app)/contas-receber');
@@ -502,6 +557,9 @@ export default function GerarMensalidadeScreen() {
                       : '—'}
                   </Text>
                   <Text style={styles.metaProx}>Próx. mensalidade: {proxLabel}</Text>
+                  <Text style={[styles.metaNf, !r.emite_nf && styles.metaNfOff]}>
+                    NFS-e: {r.emite_nf ? 'Com NF' : 'Sem NF — não emite nota'}
+                  </Text>
                   {r.cancelado ? <Text style={styles.cancel}>Cancelado</Text> : null}
                   <Text style={styles.val}>{formatBRL(r.valor_mensalidade)}</Text>
                 </View>
@@ -694,6 +752,8 @@ const styles = StyleSheet.create({
   meta: { fontSize: 12, color: colors.gray600, marginTop: 4 },
   metaReaj: { fontSize: 12, color: colors.gray800, marginTop: 2 },
   metaProx: { fontSize: 11, color: colors.gray600, marginTop: 2 },
+  metaNf: { fontSize: 11, fontWeight: '700', color: colors.success, marginTop: 2 },
+  metaNfOff: { color: colors.danger },
   cancel: { fontSize: 11, fontWeight: '700', color: colors.danger, marginTop: 4 },
   val: { fontSize: 17, fontWeight: '800', color: colors.orange, marginTop: 6 },
   enviar: { marginTop: spacing.md },

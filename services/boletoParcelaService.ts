@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
+import { fetchNotasFiscaisPorMensalidadeIds, fetchNotasFiscaisPorVendaIds } from '@/services/notaFiscalService';
 import { emitirBoletosSicoobLote } from '@/services/sicoobBoletoService';
 import type { BoletoParcelaVendaRow, ContaReceberListRow, PerfilCobranca } from '@/types/contasReceber';
 import { situacaoCobrancaDeStatus } from '@/utils/contaReceberCobranca';
@@ -531,6 +532,11 @@ export async function fetchContasReceberLista(userId: string): Promise<ContaRece
     }
   }
 
+  const [nfPorMensalidade, nfPorVenda] = await Promise.all([
+    fetchNotasFiscaisPorMensalidadeIds(userId, mensalidadeIds).catch(() => new Map()),
+    fetchNotasFiscaisPorVendaIds(userId, vendaIds).catch(() => new Map()),
+  ]);
+
   return blist.map((b) => {
     const isMen = b.origem === 'mensalidade' || Boolean(b.mensalidade_id);
     const status = isMen
@@ -550,8 +556,17 @@ export async function fetchContasReceberLista(userId: string): Promise<ContaRece
     const clienteId = clientePorBoleto.get(b.id) ?? null;
     const wa = clienteId ? whatsappPorCliente.get(clienteId) : undefined;
 
+    let nota_fiscal_id = b.nota_fiscal_id;
+    if (!nota_fiscal_id && b.mensalidade_id) {
+      nota_fiscal_id = nfPorMensalidade.get(b.mensalidade_id)?.id ?? null;
+    }
+    if (!nota_fiscal_id && b.venda_id) {
+      nota_fiscal_id = nfPorVenda.get(b.venda_id)?.id ?? null;
+    }
+
     return {
       ...b,
+      nota_fiscal_id,
       origem: isMen ? 'mensalidade' : 'venda',
       parcela_status: status,
       situacao_cobranca: situacaoCobrancaDeStatus(status),

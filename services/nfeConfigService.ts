@@ -133,6 +133,33 @@ async function salvarSenhaCertificado(
   certificadoId: string,
   senha: string,
 ): Promise<void> {
+  const { data: session } = await supabase.auth.getSession();
+  const token = session.session?.access_token;
+  const base = nfeApiBaseUrl();
+
+  if (token && base) {
+    try {
+      const res = await fetch(`${base}/api/nfe/certificado`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ certificadoId, senha: senha.trim() }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (res.ok && !body.error) return;
+      if (body.error && res.status !== 500 && res.status !== 503) {
+        throw new Error(body.error);
+      }
+    } catch (e) {
+      if ((e as Error).message && !(e as Error).message.includes('fetch')) {
+        const msg = (e as Error).message;
+        if (!/Failed to fetch|NetworkError|network/i.test(msg)) throw e;
+      }
+    }
+  }
+
   const chave = await fetchChaveCertificado();
   const senhaCriptografada = await encryptCertificadoSenha(senha, chave);
   const { error } = await supabase.from('empresa_certificado_secreto').upsert(

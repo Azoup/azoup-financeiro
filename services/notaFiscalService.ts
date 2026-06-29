@@ -29,22 +29,46 @@ function descricaoItem(competencia: string | null, padrao: string): string {
   return comp ? `${padrao} — competência ${comp}` : padrao;
 }
 
+function wrapNotaFiscalInsertError(msg?: string): Error {
+  if (!msg) return new Error('Falha ao criar rascunho da NFS-e.');
+  if (/venda_id|tipo_documento|nota_fiscal|codigo_verificacao/i.test(msg) && /does not exist|column|schema cache/i.test(msg)) {
+    return new Error(
+      'Tabelas de NFS-e incompletas no Supabase. Execute as migrations 022_nfse_servico.sql e 030_nota_fiscal_venda.sql no SQL Editor.',
+    );
+  }
+  return new Error(msg);
+}
+
+function mapNotaFiscalRow(
+  row: NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null },
+): NotaFiscalListRow {
+  const { clientes, ...rest } = row;
+  return { ...rest, cliente: mapClienteJoinEmbed(clientes) };
+}
+
 export async function fetchNotasFiscaisLista(userId: string): Promise<NotaFiscalListRow[]> {
-  const { data, error } = await supabase
+  const withJoin = await supabase
     .from('nota_fiscal')
     .select('*, clientes(nome_fantasia, nome)')
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
-  if (error) throw new Error(error.message);
-  return ((data as (NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null })[] | null) ?? []).map(
-    (row) => {
-      const { clientes, ...rest } = row;
-      return { ...rest, cliente: mapClienteJoinEmbed(clientes) };
-    },
+
+  if (withJoin.error) {
+    const plain = await supabase
+      .from('nota_fiscal')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if (plain.error) throw new Error(plain.error.message);
+    return ((plain.data as NotaFiscalListRow[] | null) ?? []).map((row) => ({ ...row, cliente: null }));
+  }
+
+  return ((withJoin.data as (NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null })[] | null) ?? []).map(
+    mapNotaFiscalRow,
   );
 }
 
-export async function fetchNotaFiscalPorMensalidade(
+export async function fetchUltimaNotaFiscalMensalidade(
   userId: string,
   mensalidadeId: string,
 ): Promise<NotaFiscalListRow | null> {
@@ -53,18 +77,36 @@ export async function fetchNotaFiscalPorMensalidade(
     .select('*, clientes(nome_fantasia, nome)')
     .eq('user_id', userId)
     .eq('mensalidade_id', mensalidadeId)
-    .in('status', ['rascunho', 'processando', 'autorizada'])
+    .neq('status', 'cancelada')
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return null;
-  const row = data as NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null };
-  const { clientes, ...rest } = row;
-  return { ...rest, cliente: mapClienteJoinEmbed(clientes) };
+  return mapNotaFiscalRow(data as NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null });
+}
+
+export async function fetchNotaFiscalPorMensalidade(
+  userId: string,
+  mensalidadeId: string,
+): Promise<NotaFiscalListRow | null> {
+  const row = await fetchUltimaNotaFiscalMensalidade(userId, mensalidadeId);
+  if (!row) return null;
+  if (row.status === 'rejeitada') return null;
+  return row;
 }
 
 export async function fetchNotaFiscalPorVenda(
+  userId: string,
+  vendaId: string,
+): Promise<NotaFiscalListRow | null> {
+  const row = await fetchUltimaNotaFiscalVenda(userId, vendaId);
+  if (!row) return null;
+  if (row.status === 'rejeitada') return null;
+  return row;
+}
+
+export async function fetchUltimaNotaFiscalVenda(
   userId: string,
   vendaId: string,
 ): Promise<NotaFiscalListRow | null> {
@@ -73,15 +115,13 @@ export async function fetchNotaFiscalPorVenda(
     .select('*, clientes(nome_fantasia, nome)')
     .eq('user_id', userId)
     .eq('venda_id', vendaId)
-    .in('status', ['rascunho', 'processando', 'autorizada'])
+    .neq('status', 'cancelada')
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return null;
-  const row = data as NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null };
-  const { clientes, ...rest } = row;
-  return { ...rest, cliente: mapClienteJoinEmbed(clientes) };
+  return mapNotaFiscalRow(data as NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null });
 }
 
 async function validarPreEmissaoNfse(
@@ -98,8 +138,11 @@ async function validarPreEmissaoNfse(
     throw new Error(clienteRes.error?.message ?? 'Cliente não encontrado.');
   }
   const clienteRow = mapClienteEnderecoFiscal(clienteRes.data as Parameters<typeof mapClienteEnderecoFiscal>[0]);
-  if (!clienteRow.emite_nf) {
-    throw new Error(`Cliente "${clienteRow.nome_cliente}" está marcado como Sem NF no cadastro.`);
+  const doc = onlyDigits(clienteRow.cnpj || clienteRow.documento);
+  if (doc.length !== 11 && doc.length !== 14) {
+    throw new Error(
+      `Cliente "${clienteRow.nome_cliente}" sem CPF/CNPJ válido. Preencha o documento no cadastro antes de emitir NFS-e.`,
+    );
   }
   if (!perfil?.razao_social?.trim() || !onlyDigits(perfil.documento).length) {
     throw new Error('Preencha os dados do beneficiário em Configurações antes de emitir NFS-e.');
@@ -154,6 +197,14 @@ export async function criarNotaFiscalRascunhoMensalidade(
   userId: string,
   mensalidade: MensalidadeNfInput,
 ): Promise<string> {
+  const existente = await fetchUltimaNotaFiscalMensalidade(userId, mensalidade.id);
+  if (existente) {
+    if (existente.status === 'autorizada') {
+      throw new Error('Já existe NFS-e autorizada para esta mensalidade.');
+    }
+    return existente.id;
+  }
+
   const { config } = await validarPreEmissaoNfse(userId, mensalidade.cliente_id);
 
   const numero = config.proximo_numero;
@@ -177,7 +228,7 @@ export async function criarNotaFiscalRascunhoMensalidade(
     })
     .select('id')
     .single();
-  if (nfErr || !nf) throw new Error(nfErr?.message ?? 'Falha ao criar rascunho da NFS-e.');
+  if (nfErr || !nf) throw wrapNotaFiscalInsertError(nfErr?.message);
 
   const notaId = nf.id as string;
   await inserirItensNotaFiscal(notaId, config, descricao, mensalidade.valor);
@@ -194,9 +245,12 @@ export async function criarNotaFiscalRascunhoVenda(
   userId: string,
   venda: VendaNfInput,
 ): Promise<string> {
-  const existente = await fetchNotaFiscalPorVenda(userId, venda.id);
+  const existente = await fetchUltimaNotaFiscalVenda(userId, venda.id);
   if (existente) {
-    throw new Error('Já existe uma NFS-e em andamento ou autorizada para esta venda.');
+    if (existente.status === 'autorizada') {
+      throw new Error('Já existe NFS-e autorizada para esta venda.');
+    }
+    return existente.id;
   }
 
   const { config } = await validarPreEmissaoNfse(userId, venda.cliente_id);
@@ -223,7 +277,7 @@ export async function criarNotaFiscalRascunhoVenda(
     })
     .select('id')
     .single();
-  if (nfErr || !nf) throw new Error(nfErr?.message ?? 'Falha ao criar rascunho da NFS-e.');
+  if (nfErr || !nf) throw wrapNotaFiscalInsertError(nfErr?.message);
 
   const notaId = nf.id as string;
   await inserirItensNotaFiscal(notaId, config, descricao, venda.valor_total);
@@ -245,6 +299,11 @@ export async function gerarNotaFiscalParaVenda(
     throw new Error('Cadastre o certificado A1 em Configurações › NFS-e antes de emitir notas fiscais.');
   }
 
+  const existente = await fetchUltimaNotaFiscalVenda(userId, venda.id);
+  if (existente?.status === 'autorizada') {
+    return { success: true, notaId: existente.id, message: 'NFS-e já autorizada para esta venda.' };
+  }
+
   const notaId = await criarNotaFiscalRascunhoVenda(userId, venda);
   const res = await emitirNotaFiscalSefaz(notaId);
   if (res.success) {
@@ -257,12 +316,12 @@ export async function gerarNotaFiscalParaMensalidade(
   userId: string,
   mensalidade: MensalidadeNfInput,
 ): Promise<{ success: boolean; notaId?: string; message?: string; ignorada?: boolean }> {
-  const existente = await fetchNotaFiscalPorMensalidade(userId, mensalidade.id);
-  if (existente) {
+  const existente = await fetchUltimaNotaFiscalMensalidade(userId, mensalidade.id);
+  if (existente?.status === 'autorizada') {
     return {
       success: true,
       notaId: existente.id,
-      message: 'NFS-e já existente para esta mensalidade.',
+      message: 'NFS-e já autorizada para esta mensalidade.',
     };
   }
 
@@ -271,20 +330,29 @@ export async function gerarNotaFiscalParaMensalidade(
     throw new Error('Cadastre o certificado A1 em Configurações › NFS-e antes de emitir notas fiscais.');
   }
 
-  try {
-    const notaId = await criarNotaFiscalRascunhoMensalidade(userId, mensalidade);
-    const res = await emitirNotaFiscalSefaz(notaId);
-    if (res.success) {
-      return { success: true, notaId };
-    }
-    return { success: false, notaId, message: res.message };
-  } catch (e) {
-    const msg = (e as Error).message;
-    if (/Sem NF/i.test(msg)) {
-      return { success: false, message: msg, ignorada: true };
-    }
-    throw e;
+  const notaId = await criarNotaFiscalRascunhoMensalidade(userId, mensalidade);
+  const res = await emitirNotaFiscalSefaz(notaId);
+  if (res.success) {
+    return { success: true, notaId };
   }
+  return { success: false, notaId, message: res.message };
+}
+
+export async function reemitirNotaFiscalSefaz(notaFiscalId: string): Promise<EmitirNfeResult> {
+  const { data: nota, error } = await supabase
+    .from('nota_fiscal')
+    .select('id, status')
+    .eq('id', notaFiscalId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!nota) throw new Error('Nota fiscal não encontrada.');
+  if (nota.status === 'autorizada') {
+    throw new Error('Esta NFS-e já está autorizada.');
+  }
+  if (nota.status === 'cancelada') {
+    throw new Error('NFS-e cancelada não pode ser reemitida.');
+  }
+  return emitirNotaFiscalSefaz(notaFiscalId);
 }
 
 export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<EmitirNfeResult> {
@@ -297,18 +365,47 @@ export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emiti
     throw new Error('URL da API NFS-e não configurada (EXPO_PUBLIC_NFE_API_URL ou origem web).');
   }
 
-  await supabase.from('nota_fiscal').update({ status: 'processando' }).eq('id', notaFiscalId);
+  await supabase.from('nota_fiscal').update({ status: 'processando', motivo_rejeicao: null }).eq('id', notaFiscalId);
 
-  const res = await fetch(`${base}/api/nfe/emitir`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ notaFiscalId }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/nfe/emitir`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ notaFiscalId }),
+    });
+  } catch (e) {
+    const msg = (e as Error).message || 'Falha de rede ao contactar a API de emissão.';
+    await supabase
+      .from('nota_fiscal')
+      .update({ status: 'rejeitada', motivo_rejeicao: msg })
+      .eq('id', notaFiscalId);
+    return { success: false, message: msg };
+  }
 
-  const body = (await res.json().catch(() => ({}))) as EmitirNfeResult & { error?: string };
+  const rawText = await res.text().catch(() => '');
+  let body = {} as EmitirNfeResult & { error?: string; message?: string };
+  if (rawText.trim()) {
+    try {
+      body = JSON.parse(rawText) as typeof body;
+    } catch {
+      body = {
+        success: false,
+        message: rawText.slice(0, 500) || `Emissão falhou (${res.status}).`,
+      };
+    }
+  } else if (!res.ok) {
+    body = {
+      success: false,
+      message:
+        res.status === 500
+          ? 'Erro interno na API de emissão. Verifique na Vercel: SUPABASE_SERVICE_ROLE_KEY, CERT_ENCRYPTION_KEY (mesma chave do app) e redeploy.'
+          : `Emissão falhou (${res.status}).`,
+    };
+  }
 
   if (!res.ok || !body.success) {
     const msg = body.message ?? body.error ?? `Emissão falhou (${res.status}).`;
@@ -379,30 +476,100 @@ export async function gerarNotasFiscaisParaMensalidades(
     throw new Error('Cadastre o certificado A1 em Configurações › NFS-e antes de gerar notas fiscais.');
   }
 
+  const clienteIds = [...new Set(mensalidades.map((m) => m.cliente_id))];
+  const { data: clientesRows, error: cliErr } = await supabase
+    .from('clientes')
+    .select('id, emite_nf, nome_fantasia, nome')
+    .in('id', clienteIds);
+  if (cliErr) throw new Error(cliErr.message);
+
+  const emitePorCliente = new Map(
+    (clientesRows ?? []).map((c) => [
+      c.id as string,
+      Boolean(c.emite_nf),
+    ]),
+  );
+
   let emitidas = 0;
   let rejeitadas = 0;
   let ignoradas = 0;
   const erros: string[] = [];
 
   for (const m of mensalidades) {
+    if (!emitePorCliente.get(m.cliente_id)) {
+      ignoradas += 1;
+      continue;
+    }
+
     try {
-      const notaId = await criarNotaFiscalRascunhoMensalidade(userId, m);
-      const res = await emitirNotaFiscalSefaz(notaId);
-      if (res.success) emitidas += 1;
-      else {
-        rejeitadas += 1;
-        erros.push(res.message ?? `NF rejeitada (mensalidade ${m.id})`);
-      }
-    } catch (e) {
-      const msg = (e as Error).message;
-      if (/Sem NF/i.test(msg)) {
+      const result = await gerarNotaFiscalParaMensalidade(userId, m);
+      if (result.ignorada) {
         ignoradas += 1;
+        continue;
+      }
+      if (result.success) {
+        emitidas += 1;
       } else {
         rejeitadas += 1;
-        erros.push(msg);
+        if (result.message) erros.push(result.message);
       }
+    } catch (e) {
+      rejeitadas += 1;
+      erros.push((e as Error).message);
     }
   }
 
   return { emitidas, rejeitadas, ignoradas, erros };
+}
+
+/** Mapa mensalidade_id → nota fiscal (qualquer status exceto cancelada). */
+export async function fetchNotasFiscaisPorMensalidadeIds(
+  userId: string,
+  mensalidadeIds: string[],
+): Promise<Map<string, NotaFiscalListRow>> {
+  const map = new Map<string, NotaFiscalListRow>();
+  if (!mensalidadeIds.length) return map;
+
+  const { data, error } = await supabase
+    .from('nota_fiscal')
+    .select('*, clientes(nome_fantasia, nome)')
+    .eq('user_id', userId)
+    .in('mensalidade_id', mensalidadeIds)
+    .neq('status', 'cancelada')
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+
+  for (const row of (data ?? []) as (NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null })[]) {
+    const mid = row.mensalidade_id;
+    if (mid && !map.has(mid)) {
+      map.set(mid, mapNotaFiscalRow(row));
+    }
+  }
+  return map;
+}
+
+/** Mapa venda_id → nota fiscal (qualquer status exceto cancelada). */
+export async function fetchNotasFiscaisPorVendaIds(
+  userId: string,
+  vendaIds: string[],
+): Promise<Map<string, NotaFiscalListRow>> {
+  const map = new Map<string, NotaFiscalListRow>();
+  if (!vendaIds.length) return map;
+
+  const { data, error } = await supabase
+    .from('nota_fiscal')
+    .select('*, clientes(nome_fantasia, nome)')
+    .eq('user_id', userId)
+    .in('venda_id', vendaIds)
+    .neq('status', 'cancelada')
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+
+  for (const row of (data ?? []) as (NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null })[]) {
+    const vid = row.venda_id;
+    if (vid && !map.has(vid)) {
+      map.set(vid, mapNotaFiscalRow(row));
+    }
+  }
+  return map;
 }

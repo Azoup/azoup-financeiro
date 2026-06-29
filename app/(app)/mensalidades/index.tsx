@@ -42,7 +42,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import Toast from 'react-native-toast-message';
+import { showAppError, showAppInfo, showAppSuccess } from '@/utils/appToast';
 
 type StatusFiltro = 'todos' | MensalidadeGeradaStatusVisual;
 
@@ -129,7 +129,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
         try {
           await load();
         } catch (e) {
-          if (alive) Toast.show({ type: 'error', text1: (e as Error).message });
+          if (alive) showAppError((e as Error).message);
         } finally {
           if (alive) setLoading(false);
         }
@@ -160,7 +160,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
     try {
       await load();
     } catch (e) {
-      Toast.show({ type: 'error', text1: (e as Error).message });
+      showAppError((e as Error).message);
     } finally {
       setRefreshing(false);
     }
@@ -178,7 +178,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
       const list = await fetchPagamentosMensalidadeGerada(id);
       setPagamentos((p) => ({ ...p, [id]: list }));
     } catch (e) {
-      Toast.show({ type: 'error', text1: (e as Error).message });
+      showAppError((e as Error).message);
     } finally {
       setLoadingPay(null);
     }
@@ -209,15 +209,19 @@ export default function HistoricoMensalidadesGeradasScreen() {
         competencia: m.competencia,
       });
       if (res.success) {
-        Toast.show({ type: 'success', text1: res.message ?? 'NFS-e emitida com sucesso.' });
+        showAppSuccess(res.message ?? 'NFS-e emitida com sucesso.', 'Veja em Notas fiscais.');
         router.push('/(app)/notas-fiscais');
       } else if (res.ignorada) {
-        Toast.show({ type: 'info', text1: res.message ?? 'Cliente sem NF no cadastro.' });
+        showAppInfo(res.message ?? 'Cliente sem NF no cadastro (lote automático).');
       } else {
-        Toast.show({ type: 'error', text1: res.message ?? 'Não foi possível emitir a NFS-e.' });
+        showAppError(
+          res.message ?? 'Não foi possível emitir a NFS-e.',
+          res.notaId ? 'Toque em Notas fiscais para ver o motivo e reemitir.' : undefined,
+        );
+        if (res.notaId) router.push('/(app)/notas-fiscais');
       }
     } catch (e) {
-      Toast.show({ type: 'error', text1: (e as Error).message });
+      showAppError((e as Error).message);
     } finally {
       setNfBusyId(null);
     }
