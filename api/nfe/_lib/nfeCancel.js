@@ -2,6 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { decryptCertPassword } = require('./crypto');
+const { prepareServerlessCryptoEnv, NFEWIZARD_LIB_SERVERLESS } = require('./serverlessEnv');
 
 async function loadNfeWizard() {
   try {
@@ -27,6 +28,8 @@ function onlyDigits(s) {
 
 /** Carrega NFeWizard com certificado; retorna { wizard, certPath } — apague certPath no finally. */
 async function createNfeWizard({ admin, cert, senhaEnc, ambiente }) {
+  prepareServerlessCryptoEnv();
+
   const NFeWizard = await loadNfeWizard();
   if (!NFeWizard) {
     throw new Error('Pacote nfewizard-io não instalado no servidor.');
@@ -44,7 +47,7 @@ async function createNfeWizard({ admin, cert, senhaEnc, ambiente }) {
         ambiente: Number(ambiente),
       },
       lib: {
-        useForSchemaValidation: 'validateSchemaJsBased',
+        ...NFEWIZARD_LIB_SERVERLESS,
       },
     },
   });

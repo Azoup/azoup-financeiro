@@ -6,6 +6,9 @@
   "devCommand": "npx expo start --web",
   "framework": null,
   "cleanUrls": true,
+  "env": {
+    "LD_LIBRARY_PATH": ""
+  },
   "functions": {
     "api/nfe/**/*.js": {
       "maxDuration": 60,

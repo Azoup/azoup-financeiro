@@ -2,6 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { decryptCertPassword } = require('./crypto');
+const { prepareServerlessCryptoEnv, NFEWIZARD_LIB_SERVERLESS } = require('./serverlessEnv');
 
 async function loadNfseWizardClass() {
   try {
@@ -35,6 +36,8 @@ function cleanupCert(certPath) {
 
 /** Instancia @nfewizard/nfse com certificado temporário. */
 async function createNfseWizard({ admin, cert, senhaEnc, perfil, ambiente = 2 }) {
+  prepareServerlessCryptoEnv();
+
   const NFSeWizard = await loadNfseWizardClass();
   if (!NFSeWizard) {
     throw new Error('Pacote @nfewizard/nfse não instalado no servidor.');
@@ -68,8 +71,7 @@ async function createNfseWizard({ admin, cert, senhaEnc, perfil, ambiente = 2 })
       versaoDF: '1.0.0',
     },
     lib: {
-      useForSchemaValidation: 'validateSchemaJsBased',
-      log: { exibirLogNoConsole: false, armazenarLogs: false },
+      ...NFEWIZARD_LIB_SERVERLESS,
     },
   });
 
