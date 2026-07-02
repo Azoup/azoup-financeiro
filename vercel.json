@@ -14,10 +14,7 @@
     "api/nfe/**/*.js": {
       "maxDuration": 60,
       "memory": 1024,
-      "includeFiles": [
-        "api/nfe/_lib/nfewizard-certs/**",
-        "api/nfe/_lib/icp-brasil-ca-bundle.pem"
-      ]
+      "includeFiles": "api/nfe/_lib/**"
     }
   },
   "rewrites": [
