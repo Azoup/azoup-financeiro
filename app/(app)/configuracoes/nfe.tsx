@@ -1,4 +1,4 @@
-import { Card } from '@/components/Card';
+import { NfseEnumField } from '@/components/configuracoes/NfseEnumField';
 import { FormTextInput } from '@/components/FormTextInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
@@ -16,7 +16,12 @@ import { fetchPerfilCobranca, upsertPerfilCobranca } from '@/services/perfilCobr
 import { colors, radius, spacing } from '@/theme/colors';
 import type { PerfilCobrancaInput } from '@/types/contasReceber';
 import type { NfeConfig } from '@/types/notaFiscal';
-import { avaliarProntidaoNfe } from '@/utils/nfeProntidao';
+import {
+  OP_SIMP_NAC_OPCOES,
+  REG_ESP_TRIB_OPCOES,
+  TP_RET_ISSQN_OPCOES,
+  TRIB_ISSQN_OPCOES,
+} from '@/utils/nfseTributacao';
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -73,6 +78,10 @@ export default function NfeConfigScreen() {
   const [codTribNac, setCodTribNac] = useState('010701');
   const [codNbs, setCodNbs] = useState('106043000');
   const [descricao, setDescricao] = useState('Serviço de mensalidade');
+  const [opSimpNac, setOpSimpNac] = useState(3);
+  const [regEspTrib, setRegEspTrib] = useState(0);
+  const [tribIssqn, setTribIssqn] = useState(1);
+  const [tpRetIssqn, setTpRetIssqn] = useState(1);
   const [chaveConfigurada, setChaveConfigurada] = useState(false);
   const [chaveSetup, setChaveSetup] = useState('');
   const [busyChave, setBusyChave] = useState(false);
@@ -98,6 +107,10 @@ export default function NfeConfigScreen() {
       setCodTribNac(c.codigo_tributacao_nacional ?? '010701');
       setCodNbs(c.codigo_nbs ?? '106043000');
       setDescricao(c.descricao_servico_padrao);
+      setOpSimpNac(Number(c.op_simp_nac ?? 3));
+      setRegEspTrib(Number(c.reg_esp_trib ?? 0));
+      setTribIssqn(Number(c.trib_issqn ?? 1));
+      setTpRetIssqn(Number(c.tp_ret_issqn ?? 1));
       setCertOk(Boolean(cert));
       setChaveConfigurada(chaveOk);
       if (perfil) {
@@ -268,10 +281,10 @@ export default function NfeConfigScreen() {
         csosn: '102',
         descricao_servico_padrao: descricao,
         natureza_operacao: 'Prestação de serviço',
-        op_simp_nac: 1,
-        reg_esp_trib: 0,
-        trib_issqn: 1,
-        tp_ret_issqn: 1,
+        op_simp_nac: Math.min(4, Math.max(1, opSimpNac)) as 1 | 2 | 3 | 4,
+        reg_esp_trib: regEspTrib,
+        trib_issqn: Math.min(4, Math.max(1, tribIssqn)) as 1 | 2 | 3 | 4,
+        tp_ret_issqn: Math.min(3, Math.max(1, tpRetIssqn)) as 1 | 2 | 3,
       });
 
       if (pendingCertFile) {
@@ -522,7 +535,39 @@ export default function NfeConfigScreen() {
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.h}>4. Serviço na NFS-e (mensalidade)</Text>
+        <Text style={styles.h}>4. Regime tributário (prestador)</Text>
+        <Text style={styles.sub}>
+          Deve ser igual ao cadastro da empresa no portal da prefeitura. Erro L327 indica divergência aqui.
+        </Text>
+        <NfseEnumField
+          label="Situação no Simples Nacional (opSimpNac)"
+          hint="Confira em americanahomologacao.nfe.com.br › perfil da empresa. ME/EPP costuma ser opção 3."
+          value={opSimpNac}
+          options={OP_SIMP_NAC_OPCOES}
+          onChange={setOpSimpNac}
+        />
+        <NfseEnumField
+          label="Regime especial de tributação (regEspTrib)"
+          value={regEspTrib}
+          options={REG_ESP_TRIB_OPCOES}
+          onChange={setRegEspTrib}
+        />
+        <NfseEnumField
+          label="Tributação do ISSQN (tribISSQN)"
+          value={tribIssqn}
+          options={TRIB_ISSQN_OPCOES}
+          onChange={setTribIssqn}
+        />
+        <NfseEnumField
+          label="Retenção do ISSQN (tpRetISSQN)"
+          value={tpRetIssqn}
+          options={TP_RET_ISSQN_OPCOES}
+          onChange={setTpRetIssqn}
+        />
+      </Card>
+
+      <Card style={styles.card}>
+        <Text style={styles.h}>5. Serviço na NFS-e (mensalidade)</Text>
         <Text style={styles.sub}>
           NFS-e de serviço não usa NCM nem CFOP (esses campos são de NF-e de produto). Informe o código do serviço
           conforme a Lista LC 116 e o NBS indicados pelo seu contador.

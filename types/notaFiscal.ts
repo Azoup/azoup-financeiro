@@ -24,7 +24,7 @@ export type NfeConfig = {
   inscricao_municipal: string;
   codigo_tributacao_nacional: string;
   codigo_nbs: string;
-  op_simp_nac: 1 | 2 | 3;
+  op_simp_nac: 1 | 2 | 3 | 4;
   reg_esp_trib: number;
   trib_issqn: 1 | 2 | 3 | 4;
   tp_ret_issqn: 1 | 2 | 3;

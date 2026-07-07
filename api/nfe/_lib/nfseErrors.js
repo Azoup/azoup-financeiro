@@ -4,6 +4,14 @@ function humanizeNfseRejection(message, ibge) {
   const raw = String(message ?? '').trim();
   if (!raw) return 'NFS-e rejeitada pela SEFIN.';
 
+  if (/L327/i.test(raw)) {
+    return [
+      'L327 — A opção de tributação na NFS-e não confere com o perfil do prestador na prefeitura.',
+      'Em Configurações › NFS-e, ajuste "Situação no Simples Nacional" para o mesmo valor cadastrado no portal da prefeitura (americanahomologacao.nfe.com.br).',
+      'Ex.: se a empresa é ME/EPP no Simples, selecione opção 3 — não "Não optante" (1).',
+    ].join(' ');
+  }
+
   if (/E0039/i.test(raw)) {
     const cod = onlyDigits(ibge).padStart(7, '0').slice(0, 7) || 'informado';
     if (cod === '3501608') {
