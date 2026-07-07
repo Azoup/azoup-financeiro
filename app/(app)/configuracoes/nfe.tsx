@@ -10,6 +10,7 @@ import {
   pickCertificadoFile,
   uploadCertificadoA1,
   upsertNfeConfig,
+  verificarConvenioMunicipioIbge,
 } from '@/services/nfeConfigService';
 import { fetchPerfilCobranca, upsertPerfilCobranca } from '@/services/perfilCobrancaService';
 import { colors, radius, spacing } from '@/theme/colors';
@@ -75,6 +76,9 @@ export default function NfeConfigScreen() {
   const [chaveConfigurada, setChaveConfigurada] = useState(false);
   const [chaveSetup, setChaveSetup] = useState('');
   const [busyChave, setBusyChave] = useState(false);
+  const [convenioOk, setConvenioOk] = useState<boolean | null>(null);
+  const [convenioMsg, setConvenioMsg] = useState<string | null>(null);
+  const [busyConvenio, setBusyConvenio] = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -149,6 +153,35 @@ export default function NfeConfigScreen() {
   );
 
   const patchEmitente = (p: Partial<PerfilCobrancaInput>) => setEmitente((v) => ({ ...v, ...p }));
+
+  const verificarIbge = async () => {
+    if (!ibge.trim()) {
+      showAppToast('error', 'Informe o código IBGE antes de verificar.');
+      return;
+    }
+    setBusyConvenio(true);
+    setConvenioMsg(null);
+    try {
+      const res = await verificarConvenioMunicipioIbge(ibge);
+      setConvenioOk(res.ok);
+      setConvenioMsg(
+        res.ok
+          ? `Município ${res.ibge} habilitado no emissor nacional (homologação).`
+          : res.message ?? 'Município não habilitado no Sistema Nacional NFS-e.',
+      );
+      if (res.ok) {
+        showAppToast('success', 'Município habilitado para NFS-e nacional.', `IBGE ${res.ibge}`);
+      } else {
+        showAppToast('error', 'Município não habilitado no emissor nacional.', 'Veja os detalhes na seção Município.');
+      }
+    } catch (e) {
+      setConvenioOk(false);
+      setConvenioMsg((e as Error).message);
+      showAppToast('error', (e as Error).message);
+    } finally {
+      setBusyConvenio(false);
+    }
+  };
 
   const escolherCertificado = async () => {
     try {
@@ -447,14 +480,34 @@ export default function NfeConfigScreen() {
         <FormTextInput
           label="Código IBGE do município"
           value={ibge}
-          onChangeText={setIbge}
+          onChangeText={(t) => {
+            setIbge(t);
+            setConvenioOk(null);
+            setConvenioMsg(null);
+          }}
           keyboardType="number-pad"
           placeholder="7 dígitos — ex.: 3550308"
         />
         <Text style={styles.fieldHint}>
-          Código da cidade onde o prestador está estabelecido (IBGE). Não é inscrição municipal — é o código do
-          município. Ex.: São Paulo = 3550308, Campinas = 3509502.
+          Código da cidade onde o prestador está estabelecido (IBGE). A cidade precisa estar aderida ao{' '}
+          <Text style={styles.boldHint}>Sistema Nacional NFS-e</Text> (emissor público). Caso contrário a SEFIN
+          rejeita com E0039.
         </Text>
+        <PrimaryButton
+          title={busyConvenio ? 'Verificando município…' : 'Verificar adesão do município'}
+          variant="secondary"
+          onPress={() => void verificarIbge()}
+          loading={busyConvenio}
+          disabled={!ibge.trim() || !certOk}
+        />
+        {!certOk ? (
+          <Text style={styles.fieldHint}>Envie o certificado A1 antes de verificar o município na SEFIN.</Text>
+        ) : null}
+        {convenioMsg ? (
+          <View style={[styles.convenioBox, convenioOk ? styles.convenioOk : styles.convenioWarn]}>
+            <Text style={styles.convenioTxt}>{convenioMsg}</Text>
+          </View>
+        ) : null}
         <FormTextInput
           label="Inscrição municipal (IM)"
           value={inscricaoMunicipal}
@@ -599,5 +652,15 @@ const styles = StyleSheet.create({
     marginTop: -spacing.sm,
     marginBottom: spacing.md,
   },
+  boldHint: { fontWeight: '700', color: colors.gray800 },
+  convenioBox: {
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+  },
+  convenioOk: { backgroundColor: '#e8f5e9', borderColor: '#a5d6a7' },
+  convenioWarn: { backgroundColor: '#fff3e0', borderColor: '#ffcc80' },
+  convenioTxt: { fontSize: 12, color: colors.gray800, lineHeight: 17 },
   footer: { fontSize: 11, color: colors.gray400, marginTop: spacing.sm, textAlign: 'center' },
 });

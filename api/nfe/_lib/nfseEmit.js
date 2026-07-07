@@ -1,6 +1,7 @@
 const { buildNFSeLayout } = require('./buildNFSeFromDb');
 const { createNfseWizard, cleanupCert } = require('./nfseWizard');
 const { withHomologTlsRelaxed } = require('./tlsHomolog');
+const { humanizeNfseRejection, validarConvenioMunicipio } = require('./nfseErrors');
 
 function extrairXml(ret) {
   const xml =
@@ -27,14 +28,24 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
     });
 
     try {
+      const convenio = await validarConvenioMunicipio(wizard, config.codigo_ibge_emitente);
+      if (!convenio.ok) {
+        return {
+          success: false,
+          status: 'E0039',
+          message: convenio.message,
+        };
+      }
+
       let ret;
       try {
         ret = await wizard.Autorizacao(layout);
       } catch (authErr) {
+        const raw = authErr?.message ?? String(authErr) ?? 'Falha ao comunicar com o webservice NFS-e.';
         return {
           success: false,
           status: 'ERR',
-          message: authErr?.message ?? String(authErr) ?? 'Falha ao comunicar com o webservice NFS-e.',
+          message: humanizeNfseRejection(raw, config.codigo_ibge_emitente),
         };
       }
       const chave =
@@ -66,7 +77,11 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
         Boolean(chave);
 
       if (!ok) {
-        return { success: false, status, message };
+        return {
+          success: false,
+          status,
+          message: humanizeNfseRejection(message, config.codigo_ibge_emitente),
+        };
       }
 
       const xmlProc = extrairXml(ret);

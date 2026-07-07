@@ -325,3 +325,37 @@ export function nfeApiBaseUrl(): string {
   }
   return process.env.EXPO_PUBLIC_NFE_API_URL ?? '';
 }
+
+export type MunicipioConvenioResult = {
+  ok: boolean;
+  ibge?: string;
+  message?: string;
+  tipoConvenio?: string | null;
+  aderente?: string | null;
+};
+
+export async function verificarConvenioMunicipioIbge(ibge: string): Promise<MunicipioConvenioResult> {
+  const cod = ibge.replace(/\D/g, '').padStart(7, '0').slice(0, 7);
+  if (cod.length < 7) {
+    throw new Error('Informe o código IBGE com 7 dígitos.');
+  }
+
+  const { data: session } = await supabase.auth.getSession();
+  const token = session.session?.access_token;
+  if (!token) throw new Error('Sessão expirada. Faça login novamente.');
+
+  const base = nfeApiBaseUrl();
+  if (!base) throw new Error('URL da API NFS-e não configurada.');
+
+  const res = await fetch(`${base}/api/nfe/municipio-convenio?ibge=${encodeURIComponent(cod)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const body = (await res.json().catch(() => ({}))) as MunicipioConvenioResult & { message?: string };
+  return {
+    ok: Boolean(body.ok),
+    ibge: body.ibge ?? cod,
+    message: body.message,
+    tipoConvenio: body.tipoConvenio ?? null,
+    aderente: body.aderente ?? null,
+  };
+}
