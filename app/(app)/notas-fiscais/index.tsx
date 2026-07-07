@@ -30,6 +30,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { showAppToast } from '@/utils/appToast';
 import Toast from 'react-native-toast-message';
 
 export default function NotasFiscaisIndexScreen() {
@@ -119,9 +120,9 @@ export default function NotasFiscaisIndexScreen() {
     try {
       const res = await reemitirNotaFiscalSefaz(item.id);
       if (res.success) {
-        Toast.show({ type: 'success', text1: 'NFS-e autorizada.' });
+        showAppToast('success', 'NFS-e autorizada.');
       } else {
-        Toast.show({ type: 'error', text1: res.message ?? 'NFS-e rejeitada.' });
+        showAppToast('error', res.message ?? 'NFS-e rejeitada.', 'Veja o motivo na nota abaixo e corrija antes de reemitir.');
       }
       await load();
     } catch (e) {
@@ -174,8 +175,8 @@ export default function NotasFiscaisIndexScreen() {
           </Text>
         ) : null}
         {item.motivo_rejeicao ? (
-          <Text style={styles.rejeicao} numberOfLines={3}>
-            {item.motivo_rejeicao}
+          <Text style={styles.rejeicao} selectable>
+            Rejeição: {item.motivo_rejeicao}
           </Text>
         ) : null}
         <Text style={styles.date}>{formatDateTimeBRFromISO(item.created_at)}</Text>

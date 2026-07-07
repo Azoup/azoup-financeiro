@@ -253,16 +253,40 @@ export async function uploadCertificadoA1(
   }
 }
 
+function isCertificadoFileName(name: string): boolean {
+  return /\.(pfx|p12)$/i.test(name.trim());
+}
+
 export async function pickCertificadoFile(): Promise<CertificadoFilePick | null> {
   if (Platform.OS === 'web') {
-    return new Promise((resolve) => {
+    if (typeof document === 'undefined') return null;
+
+    return new Promise((resolve, reject) => {
       const input = document.createElement('input');
       input.type = 'file';
-      input.accept = '.pfx,.p12';
-      input.onchange = () => {
+      input.accept = '.pfx,.p12,application/x-pkcs12,application/pkcs12';
+      input.style.display = 'none';
+
+      const cleanup = () => {
+        input.removeEventListener('change', onChange);
+        input.removeEventListener('cancel', onCancel);
+        window.setTimeout(() => input.remove(), 0);
+      };
+
+      const onCancel = () => {
+        cleanup();
+        resolve(null);
+      };
+
+      const onChange = () => {
         const f = input.files?.[0];
+        cleanup();
         if (!f) {
           resolve(null);
+          return;
+        }
+        if (!isCertificadoFileName(f.name)) {
+          reject(new Error('Selecione um arquivo .pfx ou .p12 (certificado A1).'));
           return;
         }
         resolve({
@@ -272,16 +296,27 @@ export async function pickCertificadoFile(): Promise<CertificadoFilePick | null>
           webFile: f,
         });
       };
+
+      input.addEventListener('change', onChange);
+      input.addEventListener('cancel', onCancel);
+      document.body.appendChild(input);
+      input.value = '';
       input.click();
     });
   }
+
   const res = await DocumentPicker.getDocumentAsync({
-    type: ['application/x-pkcs12', 'application/octet-stream'],
+    type: ['application/x-pkcs12', 'application/octet-stream', '*/*'],
     copyToCacheDirectory: true,
+    multiple: false,
   });
   if (res.canceled || !res.assets?.[0]) return null;
   const a = res.assets[0];
-  return { uri: a.uri, name: a.name, mimeType: a.mimeType ?? undefined };
+  const name = a.name?.trim() || 'certificado.pfx';
+  if (!isCertificadoFileName(name)) {
+    throw new Error('Selecione um arquivo .pfx ou .p12 (certificado A1).');
+  }
+  return { uri: a.uri, name, mimeType: a.mimeType ?? undefined };
 }
 
 export function nfeApiBaseUrl(): string {

@@ -27,6 +27,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { showAppToast } from '@/utils/appToast';
 import Toast from 'react-native-toast-message';
 
 function emptyEmitente(): PerfilCobrancaInput {
@@ -150,10 +151,15 @@ export default function NfeConfigScreen() {
   const patchEmitente = (p: Partial<PerfilCobrancaInput>) => setEmitente((v) => ({ ...v, ...p }));
 
   const escolherCertificado = async () => {
-    const file = await pickCertificadoFile();
-    if (!file) return;
-    setPendingCertFile(file);
-    setCertFileName(file.name);
+    try {
+      const file = await pickCertificadoFile();
+      if (!file) return;
+      setPendingCertFile(file);
+      setCertFileName(file.name);
+      showAppToast('success', 'Certificado selecionado', `${file.name} — informe a senha e clique em Salvar tudo.`);
+    } catch (e) {
+      showAppToast('error', (e as Error).message);
+    }
   };
 
   const salvarChaveCertificado = async () => {
@@ -374,13 +380,38 @@ export default function NfeConfigScreen() {
       <Card style={styles.card}>
         <Text style={styles.h}>2. Certificado digital A1</Text>
         <Text style={styles.sub}>
-          Status:{' '}
           {certOk
-            ? 'Certificado ativo no servidor'
-            : pendingCertFile
-              ? `Arquivo selecionado: ${certFileName}`
-              : 'Nenhum certificado — obrigatório para enviar à prefeitura/SEFIN'}
+            ? 'Certificado A1 já está salvo no servidor. Você pode trocar o arquivo abaixo se precisar.'
+            : 'Envie o arquivo .pfx ou .p12 do certificado A1 da empresa.'}
         </Text>
+        {certOk && !pendingCertFile ? (
+          <View style={styles.certStatusOk}>
+            <Ionicons name="shield-checkmark" size={22} color={colors.success} />
+            <Text style={styles.certStatusOkTxt}>Certificado ativo no servidor</Text>
+          </View>
+        ) : null}
+        {pendingCertFile ? (
+          <View style={styles.certStatusPending}>
+            <Ionicons name="document-attach" size={22} color={colors.petroleum} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.certStatusPendingTitle}>Arquivo selecionado</Text>
+              <Text style={styles.certStatusPendingName} numberOfLines={2}>
+                {certFileName ?? pendingCertFile.name}
+              </Text>
+              <Text style={styles.certStatusPendingHint}>Informe a senha abaixo e clique em Salvar tudo.</Text>
+            </View>
+            <Pressable
+              accessibilityLabel="Remover arquivo selecionado"
+              onPress={() => {
+                setPendingCertFile(null);
+                setCertFileName(null);
+              }}
+              hitSlop={8}
+            >
+              <Ionicons name="close-circle" size={22} color={colors.gray400} />
+            </Pressable>
+          </View>
+        ) : null}
         <Pressable style={styles.fileBtn} onPress={() => void escolherCertificado()}>
           <Ionicons name="folder-open-outline" size={22} color={colors.petroleum} />
           <Text style={styles.fileBtnTxt}>
@@ -517,6 +548,32 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
   fileBtnTxt: { fontSize: 14, fontWeight: '600', color: colors.petroleum, flex: 1 },
+  certStatusOk: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: '#e8f5e9',
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: '#a5d6a7',
+  },
+  certStatusOkTxt: { fontSize: 14, fontWeight: '700', color: colors.success, flex: 1 },
+  certStatusPending: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: '#e3f2fd',
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: '#90caf9',
+  },
+  certStatusPendingTitle: { fontSize: 12, fontWeight: '800', color: colors.petroleum, marginBottom: 2 },
+  certStatusPendingName: { fontSize: 14, fontWeight: '700', color: colors.gray800 },
+  certStatusPendingHint: { fontSize: 11, color: colors.gray600, marginTop: 4, lineHeight: 15 },
   certHint: { fontSize: 11, color: colors.gray600, lineHeight: 16, marginTop: -spacing.sm },
   mono: { fontFamily: Platform.OS === 'web' ? 'monospace' : undefined, fontSize: 11 },
   ambiente: {
