@@ -489,9 +489,10 @@ export default function NfeConfigScreen() {
           placeholder="7 dígitos — ex.: 3550308"
         />
         <Text style={styles.fieldHint}>
-          Código da cidade onde o prestador está estabelecido (IBGE). A cidade precisa estar aderida ao{' '}
-          <Text style={styles.boldHint}>Sistema Nacional NFS-e</Text> (emissor público). Caso contrário a SEFIN
-          rejeita com E0039.
+          Código da cidade do prestador (IBGE, 7 dígitos). Ex.: Americana = 3501608, São Paulo = 3550308.
+          {'\n'}
+          Americana usa o emissor municipal — o sistema envia automaticamente para a API da prefeitura em
+          homologação.
         </Text>
         <PrimaryButton
           title={busyConvenio ? 'Verificando município…' : 'Verificar adesão do município'}

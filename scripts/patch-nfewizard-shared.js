@@ -70,9 +70,34 @@ if (src.includes(tlsNeedle2)) {
   console.log('[patch-nfewizard-shared] TLS homologação (OpenSSL) — rejectUnauthorized sempre false.');
 }
 
+const urlNeedle = `getWebServiceUrlNFSe(metodo) {
+        const nfseUrls = NFSeServicosUrl;`;
+const urlReplacement = `getWebServiceUrlNFSe(metodo) {
+        try {
+            const __ov = process.env.NFSE_URL_OVERRIDES;
+            if (__ov) {
+                const __map = JSON.parse(__ov);
+                if (__map && typeof __map[metodo] === 'string' && __map[metodo]) {
+                    return __map[metodo];
+                }
+            }
+        } catch {
+            /* ignore */
+        }
+        const nfseUrls = NFSeServicosUrl;`;
+
+if (!src.includes('NFSE_URL_OVERRIDES') && src.includes(urlNeedle)) {
+  src = src.replace(urlNeedle, urlReplacement);
+  changed = true;
+  console.log('[patch-nfewizard-shared] URLs via NFSE_URL_OVERRIDES.');
+}
+
 if (changed) {
   fs.writeFileSync(sharedCjs, src);
-} else if (src.includes('if (this.config.dfe.ambiente === 2) {\n                        agentOptions.rejectUnauthorized = false;')) {
+} else if (
+  src.includes('if (this.config.dfe.ambiente === 2) {\n                        agentOptions.rejectUnauthorized = false;') &&
+  src.includes('NFSE_URL_OVERRIDES')
+) {
   console.log('[patch-nfewizard-shared] já aplicado.');
 } else {
   console.warn('[patch-nfewizard-shared] Nenhum patch TLS aplicado — padrão não encontrado.');

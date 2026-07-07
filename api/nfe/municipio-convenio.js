@@ -2,6 +2,7 @@ const { getAdmin, getUserFromBearer } = require('./_lib/supabaseAdmin');
 const { createNfseWizard, cleanupCert } = require('./_lib/nfseWizard');
 const { withHomologTlsRelaxed } = require('./_lib/tlsHomolog');
 const { validarConvenioMunicipio } = require('./_lib/nfseErrors');
+const { resolveNfseGateway } = require('./_lib/nfseGateways');
 const { prepareServerlessCryptoEnv } = require('./_lib/serverlessEnv');
 
 prepareServerlessCryptoEnv();
@@ -15,6 +16,17 @@ module.exports = async function handler(req, res) {
   const ibge = String(req.query?.ibge ?? '').trim();
   if (!ibge) {
     return res.status(400).json({ ok: false, message: 'Informe ?ibge= com 7 dígitos.' });
+  }
+
+  const gateway = resolveNfseGateway(ibge, 2);
+  if (gateway.mode === 'municipal') {
+    return res.status(200).json({
+      ok: true,
+      ibge: gateway.ibge,
+      mode: gateway.mode,
+      gateway: gateway.nome,
+      message: `${gateway.nome}: emissão via API municipal (homologação). Certifique-se de que o CNPJ está credenciado na prefeitura.`,
+    });
   }
 
   try {
@@ -49,6 +61,7 @@ module.exports = async function handler(req, res) {
         senhaEnc: sec.senha_criptografada,
         perfil,
         ambiente: 2,
+        ibge,
       });
       try {
         return await validarConvenioMunicipio(wizard, ibge);
@@ -57,7 +70,7 @@ module.exports = async function handler(req, res) {
       }
     });
 
-    return res.status(result.ok ? 200 : 422).json(result);
+    return res.status(result.ok ? 200 : 422).json({ ...result, mode: 'nacional' });
   } catch (e) {
     console.error('nfe/municipio-convenio', e);
     return res.status(500).json({

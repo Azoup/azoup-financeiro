@@ -34,9 +34,10 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const [{ data: perfil }, { data: cert }] = await Promise.all([
+    const [{ data: perfil }, { data: cert }, { data: config }] = await Promise.all([
       admin.from('perfil_cobranca').select('*').eq('user_id', user.id).maybeSingle(),
       admin.from('empresa_certificado').select('*').eq('user_id', user.id).eq('ativo', true).maybeSingle(),
+      admin.from('nfe_config').select('codigo_ibge_emitente').eq('user_id', user.id).maybeSingle(),
     ]);
 
     if (!perfil?.documento) {
@@ -62,6 +63,7 @@ module.exports = async function handler(req, res) {
       cert,
       senhaEnc: sec.senha_criptografada,
       justificativa,
+      codigoIbgeEmitente: config?.codigo_ibge_emitente,
     });
 
     if (!result.success) {

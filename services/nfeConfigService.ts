@@ -330,6 +330,8 @@ export type MunicipioConvenioResult = {
   ok: boolean;
   ibge?: string;
   message?: string;
+  mode?: 'nacional' | 'municipal';
+  gateway?: string;
   tipoConvenio?: string | null;
   aderente?: string | null;
 };
@@ -355,6 +357,8 @@ export async function verificarConvenioMunicipioIbge(ibge: string): Promise<Muni
     ok: Boolean(body.ok),
     ibge: body.ibge ?? cod,
     message: body.message,
+    mode: body.mode,
+    gateway: body.gateway,
     tipoConvenio: body.tipoConvenio ?? null,
     aderente: body.aderente ?? null,
   };

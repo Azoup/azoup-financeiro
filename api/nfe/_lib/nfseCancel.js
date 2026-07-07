@@ -1,6 +1,7 @@
 const { createNfseWizard, cleanupCert, onlyDigits } = require('./nfseWizard');
+const { withHomologTlsRelaxed } = require('./tlsHomolog');
 
-async function cancelarNfseSefaz({ admin, nota, perfil, cert, senhaEnc, justificativa }) {
+async function cancelarNfseSefaz({ admin, nota, perfil, cert, senhaEnc, justificativa, codigoIbgeEmitente }) {
   const xJust = String(justificativa ?? '').trim();
   if (xJust.length < 15) {
     throw new Error('A justificativa de cancelamento deve ter no mínimo 15 caracteres.');
@@ -33,38 +34,41 @@ async function cancelarNfseSefaz({ admin, nota, perfil, cert, senhaEnc, justific
     },
   };
 
-  const { wizard, certPath } = await createNfseWizard({
-    admin,
-    cert,
-    senhaEnc,
-    perfil,
-    ambiente,
+  return withHomologTlsRelaxed(async () => {
+    const { wizard, certPath } = await createNfseWizard({
+      admin,
+      cert,
+      senhaEnc,
+      perfil,
+      ambiente,
+      ibge: codigoIbgeEmitente,
+    });
+
+    try {
+      if (typeof wizard.RegistrarEvento !== 'function') {
+        throw new Error('Cancelamento NFS-e não disponível nesta versão da biblioteca.');
+      }
+
+      const ret = await wizard.RegistrarEvento(evento);
+      const status = String(ret?.status ?? ret?.response?.status ?? ret?.cStat ?? '');
+      const message = ret?.response?.xMotivo ?? ret?.message ?? ret?.xMotivo ?? 'Cancelada';
+
+      const ok =
+        ret?.success === true ||
+        status === '100' ||
+        status === 'OK' ||
+        status.toLowerCase() === 'sucesso' ||
+        /cancel/i.test(message);
+
+      if (!ok) {
+        return { success: false, status, message };
+      }
+
+      return { success: true, status: status || '100', message };
+    } finally {
+      cleanupCert(certPath);
+    }
   });
-
-  try {
-    if (typeof wizard.RegistrarEvento !== 'function') {
-      throw new Error('Cancelamento NFS-e não disponível nesta versão da biblioteca.');
-    }
-
-    const ret = await wizard.RegistrarEvento(evento);
-    const status = String(ret?.status ?? ret?.response?.status ?? ret?.cStat ?? '');
-    const message = ret?.response?.xMotivo ?? ret?.message ?? ret?.xMotivo ?? 'Cancelada';
-
-    const ok =
-      ret?.success === true ||
-      status === '100' ||
-      status === 'OK' ||
-      status.toLowerCase() === 'sucesso' ||
-      /cancel/i.test(message);
-
-    if (!ok) {
-      return { success: false, status, message };
-    }
-
-    return { success: true, status: status || '100', message };
-  } finally {
-    cleanupCert(certPath);
-  }
 }
 
 module.exports = { cancelarNfseSefaz };

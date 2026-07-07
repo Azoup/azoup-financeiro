@@ -19,22 +19,25 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
   const layout = buildNFSeLayout({ nota, itens, perfil, cliente, config });
 
   return withHomologTlsRelaxed(async () => {
-    const { wizard, certPath } = await createNfseWizard({
+    const { wizard, certPath, gateway } = await createNfseWizard({
       admin,
       cert,
       senhaEnc,
       perfil,
       ambiente: 2,
+      ibge: config.codigo_ibge_emitente,
     });
 
     try {
-      const convenio = await validarConvenioMunicipio(wizard, config.codigo_ibge_emitente);
-      if (!convenio.ok) {
-        return {
-          success: false,
-          status: 'E0039',
-          message: convenio.message,
-        };
+      if (!gateway.skipConvenioNacional) {
+        const convenio = await validarConvenioMunicipio(wizard, config.codigo_ibge_emitente);
+        if (!convenio.ok) {
+          return {
+            success: false,
+            status: 'E0039',
+            message: convenio.message,
+          };
+        }
       }
 
       let ret;
