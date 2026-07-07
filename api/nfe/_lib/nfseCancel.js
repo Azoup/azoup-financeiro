@@ -1,5 +1,7 @@
 const { createNfseWizard, cleanupCert, onlyDigits } = require('./nfseWizard');
 const { withHomologTlsRelaxed } = require('./tlsHomolog');
+const { installMunicipalAxiosRedirect } = require('./municipalAxiosRedirect');
+const { resolveNfseGateway } = require('./nfseGateways');
 
 async function cancelarNfseSefaz({ admin, nota, perfil, cert, senhaEnc, justificativa, codigoIbgeEmitente }) {
   const xJust = String(justificativa ?? '').trim();
@@ -35,6 +37,7 @@ async function cancelarNfseSefaz({ admin, nota, perfil, cert, senhaEnc, justific
   };
 
   return withHomologTlsRelaxed(async () => {
+    const gateway = resolveNfseGateway(codigoIbgeEmitente, ambiente);
     const { wizard, certPath } = await createNfseWizard({
       admin,
       cert,
@@ -44,9 +47,14 @@ async function cancelarNfseSefaz({ admin, nota, perfil, cert, senhaEnc, justific
       ibge: codigoIbgeEmitente,
     });
 
+    let removeRedirect = () => undefined;
     try {
       if (typeof wizard.RegistrarEvento !== 'function') {
         throw new Error('Cancelamento NFS-e não disponível nesta versão da biblioteca.');
+      }
+
+      if (gateway.mode === 'municipal' && gateway.urlOverrides) {
+        removeRedirect = await installMunicipalAxiosRedirect(wizard, gateway.urlOverrides);
       }
 
       const ret = await wizard.RegistrarEvento(evento);
@@ -66,6 +74,7 @@ async function cancelarNfseSefaz({ admin, nota, perfil, cert, senhaEnc, justific
 
       return { success: true, status: status || '100', message };
     } finally {
+      removeRedirect();
       cleanupCert(certPath);
     }
   });

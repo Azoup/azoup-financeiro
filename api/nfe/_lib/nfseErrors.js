@@ -6,6 +6,13 @@ function humanizeNfseRejection(message, ibge) {
 
   if (/E0039/i.test(raw)) {
     const cod = onlyDigits(ibge).padStart(7, '0').slice(0, 7) || 'informado';
+    if (cod === '3501608') {
+      return [
+        `E0039 — Americana (IBGE ${cod}): a prefeitura não aceita emissão direta pelo SEFIN nacional.`,
+        'O sistema deve usar a API municipal (americanahomologacao.nfe.com.br). Faça redeploy da versão mais recente.',
+        'Credencie o CNPJ do certificado A1 no portal de homologação da prefeitura de Americana.',
+      ].join(' ');
+    }
     return [
       `E0039 — O município IBGE ${cod} não está habilitado no Sistema Nacional NFS-e para emissão pelo emissor público nacional (homologação).`,
       'Confira se o código IBGE da cidade do prestador está correto (7 dígitos, ex.: 3550308).',

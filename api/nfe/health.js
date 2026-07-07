@@ -2,6 +2,7 @@ const { getAdmin } = require('./_lib/supabaseAdmin');
 const fs = require('fs');
 const path = require('path');
 const { prepareServerlessCryptoEnv } = require('./_lib/serverlessEnv');
+const { resolveNfseGateway } = require('./_lib/nfseGateways');
 
 prepareServerlessCryptoEnv();
 
@@ -34,6 +35,7 @@ module.exports = async function handler(req, res) {
     icpBundleBytes,
     nfewizardCertsCount,
     nfsePackage: false,
+    nfseGatewayAmericana: Boolean(resolveNfseGateway('3501608', 2).urlOverrides),
   };
 
   try {

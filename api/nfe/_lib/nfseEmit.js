@@ -2,6 +2,7 @@ const { buildNFSeLayout } = require('./buildNFSeFromDb');
 const { createNfseWizard, cleanupCert } = require('./nfseWizard');
 const { withHomologTlsRelaxed } = require('./tlsHomolog');
 const { humanizeNfseRejection, validarConvenioMunicipio } = require('./nfseErrors');
+const { installMunicipalAxiosRedirect } = require('./municipalAxiosRedirect');
 
 function extrairXml(ret) {
   const xml =
@@ -41,15 +42,26 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
       }
 
       let ret;
+      let removeRedirect = () => undefined;
       try {
+        if (gateway.mode === 'municipal' && gateway.urlOverrides) {
+          removeRedirect = await installMunicipalAxiosRedirect(wizard, gateway.urlOverrides);
+          console.info('[nfse] gateway municipal', gateway.nome, gateway.urlOverrides.NFSe_Autorizacao);
+        }
         ret = await wizard.Autorizacao(layout);
       } catch (authErr) {
         const raw = authErr?.message ?? String(authErr) ?? 'Falha ao comunicar com o webservice NFS-e.';
+        const hint =
+          gateway.mode === 'municipal'
+            ? ' Verifique se o CNPJ está credenciado para integração em americanahomologacao.nfe.com.br.'
+            : '';
         return {
           success: false,
           status: 'ERR',
-          message: humanizeNfseRejection(raw, config.codigo_ibge_emitente),
+          message: `${humanizeNfseRejection(raw, config.codigo_ibge_emitente)}${hint}`,
         };
+      } finally {
+        removeRedirect();
       }
       const chave =
         ret?.response?.chaveAcesso ??
