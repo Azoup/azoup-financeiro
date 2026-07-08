@@ -37,6 +37,13 @@ function padNbs(code) {
   return onlyDigits(code).padStart(9, '0').slice(0, 9);
 }
 
+/** Valores monetários NFS-e (TSDec15V2): sempre 2 casas decimais, ex. "0.20". */
+function money2(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '0.00';
+  return (Math.round(v * 100) / 100).toFixed(2);
+}
+
 /** Monta DPS/NFS-e nacional a partir dos dados do banco (mensalidade = serviço). */
 function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   const ambiente = 2; // homologação fixa por enquanto
@@ -76,7 +83,7 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
 
   const valor = Number(nota.valor_total);
   const tribMun = Number(config.trib_issqn ?? 1);
-  const vMun = tribMun === 1 ? Number((valor * 0.04).toFixed(2)) : 0;
+  const vMun = tribMun === 1 ? money2(valor * 0.04) : money2(0);
 
   return {
     DPS: {
@@ -121,7 +128,7 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
           },
         },
         valores: {
-          vServPrest: { vServ: valor },
+          vServPrest: { vServ: money2(valor) },
           trib: {
             tribMun: {
               tribISSQN: tribMun,
@@ -129,8 +136,8 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
             },
             totTrib: {
               vTotTrib: {
-                vTotTribFed: 0,
-                vTotTribEst: 0,
+                vTotTribFed: money2(0),
+                vTotTribEst: money2(0),
                 vTotTribMun: vMun,
               },
             },

@@ -12,6 +12,13 @@ function humanizeNfseRejection(message, ibge) {
     ].join(' ');
   }
 
+  if (/L2103|TSDec15V2|vTotTribMun/i.test(raw)) {
+    return [
+      'L2103 — Valor monetário inválido na DPS (deve ter 2 casas decimais, ex.: 0.20).',
+      'Reemitir após o último deploy; se persistir, verifique o valor da nota.',
+    ].join(' ');
+  }
+
   if (/E0039/i.test(raw)) {
     const cod = onlyDigits(ibge).padStart(7, '0').slice(0, 7) || 'informado';
     if (cod === '3501608') {
