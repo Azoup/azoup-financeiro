@@ -1,3 +1,4 @@
+import { Card } from '@/components/Card';
 import { NfseEnumField } from '@/components/configuracoes/NfseEnumField';
 import { FormTextInput } from '@/components/FormTextInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -16,6 +17,8 @@ import { fetchPerfilCobranca, upsertPerfilCobranca } from '@/services/perfilCobr
 import { colors, radius, spacing } from '@/theme/colors';
 import type { PerfilCobrancaInput } from '@/types/contasReceber';
 import type { NfeConfig } from '@/types/notaFiscal';
+import { showAppToast } from '@/utils/appToast';
+import { avaliarProntidaoNfe } from '@/utils/nfeProntidao';
 import {
   OP_SIMP_NAC_OPCOES,
   REG_ESP_TRIB_OPCOES,
@@ -33,7 +36,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { showAppToast } from '@/utils/appToast';
 import Toast from 'react-native-toast-message';
 
 function emptyEmitente(): PerfilCobrancaInput {
