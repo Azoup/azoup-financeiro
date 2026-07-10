@@ -33,6 +33,12 @@ function padTribNac(code) {
   return onlyDigits(code).padStart(6, '0').slice(0, 6);
 }
 
+function padTribMun(code) {
+  const d = onlyDigits(code);
+  if (!d) return '';
+  return d.slice(0, 3);
+}
+
 function padNbs(code) {
   return onlyDigits(code).padStart(9, '0').slice(0, 9);
 }
@@ -85,6 +91,12 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   const tribMun = Number(config.trib_issqn ?? 1);
   const vMun = tribMun === 1 ? money2(valor * 0.04) : money2(0);
 
+  // cTribMun: complementar municipal (até 3 dígitos). Americana costuma exigir (ex.: 001).
+  let cTribMun = padTribMun(config.codigo_tributacao_municipal);
+  if (!cTribMun && ibge === '3501608') {
+    cTribMun = '001';
+  }
+
   return {
     DPS: {
       infDps: {
@@ -123,6 +135,7 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
           locPrest: { cLocPrestacao: ibge },
           cServ: {
             cTribNac: padTribNac(config.codigo_tributacao_nacional),
+            ...(cTribMun ? { cTribMun } : {}),
             xDescServ,
             cNBS: padNbs(config.codigo_nbs),
           },

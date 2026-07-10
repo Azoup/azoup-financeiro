@@ -52,7 +52,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
       } catch (authErr) {
         const raw = authErr?.message ?? String(authErr) ?? 'Falha ao comunicar com o webservice NFS-e.';
         const hint =
-          gateway.mode === 'municipal' && !/L327|L2103|E0039|TSDec15V2|vTotTribMun/i.test(raw)
+          gateway.mode === 'municipal' && !/L327|L2103|E0039|E0314|E314|TSDec15V2|vTotTribMun/i.test(raw)
             ? ' Verifique se o CNPJ está credenciado para integração em americanahomologacao.nfe.com.br.'
             : '';
         return {

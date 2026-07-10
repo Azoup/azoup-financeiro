@@ -78,6 +78,7 @@ export default function NfeConfigScreen() {
   const [ibge, setIbge] = useState('');
   const [inscricaoMunicipal, setInscricaoMunicipal] = useState('');
   const [codTribNac, setCodTribNac] = useState('010701');
+  const [codTribMun, setCodTribMun] = useState('001');
   const [codNbs, setCodNbs] = useState('106043000');
   const [descricao, setDescricao] = useState('Serviço de mensalidade');
   const [opSimpNac, setOpSimpNac] = useState(3);
@@ -107,6 +108,7 @@ export default function NfeConfigScreen() {
       setIbge(c.codigo_ibge_emitente);
       setInscricaoMunicipal(c.inscricao_municipal ?? '');
       setCodTribNac(c.codigo_tributacao_nacional ?? '010701');
+      setCodTribMun(c.codigo_tributacao_municipal?.trim() || (c.codigo_ibge_emitente === '3501608' ? '001' : ''));
       setCodNbs(c.codigo_nbs ?? '106043000');
       setDescricao(c.descricao_servico_padrao);
       setOpSimpNac(Number(c.op_simp_nac ?? 3));
@@ -276,6 +278,7 @@ export default function NfeConfigScreen() {
         codigo_ibge_emitente: ibge,
         inscricao_municipal: inscricaoMunicipal,
         codigo_tributacao_nacional: codTribNac,
+        codigo_tributacao_municipal: codTribMun,
         codigo_nbs: codNbs,
         ncm_servico: '00000000',
         cfop_padrao: '5933',
@@ -584,6 +587,18 @@ export default function NfeConfigScreen() {
         <Text style={styles.fieldHint}>
           Código nacional do serviço na Lei Complementar 116. Ex.: 010701 = desenvolvimento de programas sob
           encomenda; 171901 = contabilidade. Confirme com seu contador.
+        </Text>
+        <FormTextInput
+          label="Código de tributação municipal (cTribMun)"
+          value={codTribMun}
+          onChangeText={setCodTribMun}
+          keyboardType="number-pad"
+          placeholder="Até 3 dígitos — ex.: 001"
+          maxLength={3}
+        />
+        <Text style={styles.fieldHint}>
+          Complemento municipal exigido por Americana e outras prefeituras. Se rejeitar com E314, confirme o
+          código na lista da prefeitura (portal NFS-e). Em Americana o valor mais comum em testes é 001.
         </Text>
         <FormTextInput
           label="Código NBS (nomenclatura do serviço)"

@@ -19,6 +19,14 @@ function humanizeNfseRejection(message, ibge) {
     ].join(' ');
   }
 
+  if (/E0314|E314/i.test(raw)) {
+    return [
+      'E314 — Código de tributação municipal (cTribMun) inválido ou inexistente em Americana.',
+      'Em Configurações › NFS-e, informe o código municipal (até 3 dígitos, ex.: 001) conforme a lista da prefeitura.',
+      'Confirme também o cTribNac (LC 116) e a competência da nota.',
+    ].join(' ');
+  }
+
   if (/E0039/i.test(raw)) {
     const cod = onlyDigits(ibge).padStart(7, '0').slice(0, 7) || 'informado';
     if (cod === '3501608') {

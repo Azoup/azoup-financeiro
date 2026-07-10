@@ -23,6 +23,8 @@ export type NfeConfig = {
   natureza_operacao: string;
   inscricao_municipal: string;
   codigo_tributacao_nacional: string;
+  /** cTribMun — até 3 dígitos; vazio se o município não exigir. */
+  codigo_tributacao_municipal: string;
   codigo_nbs: string;
   op_simp_nac: 1 | 2 | 3 | 4;
   reg_esp_trib: number;
