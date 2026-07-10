@@ -86,4 +86,4 @@ async function createNfseWizard({ admin, cert, senhaEnc, perfil, ambiente = 2, i
   return { wizard, certPath, gateway };
 }
 
-module.exports = { createNfseWizard, cleanupCert, onlyDigits };
+module.exports = { createNfseWizard, cleanupCert, onlyDigits, downloadCertToTemp };

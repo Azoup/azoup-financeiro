@@ -1,8 +1,12 @@
 const { buildNFSeLayout } = require('./buildNFSeFromDb');
-const { createNfseWizard, cleanupCert } = require('./nfseWizard');
+const { createNfseWizard, cleanupCert, downloadCertToTemp } = require('./nfseWizard');
+const { decryptCertPassword } = require('./crypto');
 const { withHomologTlsRelaxed } = require('./tlsHomolog');
 const { humanizeNfseRejection, validarConvenioMunicipio } = require('./nfseErrors');
 const { installMunicipalAxiosRedirect } = require('./municipalAxiosRedirect');
+const { resolveNfseGateway } = require('./nfseGateways');
+const { emitirNfsePaulistana } = require('./nfsePaulistana');
+const { prepareServerlessCryptoEnv } = require('./serverlessEnv');
 
 function extrairXml(ret) {
   const xml =
@@ -17,10 +21,42 @@ function extrairXml(ret) {
 }
 
 async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, cert, senhaEnc }) {
+  const gateway = resolveNfseGateway(config.codigo_ibge_emitente, 2);
+
+  // São Paulo capital → WebService Paulistana (não usa SEFIN/ADN nacional)
+  if (gateway.mode === 'paulistana') {
+    prepareServerlessCryptoEnv();
+    const senha = await decryptCertPassword(admin, senhaEnc);
+    const certPath = await downloadCertToTemp(admin, cert.storage_path);
+    try {
+      console.info('[nfse] gateway Paulistana', gateway.nome);
+      return await withHomologTlsRelaxed(() =>
+        emitirNfsePaulistana({
+          certPath,
+          senha,
+          nota,
+          itens,
+          perfil,
+          cliente,
+          config,
+          ambiente: 2,
+        }),
+      );
+    } catch (e) {
+      return {
+        success: false,
+        status: 'ERR',
+        message: humanizeNfseRejection(e?.message ?? String(e), config.codigo_ibge_emitente),
+      };
+    } finally {
+      cleanupCert(certPath);
+    }
+  }
+
   const layout = buildNFSeLayout({ nota, itens, perfil, cliente, config });
 
   return withHomologTlsRelaxed(async () => {
-    const { wizard, certPath, gateway } = await createNfseWizard({
+    const { wizard, certPath, gateway: gw } = await createNfseWizard({
       admin,
       cert,
       senhaEnc,
@@ -30,7 +66,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
     });
 
     try {
-      if (!gateway.skipConvenioNacional) {
+      if (!gw.skipConvenioNacional) {
         const convenio = await validarConvenioMunicipio(wizard, config.codigo_ibge_emitente);
         if (!convenio.ok) {
           return {
@@ -44,15 +80,16 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
       let ret;
       let removeRedirect = () => undefined;
       try {
-        if (gateway.mode === 'municipal' && gateway.urlOverrides) {
-          removeRedirect = await installMunicipalAxiosRedirect(wizard, gateway.urlOverrides);
-          console.info('[nfse] gateway municipal', gateway.nome, gateway.urlOverrides.NFSe_Autorizacao);
+        if (gw.mode === 'municipal' && gw.urlOverrides) {
+          removeRedirect = await installMunicipalAxiosRedirect(wizard, gw.urlOverrides);
+          console.info('[nfse] gateway municipal', gw.nome, gw.urlOverrides.NFSe_Autorizacao);
         }
         ret = await wizard.Autorizacao(layout);
       } catch (authErr) {
         const raw = authErr?.message ?? String(authErr) ?? 'Falha ao comunicar com o webservice NFS-e.';
         const hint =
-          gateway.mode === 'municipal' && !/L327|L2103|E0039|E0314|E314|TSDec15V2|vTotTribMun/i.test(raw)
+          gw.mode === 'municipal' &&
+          !/L327|L906|L2103|E0039|E0314|E314|TSDec15V2|vTotTribMun/i.test(raw)
             ? ' Verifique se o CNPJ está credenciado para integração em americanahomologacao.nfe.com.br.'
             : '';
         return {

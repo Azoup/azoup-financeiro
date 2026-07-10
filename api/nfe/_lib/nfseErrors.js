@@ -21,9 +21,16 @@ function humanizeNfseRejection(message, ibge) {
 
   if (/E0314|E314/i.test(raw)) {
     return [
-      'E314 — Código de tributação municipal (cTribMun) inválido ou inexistente em Americana.',
-      'Em Configurações › NFS-e, informe o código municipal (até 3 dígitos, ex.: 001) conforme a lista da prefeitura.',
-      'Confirme também o cTribNac (LC 116) e a competência da nota.',
+      'E314 — Código de tributação municipal (cTribMun) inválido ou inexistente.',
+      'Em Configurações › NFS-e, informe o código municipal conforme a lista da prefeitura.',
+      'Para São Paulo (Paulistana), use o código de serviço de 4–5 dígitos da lista municipal.',
+    ].join(' ');
+  }
+
+  if (/L906/i.test(raw)) {
+    return [
+      'L906 — O código de atividade (ex.: 01.07) não está liberado para emissão neste CNPJ na prefeitura de Americana.',
+      'Opções: (1) liberar a atividade no portal americanahomologacao.nfe.com.br; ou (2) se a empresa for de São Paulo capital, altere o IBGE para 3550308 e use a Paulistana (CCM + código de serviço SP).',
     ].join(' ');
   }
 

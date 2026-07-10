@@ -108,7 +108,10 @@ export default function NfeConfigScreen() {
       setIbge(c.codigo_ibge_emitente);
       setInscricaoMunicipal(c.inscricao_municipal ?? '');
       setCodTribNac(c.codigo_tributacao_nacional ?? '010701');
-      setCodTribMun(c.codigo_tributacao_municipal?.trim() || (c.codigo_ibge_emitente === '3501608' ? '001' : ''));
+      setCodTribMun(
+        c.codigo_tributacao_municipal?.trim() ||
+          (c.codigo_ibge_emitente === '3501608' ? '001' : c.codigo_ibge_emitente === '3550308' ? '' : ''),
+      );
       setCodNbs(c.codigo_nbs ?? '106043000');
       setDescricao(c.descricao_servico_padrao);
       setOpSimpNac(Number(c.op_simp_nac ?? 3));
@@ -507,10 +510,14 @@ export default function NfeConfigScreen() {
           placeholder="7 dígitos — ex.: 3550308"
         />
         <Text style={styles.fieldHint}>
-          Código da cidade do prestador (IBGE, 7 dígitos). Ex.: Americana = 3501608, São Paulo = 3550308.
+          Código da cidade do prestador (IBGE, 7 dígitos).
           {'\n'}
-          Americana usa o emissor municipal — o sistema envia automaticamente para a API da prefeitura em
-          homologação.
+          • São Paulo capital = 3550308 → Nota Fiscal Paulistana (WebService da prefeitura)
+          {'\n'}
+          • Americana = 3501608 → API municipal ADN
+          {'\n'}
+          Para usar a API de SP, informe 3550308, a Inscrição Municipal (CCM) e o código de serviço
+          Paulistana (4–5 dígitos) no campo cTribMun.
         </Text>
         <PrimaryButton
           title={busyConvenio ? 'Verificando município…' : 'Verificar adesão do município'}
@@ -528,14 +535,14 @@ export default function NfeConfigScreen() {
           </View>
         ) : null}
         <FormTextInput
-          label="Inscrição municipal (IM)"
+          label="Inscrição municipal (IM / CCM)"
           value={inscricaoMunicipal}
           onChangeText={setInscricaoMunicipal}
-          placeholder="Número na prefeitura — se a sua cidade exigir"
+          placeholder="São Paulo: CCM · Americana: IM da prefeitura"
         />
         <Text style={styles.fieldHint}>
-          Cadastro da empresa na prefeitura (IM). Campo separado do código IBGE. Preencha se sua contabilidade ou a
-          prefeitura exigir na NFS-e.
+          Em São Paulo capital (Paulistana) a Inscrição Municipal (CCM) é obrigatória. Em Americana, preencha se a
+          prefeitura exigir.
         </Text>
       </Card>
 
@@ -589,16 +596,16 @@ export default function NfeConfigScreen() {
           encomenda; 171901 = contabilidade. Confirme com seu contador.
         </Text>
         <FormTextInput
-          label="Código de tributação municipal (cTribMun)"
+          label="Código de tributação municipal / serviço SP (cTribMun)"
           value={codTribMun}
           onChangeText={setCodTribMun}
           keyboardType="number-pad"
-          placeholder="Até 3 dígitos — ex.: 001"
-          maxLength={3}
+          placeholder="SP: 4–5 dígitos · Americana: até 3 (ex.: 001)"
+          maxLength={5}
         />
         <Text style={styles.fieldHint}>
-          Complemento municipal exigido por Americana e outras prefeituras. Se rejeitar com E314, confirme o
-          código na lista da prefeitura (portal NFS-e). Em Americana o valor mais comum em testes é 001.
+          São Paulo (Paulistana): código de serviço da lista municipal (4–5 dígitos) — obrigatório.
+          Americana: cTribMun até 3 dígitos (ex.: 001). Confirme com a contabilidade/prefeitura.
         </Text>
         <FormTextInput
           label="Código NBS (nomenclatura do serviço)"

@@ -91,7 +91,8 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   const tribMun = Number(config.trib_issqn ?? 1);
   const vMun = tribMun === 1 ? money2(valor * 0.04) : money2(0);
 
-  // cTribMun: complementar municipal (até 3 dígitos). Americana costuma exigir (ex.: 001).
+  // cTribMun: complementar municipal (até 3 dígitos em ADN). Americana costuma exigir (ex.: 001).
+  // São Paulo capital usa Paulistana (outro fluxo) — não monta DPS nacional.
   let cTribMun = padTribMun(config.codigo_tributacao_municipal);
   if (!cTribMun && ibge === '3501608') {
     cTribMun = '001';

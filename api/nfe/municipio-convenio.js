@@ -19,13 +19,16 @@ module.exports = async function handler(req, res) {
   }
 
   const gateway = resolveNfseGateway(ibge, 2);
-  if (gateway.mode === 'municipal') {
+  if (gateway.mode === 'municipal' || gateway.mode === 'paulistana') {
     return res.status(200).json({
       ok: true,
       ibge: gateway.ibge,
       mode: gateway.mode,
       gateway: gateway.nome,
-      message: `${gateway.nome}: emissão via API municipal (homologação). Certifique-se de que o CNPJ está credenciado na prefeitura.`,
+      message:
+        gateway.mode === 'paulistana'
+          ? `${gateway.nome}: emissão via WebService LoteNFe (nfews.prefeitura.sp.gov.br). Informe CCM e código de serviço SP (4–5 dígitos).`
+          : `${gateway.nome}: emissão via API municipal (homologação). Certifique-se de que o CNPJ está credenciado na prefeitura.`,
     });
   }
 

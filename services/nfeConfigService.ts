@@ -62,7 +62,7 @@ export async function upsertNfeConfig(userId: string, input: Partial<NfeConfigIn
       .slice(0, 6),
     codigo_tributacao_municipal: (input.codigo_tributacao_municipal ?? current.codigo_tributacao_municipal ?? '')
       .replace(/\D/g, '')
-      .slice(0, 3),
+      .slice(0, 5),
     codigo_nbs: (input.codigo_nbs ?? current.codigo_nbs ?? '106043000').replace(/\D/g, '').slice(0, 9),
     op_simp_nac: Math.min(4, Math.max(1, Number(input.op_simp_nac ?? current.op_simp_nac ?? 3))) as 1 | 2 | 3 | 4,
     reg_esp_trib: input.reg_esp_trib ?? current.reg_esp_trib ?? 0,

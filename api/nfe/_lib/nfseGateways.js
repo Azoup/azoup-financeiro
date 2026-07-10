@@ -1,10 +1,19 @@
 /**
- * Municípios que usam gateway municipal (API ADN local) em vez do SEFIN nacional direto.
- * Americana/SP — manual WsNFSeNacional_Complementar v1.4 (Tiplan).
+ * Roteamento de emissão NFS-e por município (IBGE).
+ * - 3550308 São Paulo capital → WebService Paulistana (SOAP)
+ * - 3501608 Americana → API ADN municipal (Tiplan)
+ * - demais → SEFIN Nacional (ADN)
  */
 const GATEWAYS_BY_IBGE = {
+  '3550308': {
+    nome: 'São Paulo/SP — Nota Fiscal Paulistana',
+    mode: 'paulistana',
+    skipConvenioNacional: true,
+    urlOverrides: null,
+  },
   '3501608': {
-    nome: 'Americana/SP — emissor municipal',
+    nome: 'Americana/SP — emissor municipal ADN',
+    mode: 'municipal',
     skipConvenioNacional: true,
     H: {
       NFSe_Autorizacao: 'https://americanahomologacao.nfe.com.br/api/adn/dps/recepcao',
@@ -38,6 +47,15 @@ function resolveNfseGateway(ibge, ambiente = 2) {
       ibge: cod,
       nome: 'SEFIN Nacional',
       skipConvenioNacional: false,
+      urlOverrides: null,
+    };
+  }
+  if (gw.mode === 'paulistana') {
+    return {
+      mode: 'paulistana',
+      ibge: cod,
+      nome: gw.nome,
+      skipConvenioNacional: true,
       urlOverrides: null,
     };
   }
