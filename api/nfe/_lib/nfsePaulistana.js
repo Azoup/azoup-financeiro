@@ -13,6 +13,13 @@ const { SignedXml } = require('xml-crypto');
 const WS_URL = 'https://nfews.prefeitura.sp.gov.br/lotenfe.asmx';
 const NS = 'http://www.prefeitura.sp.gov.br/nfe';
 
+/** soapAction do WSDL (não é o nome do método). Fonte: ACBr SP.ini / WSDL Paulistana. */
+const SOAP_ACTIONS = {
+  TesteEnvioLoteRPS: `${NS}/ws/testeenvio`,
+  EnvioLoteRPS: `${NS}/ws/envioLoteRPS`,
+  EnvioRPS: `${NS}/ws/envioRPS`,
+};
+
 function onlyDigits(s) {
   return String(s ?? '').replace(/\D/g, '');
 }
@@ -263,7 +270,7 @@ function soapEnvelope(method, mensagemXml) {
 function httpsRequest({ url, body, pfx, passphrase, soapAction }) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
-    const action = `${NS}/${soapAction}`;
+    const action = soapAction; // URI completa do WSDL, ex.: .../nfe/ws/testeenvio
     const req = https.request(
       {
         hostname: u.hostname,
@@ -272,7 +279,7 @@ function httpsRequest({ url, body, pfx, passphrase, soapAction }) {
         port: 443,
         minVersion: 'TLSv1.2',
         headers: {
-          // SOAP 1.2: Content-Type com action (sem header SOAPAction legado).
+          // SOAP 1.2: action no Content-Type (URI do WSDL, não o nome do método).
           'Content-Type': `application/soap+xml; charset=utf-8; action="${action}"`,
           'Content-Length': Buffer.byteLength(body),
         },
@@ -429,6 +436,10 @@ async function emitirNfsePaulistana({
 
   const isTeste = Number(ambiente) !== 1;
   const method = isTeste ? 'TesteEnvioLoteRPS' : 'EnvioRPS';
+  const soapAction = SOAP_ACTIONS[method];
+  if (!soapAction) {
+    throw new Error(`SOAPAction não mapeado para o método Paulistana: ${method}`);
+  }
   let xmlPedido = isTeste ? buildPedidoEnvioLoteRpsXml(args) : buildPedidoEnvioRpsXml(args);
   xmlPedido = signXmlDocument(xmlPedido, privateKeyPem, certificatePem);
 
@@ -439,7 +450,7 @@ async function emitirNfsePaulistana({
     body: soap,
     pfx: pfxBuf,
     passphrase: senha,
-    soapAction: method,
+    soapAction,
   });
 
   if (httpRes.statusCode === 403) {
