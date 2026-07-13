@@ -250,18 +250,22 @@ function signXmlDocument(xml, privateKeyPem, certificatePem) {
 
 /** SOAP 1.2 — exigido pelo endpoint nfews.prefeitura.sp.gov.br (manual). */
 function soapEnvelope(method, mensagemXml) {
-  // Escapar caracteres especiais (alternativa oficial à CDATA; gem nfe-paulistana).
-  const escaped = escapeXml(mensagemXml);
+  // SOAP 1.2 / WSDL document: elemento de entrada é {Método}Request
+  // (ex.: TesteEnvioLoteRPSRequest). Usar só o nome do método deixa MensagemXML
+  // vazia no servidor → erro 1102.
+  const requestEl = method.endsWith('Request') ? method : `${method}Request`;
+  // CDATA (manual §4.3.1 / FAQ 1102). Escapar sequências que quebrariam o CDATA.
+  const cdataSafe = String(mensagemXml ?? '').replace(/]]>/g, ']]]]><![CDATA[>');
   return (
     `<?xml version="1.0" encoding="utf-8"?>` +
     `<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ` +
     `xmlns:xsd="http://www.w3.org/2001/XMLSchema" ` +
     `xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">` +
     `<soap12:Body>` +
-    `<${method} xmlns="${NS}">` +
+    `<${requestEl} xmlns="${NS}">` +
     `<VersaoSchema>1</VersaoSchema>` +
-    `<MensagemXML>${escaped}</MensagemXML>` +
-    `</${method}>` +
+    `<MensagemXML><![CDATA[${cdataSafe}]]></MensagemXML>` +
+    `</${requestEl}>` +
     `</soap12:Body>` +
     `</soap12:Envelope>`
   );
