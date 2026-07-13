@@ -2,7 +2,7 @@
  * NFS-e São Paulo capital — WebService Paulistana (LoteNFe).
  * Homologação: TesteEnvioLoteRPS (valida sem gerar NFS-e).
  * Produção: EnvioRPS.
- * Manual: https://nfews.prefeitura.sp.gov.br/lotenfe.asmx?WSDL
+ * Endpoint: https://nfews.prefeitura.sp.gov.br/lotenfe.asmx (SOAP 1.2 + mTLS A1).
  */
 const crypto = require('crypto');
 const fs = require('fs');
@@ -213,12 +213,18 @@ function buildPedidoEnvioLoteRpsXml(args) {
 }
 
 function signXmlDocument(xml, privateKeyPem, certificatePem) {
+  // Remover declaração XML — a assinatura é só do pedido (manual § FAQ).
+  const xmlSemDecl = String(xml).replace(/^<\?xml[^?]*\?>\s*/i, '');
   const sig = new SignedXml({
     privateKey: privateKeyPem,
     publicCert: certificatePem,
     signatureAlgorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
+    // Manual: Enveloped + C14N. KeyInfo com X509 é o default do xml-crypto 6.x.
     canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+    getKeyInfoContent: SignedXml.getKeyInfoContent,
   });
+  // isEmptyUri: true → Reference URI="" (exigido pela Paulistana).
+  // Sem isso o xml-crypto injeta Id="_0" no root e quebra o XSD (HTTP 500).
   sig.addReference({
     xpath: '/*',
     transforms: [
@@ -226,43 +232,49 @@ function signXmlDocument(xml, privateKeyPem, certificatePem) {
       'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
     ],
     digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
+    uri: '',
+    isEmptyUri: true,
   });
-  sig.computeSignature(xml, {
+  sig.computeSignature(xmlSemDecl, {
     location: { reference: '/*', action: 'append' },
   });
   return sig.getSignedXml();
 }
 
+/** SOAP 1.2 — exigido pelo endpoint nfews.prefeitura.sp.gov.br (manual). */
 function soapEnvelope(method, mensagemXml) {
-  const escaped = mensagemXml.replace(/]]>/g, ']]]]><![CDATA[>');
+  // Escapar caracteres especiais (alternativa oficial à CDATA; gem nfe-paulistana).
+  const escaped = escapeXml(mensagemXml);
   return (
     `<?xml version="1.0" encoding="utf-8"?>` +
-    `<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ` +
+    `<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ` +
     `xmlns:xsd="http://www.w3.org/2001/XMLSchema" ` +
-    `xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">` +
-    `<soap:Body>` +
+    `xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">` +
+    `<soap12:Body>` +
     `<${method} xmlns="${NS}">` +
     `<VersaoSchema>1</VersaoSchema>` +
-    `<MensagemXML><![CDATA[${escaped}]]></MensagemXML>` +
+    `<MensagemXML>${escaped}</MensagemXML>` +
     `</${method}>` +
-    `</soap:Body>` +
-    `</soap:Envelope>`
+    `</soap12:Body>` +
+    `</soap12:Envelope>`
   );
 }
 
 function httpsRequest({ url, body, pfx, passphrase, soapAction }) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
+    const action = `${NS}/${soapAction}`;
     const req = https.request(
       {
         hostname: u.hostname,
         path: u.pathname + u.search,
         method: 'POST',
         port: 443,
+        minVersion: 'TLSv1.2',
         headers: {
-          'Content-Type': 'text/xml; charset=utf-8',
+          // SOAP 1.2: Content-Type com action (sem header SOAPAction legado).
+          'Content-Type': `application/soap+xml; charset=utf-8; action="${action}"`,
           'Content-Length': Buffer.byteLength(body),
-          SOAPAction: `"${NS}/${soapAction}"`,
         },
         pfx,
         passphrase,
@@ -283,6 +295,27 @@ function httpsRequest({ url, body, pfx, passphrase, soapAction }) {
     req.write(body);
     req.end();
   });
+}
+
+function extractHttpErrorDetail(soapBody) {
+  if (!soapBody) return '';
+  const fault =
+    soapBody.match(/<faultstring[^>]*>([\s\S]*?)<\/faultstring>/i)?.[1] ||
+    soapBody.match(/<Reason>[\s\S]*?<Text[^>]*>([\s\S]*?)<\/Text>/i)?.[1] ||
+    soapBody.match(/<Title>([\s\S]*?)<\/Title>/i)?.[1] ||
+    soapBody.match(/<h1>([\s\S]*?)<\/h1>/i)?.[1];
+  if (fault) {
+    return fault
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 400);
+  }
+  const plain = soapBody.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return plain.slice(0, 280);
 }
 
 function parseSoapResult(soapBody, method) {
@@ -329,6 +362,11 @@ async function emitirNfsePaulistana({
   if (im.length < 1) {
     throw new Error(
       'Informe a Inscrição Municipal (CCM) de São Paulo em Configurações › NFS-e (obrigatória na Paulistana).',
+    );
+  }
+  if (im.length > 12) {
+    throw new Error(
+      'CCM de São Paulo inválido (máx. 12 dígitos). Confira a Inscrição Municipal no portal da Paulistana.',
     );
   }
 
@@ -404,11 +442,24 @@ async function emitirNfsePaulistana({
     soapAction: method,
   });
 
-  if (httpRes.statusCode >= 500) {
+  if (httpRes.statusCode === 403) {
     return {
       success: false,
       status: 'ERR',
-      message: `Paulistana HTTP ${httpRes.statusCode}. Verifique certificado e CCM em São Paulo.`,
+      message:
+        'Paulistana HTTP 403 (acesso negado). O certificado A1 precisa estar válido e vinculado ao CNPJ/CCM em São Paulo (mTLS).',
+    };
+  }
+
+  if (httpRes.statusCode >= 400) {
+    const detail = extractHttpErrorDetail(httpRes.body);
+    return {
+      success: false,
+      status: 'ERR',
+      message: detail
+        ? `Paulistana HTTP ${httpRes.statusCode}: ${detail}`
+        : `Paulistana HTTP ${httpRes.statusCode}. Verifique certificado A1, CCM de São Paulo e código de serviço (4–5 dígitos).`,
+      xml_autorizado: httpRes.body?.slice?.(0, 4000) || null,
     };
   }
 

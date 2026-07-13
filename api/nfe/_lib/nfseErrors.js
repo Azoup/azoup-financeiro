@@ -29,8 +29,9 @@ function humanizeNfseRejection(message, ibge) {
 
   if (/L906/i.test(raw)) {
     return [
-      'L906 — O código de atividade (ex.: 01.07) não está liberado para emissão neste CNPJ na prefeitura de Americana.',
-      'Opções: (1) liberar a atividade no portal americanahomologacao.nfe.com.br; ou (2) se a empresa for de São Paulo capital, altere o IBGE para 3550308 e use a Paulistana (CCM + código de serviço SP).',
+      'L906 — A prefeitura de Americana não liberou este serviço para emissão neste CNPJ.',
+      'O código enviado (cTribNac, ex.: 010701) corresponde ao item 01.07 da LC 116 — não é erro de formatação.',
+      'No portal americanahomologacao.nfe.com.br: (1) Autorização para Emissão via integração; (2) confira se a atividade/serviço 01.07 (código 010701) está no cadastro municipal do CNPJ.',
     ].join(' ');
   }
 

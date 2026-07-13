@@ -40,7 +40,10 @@ export async function fetchNfeConfig(userId: string): Promise<NfeConfig | null> 
 
 export async function upsertNfeConfig(userId: string, input: Partial<NfeConfigInput>): Promise<void> {
   const current = (await fetchNfeConfig(userId)) ?? { ...DEFAULT_NFE_CONFIG, user_id: userId };
-  const row = {
+  const tribMun = (input.codigo_tributacao_municipal ?? current.codigo_tributacao_municipal ?? '')
+    .replace(/\D/g, '')
+    .slice(0, 5);
+  const rowBase = {
     user_id: userId,
     serie: (input.serie ?? current.serie).trim() || '1',
     proximo_numero: input.proximo_numero ?? current.proximo_numero ?? 1,
@@ -60,16 +63,24 @@ export async function upsertNfeConfig(userId: string, input: Partial<NfeConfigIn
     codigo_tributacao_nacional: (input.codigo_tributacao_nacional ?? current.codigo_tributacao_nacional ?? '010701')
       .replace(/\D/g, '')
       .slice(0, 6),
-    codigo_tributacao_municipal: (input.codigo_tributacao_municipal ?? current.codigo_tributacao_municipal ?? '')
-      .replace(/\D/g, '')
-      .slice(0, 5),
     codigo_nbs: (input.codigo_nbs ?? current.codigo_nbs ?? '106043000').replace(/\D/g, '').slice(0, 9),
     op_simp_nac: Math.min(4, Math.max(1, Number(input.op_simp_nac ?? current.op_simp_nac ?? 3))) as 1 | 2 | 3 | 4,
     reg_esp_trib: input.reg_esp_trib ?? current.reg_esp_trib ?? 0,
     trib_issqn: input.trib_issqn ?? current.trib_issqn ?? 1,
     tp_ret_issqn: input.tp_ret_issqn ?? current.tp_ret_issqn ?? 1,
   };
-  const { error } = await supabase.from('nfe_config').upsert(row, { onConflict: 'user_id' });
+
+  const withMun = { ...rowBase, codigo_tributacao_municipal: tribMun };
+  let { error } = await supabase.from('nfe_config').upsert(withMun, { onConflict: 'user_id' });
+
+  // Coluna ainda não criada no Supabase (migration 036) — salva o restante e avisa.
+  if (error && /codigo_tributacao_municipal/i.test(error.message)) {
+    ({ error } = await supabase.from('nfe_config').upsert(rowBase, { onConflict: 'user_id' }));
+    if (error) throw new Error(error.message);
+    throw new Error(
+      'Configuração salva, mas falta a coluna codigo_tributacao_municipal. Rode no Supabase SQL Editor o arquivo supabase/migrations/036_nfe_c_trib_mun.sql e salve de novo.',
+    );
+  }
   if (error) throw new Error(error.message);
 }
 
