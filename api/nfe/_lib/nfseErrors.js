@@ -29,9 +29,12 @@ function humanizeNfseRejection(message, ibge) {
 
   if (/L906/i.test(raw)) {
     return [
-      'L906 — A prefeitura de Americana não liberou este serviço para emissão neste CNPJ.',
-      'O código enviado (cTribNac, ex.: 010701) corresponde ao item 01.07 da LC 116 — não é erro de formatação.',
-      'No portal americanahomologacao.nfe.com.br: (1) Autorização para Emissão via integração; (2) confira se a atividade/serviço 01.07 (código 010701) está no cadastro municipal do CNPJ.',
+      'L906 — A prefeitura de Americana não liberou este serviço/atividade para emissão neste CNPJ (regra municipal).',
+      'Não é erro de layout da DPS: o webservice está certo; falta liberação no cadastro.',
+      '1) Acesse https://nfse.americana.sp.gov.br com certificado A1 ou Senha Web.',
+      '2) Menu Autorização para Emissão → solicite liberação para integração.',
+      '3) Confirme se a atividade 01.07 (cTribNac 010701 / CNAE correspondente) está habilitada para o CNPJ.',
+      'Homologação (americanahomologacao.nfe.com.br) só testa após o mesmo cadastro/liberação existir lá.',
     ].join(' ');
   }
 

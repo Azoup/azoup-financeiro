@@ -20,12 +20,17 @@ const GATEWAYS_BY_IBGE = {
       NFSe_Eventos: 'https://americanahomologacao.nfe.com.br/api/adn/dps/evento',
       NFSe_Consulta: 'https://americanahomologacao.nfe.com.br/api/adn/dps/recepcao',
       NFSe_ConsultaDPS: 'https://americanahomologacao.nfe.com.br/api/adn/dps/recepcao',
+      NFSe_ChaveAcesso: 'https://americanahomologacao.nfe.com.br/api/adn/dps/chave-acesso',
+      NFSe_Xml: 'https://americanahomologacao.nfe.com.br/api/adn/dps/xml',
     },
     P: {
       NFSe_Autorizacao: 'https://nfse.americana.sp.gov.br/api/adn/dps/recepcao',
       NFSe_Eventos: 'https://nfse.americana.sp.gov.br/api/adn/dps/evento',
       NFSe_Consulta: 'https://nfse.americana.sp.gov.br/api/adn/dps/recepcao',
       NFSe_ConsultaDPS: 'https://nfse.americana.sp.gov.br/api/adn/dps/recepcao',
+      // Manual Tiplan 1.4: path de produção difere do de homologação.
+      NFSe_ChaveAcesso: 'https://nfse.americana.sp.gov.br/api/adn/dps/recepcao/chave-acesso',
+      NFSe_Xml: 'https://nfse.americana.sp.gov.br/api/adn/dps/xml',
     },
   },
 };

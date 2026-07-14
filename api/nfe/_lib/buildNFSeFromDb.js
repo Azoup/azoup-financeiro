@@ -91,11 +91,23 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   const tribMun = Number(config.trib_issqn ?? 1);
   const vMun = tribMun === 1 ? money2(valor * 0.04) : money2(0);
 
+  // Manual Americana: série numérica 1–99998 (99999 reservada ao emissor online).
+  const serieNum = Number(String(nota.serie || config.serie || '1').replace(/\D/g, '') || '1');
+  if (!Number.isFinite(serieNum) || serieNum < 1 || serieNum >= 99999) {
+    throw new Error(
+      'Série do RPS inválida para Americana: use número entre 1 e 99998 (a série 99999 é reservada ao site da prefeitura).',
+    );
+  }
+
   // cTribMun: complementar municipal (até 3 dígitos em ADN). Americana costuma exigir (ex.: 001).
   // São Paulo capital usa Paulistana (outro fluxo) — não monta DPS nacional.
   let cTribMun = padTribMun(config.codigo_tributacao_municipal);
   if (!cTribMun && ibge === '3501608') {
     cTribMun = '001';
+  }
+
+  if (ibge === '3501608' && !onlyDigits(config.inscricao_municipal)) {
+    throw new Error('Informe a Inscrição Municipal de Americana (ex.: 69842) em Configurações › NFS-e.');
   }
 
   return {
@@ -104,7 +116,7 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
         tpAmb: ambiente,
         dhEmi: dhEmiBr(nota.data_emissao),
         verAplic: 'SistemaJessica-1.0',
-        serie: String(nota.serie || config.serie || '1'),
+        serie: String(serieNum),
         nDPS: String(nota.numero),
         dCompet: parseCompetenciaIso(nota.competencia, nota.data_emissao),
         tpEmit: 1,
