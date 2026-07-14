@@ -11,18 +11,19 @@ const DEFAULT_NFE_CONFIG: NfeConfigInput = {
   ambiente: AMBIENTE_FISCAL_HOMOLOGACAO,
   inscricao_estadual: '',
   regime_tributario: 1,
-  codigo_ibge_emitente: '',
+  // Azoup / prestador em Americana — API municipal ADN (não Paulistana).
+  codigo_ibge_emitente: '3501608',
   ncm_servico: '00000000',
   cfop_padrao: '5933',
   cst_icms: '102',
   csosn: '102',
   descricao_servico_padrao: 'Serviço de mensalidade',
   natureza_operacao: 'Prestação de serviço',
-  inscricao_municipal: '',
+  inscricao_municipal: '69842',
   codigo_tributacao_nacional: '010701',
   codigo_tributacao_municipal: '001',
   codigo_nbs: '106043000',
-  op_simp_nac: 1,
+  op_simp_nac: 3,
   reg_esp_trib: 0,
   trib_issqn: 1,
   tp_ret_issqn: 1,
@@ -86,7 +87,23 @@ export async function upsertNfeConfig(userId: string, input: Partial<NfeConfigIn
 
 export async function ensureNfeConfig(userId: string): Promise<NfeConfig> {
   const existing = await fetchNfeConfig(userId);
-  if (existing) return existing;
+  if (existing) {
+    const ibge = String(existing.codigo_ibge_emitente ?? '').replace(/\D/g, '');
+    // Volta de tentativa Paulistana (SP capital) para Americana — empresa cadastrada em Americana.
+    if (ibge === '3550308') {
+      await upsertNfeConfig(userId, {
+        codigo_ibge_emitente: '3501608',
+        inscricao_municipal:
+          String(existing.inscricao_municipal ?? '').replace(/\D/g, '') || '69842',
+        codigo_tributacao_municipal: '001',
+        codigo_tributacao_nacional: existing.codigo_tributacao_nacional || '010701',
+        op_simp_nac: (existing.op_simp_nac === 1 ? 3 : existing.op_simp_nac) || 3,
+      });
+      const fixed = await fetchNfeConfig(userId);
+      if (fixed) return fixed;
+    }
+    return existing;
+  }
   await upsertNfeConfig(userId, DEFAULT_NFE_CONFIG);
   const created = await fetchNfeConfig(userId);
   if (!created) throw new Error('Não foi possível criar configuração NFS-e.');

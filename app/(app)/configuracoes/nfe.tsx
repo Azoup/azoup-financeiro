@@ -507,17 +507,16 @@ export default function NfeConfigScreen() {
             setConvenioMsg(null);
           }}
           keyboardType="number-pad"
-          placeholder="7 dígitos — ex.: 3550308"
+          placeholder="7 dígitos — ex.: 3501608"
         />
         <Text style={styles.fieldHint}>
           Código da cidade do prestador (IBGE, 7 dígitos).
           {'\n'}
-          • São Paulo capital = 3550308 → Nota Fiscal Paulistana (WebService da prefeitura)
+          • Americana = 3501608 → API municipal (americanahomologacao.nfe.com.br)
           {'\n'}
-          • Americana = 3501608 → API municipal ADN
+          • São Paulo capital = 3550308 → Paulistana (somente com CCM da capital)
           {'\n'}
-          Para usar a API de SP, informe 3550308, a Inscrição Municipal (CCM) e o código de serviço
-          Paulistana (4–5 dígitos) no campo cTribMun.
+          Azoup está em Americana: use 3501608, IM 69842 e cTribMun 001.
         </Text>
         <PrimaryButton
           title={busyConvenio ? 'Verificando município…' : 'Verificar adesão do município'}
@@ -538,11 +537,11 @@ export default function NfeConfigScreen() {
           label="Inscrição municipal (IM / CCM)"
           value={inscricaoMunicipal}
           onChangeText={setInscricaoMunicipal}
-          placeholder="São Paulo: CCM · Americana: IM da prefeitura"
+          placeholder="Americana: IM da prefeitura — ex.: 69842"
         />
         <Text style={styles.fieldHint}>
-          Em São Paulo capital (Paulistana) a Inscrição Municipal (CCM) é obrigatória. Em Americana, preencha se a
-          prefeitura exigir.
+          Em Americana informe a inscrição municipal do cadastro (ex.: 69842). CCM de São Paulo capital só se o
+          IBGE for 3550308.
         </Text>
       </Card>
 
@@ -596,16 +595,16 @@ export default function NfeConfigScreen() {
           encomenda; 171901 = contabilidade. Confirme com seu contador.
         </Text>
         <FormTextInput
-          label="Código de tributação municipal / serviço SP (cTribMun)"
+          label="Código de tributação municipal (cTribMun)"
           value={codTribMun}
           onChangeText={setCodTribMun}
           keyboardType="number-pad"
-          placeholder="SP: 4–5 dígitos · Americana: até 3 (ex.: 001)"
+          placeholder="Americana: até 3 dígitos — ex.: 001"
           maxLength={5}
         />
         <Text style={styles.fieldHint}>
-          São Paulo (Paulistana): código de serviço da lista municipal (4–5 dígitos) — obrigatório.
-          Americana: cTribMun até 3 dígitos (ex.: 001). Confirme com a contabilidade/prefeitura.
+          Americana: cTribMun até 3 dígitos (ex.: 001). São Paulo capital: código de serviço municipal 4–5 dígitos.
+          Confirme com a contabilidade/prefeitura.
         </Text>
         <FormTextInput
           label="Código NBS (nomenclatura do serviço)"
