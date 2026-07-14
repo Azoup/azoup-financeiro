@@ -210,7 +210,7 @@ function buildPedidoEnvioLoteRpsXml(args) {
     `<transacao>true</transacao>` +
     `<dtInicio>${escapeXml(dt)}</dtInicio>` +
     `<dtFim>${escapeXml(dt)}</dtFim>` +
-    `<QtdeRPS>1</QtdeRPS>` +
+    `<QtdRPS>1</QtdRPS>` +
     `<ValorTotalServicos>${escapeXml(valor)}</ValorTotalServicos>` +
     `<ValorTotalDeducoes>0</ValorTotalDeducoes>` +
     `</Cabecalho>` +
