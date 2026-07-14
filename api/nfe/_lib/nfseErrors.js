@@ -35,6 +35,24 @@ function humanizeNfseRejection(message, ibge) {
     ].join(' ');
   }
 
+  if (/1202/i.test(raw)) {
+    return [
+      '1202 — Prestador não encontrado no Cadastro Municipal de São Paulo (CCM).',
+      'A Paulistana só aceita CNPJ com CCM válido na capital. Confira em Configurações › NFS-e:',
+      '(1) código IBGE 3550308; (2) Inscrição Municipal = CCM de São Paulo (não a IM de Americana);',
+      '(3) CNPJ do certificado A1 igual ao cadastrado em nfpaulistana.prefeitura.sp.gov.br.',
+      'Sem CCM em São Paulo, use Americana (IBGE 3501608) e a API municipal — a API de SP não substitui cadastro na capital.',
+    ].join(' ');
+  }
+
+  if (/1203|1204/i.test(raw) && /1202/i.test(raw) === false) {
+    return [
+      raw.split('|')[0]?.trim() || raw,
+      'Os totais do lote não bateram com os RPS lidos pela Paulistana.',
+      'Confira CCM (máx. 8 dígitos), valor da nota e código de serviço SP (4–5 dígitos).',
+    ].join(' ');
+  }
+
   if (/E0039/i.test(raw)) {
     const cod = onlyDigits(ibge).padStart(7, '0').slice(0, 7) || 'informado';
     if (cod === '3501608') {

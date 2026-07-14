@@ -30,7 +30,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
     const certPath = await downloadCertToTemp(admin, cert.storage_path);
     try {
       console.info('[nfse] gateway Paulistana', gateway.nome);
-      return await withHomologTlsRelaxed(() =>
+      const result = await withHomologTlsRelaxed(() =>
         emitirNfsePaulistana({
           certPath,
           senha,
@@ -42,6 +42,10 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
           ambiente: 2,
         }),
       );
+      if (!result.success && result.message) {
+        result.message = humanizeNfseRejection(result.message, config.codigo_ibge_emitente);
+      }
+      return result;
     } catch (e) {
       return {
         success: false,

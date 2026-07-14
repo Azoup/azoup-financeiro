@@ -136,8 +136,13 @@ function signRpsCadeia(cadeia, privateKeyPem) {
   return sign.sign(privateKeyPem, 'base64');
 }
 
-function buildPedidoEnvioRpsXml({
-  cnpjRemetente,
+/** CCM no XML: dígitos sem zeros à esquerda forçados. Na assinatura RPS: 8 posições. */
+function ccmXml(im) {
+  const d = onlyDigits(im);
+  return String(parseInt(d, 10) || 0);
+}
+
+function buildRpsElement({
   im,
   serie,
   numero,
@@ -153,16 +158,12 @@ function buildPedidoEnvioRpsXml({
 }) {
   const isCpf = tomadorDoc.length === 11;
   const end = tomadorEnd || {};
+  const cep = onlyDigits(end.cep);
   return (
-    `<?xml version="1.0" encoding="UTF-8"?>` +
-    `<PedidoEnvioRPS xmlns="${NS}">` +
-    `<Cabecalho Versao="1" xmlns="">` +
-    `<CPFCNPJRemetente><CNPJ>${escapeXml(cnpjRemetente)}</CNPJ></CPFCNPJRemetente>` +
-    `</Cabecalho>` +
     `<RPS xmlns="">` +
     `<Assinatura>${escapeXml(assinaturaRps)}</Assinatura>` +
     `<ChaveRPS>` +
-    `<InscricaoPrestador>${escapeXml(padLeft(onlyDigits(im), 8))}</InscricaoPrestador>` +
+    `<InscricaoPrestador>${escapeXml(ccmXml(im))}</InscricaoPrestador>` +
     `<SerieRPS>${escapeXml(String(serie || '1').slice(0, 5))}</SerieRPS>` +
     `<NumeroRPS>${escapeXml(String(numero))}</NumeroRPS>` +
     `</ChaveRPS>` +
@@ -184,29 +185,33 @@ function buildPedidoEnvioRpsXml({
     `<Bairro>${escapeXml(end.bairro || 'Centro')}</Bairro>` +
     `<Cidade>${escapeXml(end.cidadeIbge || '3550308')}</Cidade>` +
     `<UF>${escapeXml(end.uf || 'SP')}</UF>` +
-    `<CEP>${escapeXml(padLeft(onlyDigits(end.cep), 8))}</CEP>` +
+    (cep ? `<CEP>${escapeXml(padLeft(cep, 8))}</CEP>` : '') +
     `</EnderecoTomador>` +
     `<Discriminacao>${escapeXml(discriminacao)}</Discriminacao>` +
-    `</RPS>` +
+    `</RPS>`
+  );
+}
+
+function buildPedidoEnvioRpsXml(args) {
+  return (
+    `<?xml version="1.0" encoding="UTF-8"?>` +
+    `<PedidoEnvioRPS xmlns="${NS}">` +
+    `<Cabecalho Versao="1" xmlns="">` +
+    `<CPFCNPJRemetente><CNPJ>${escapeXml(args.cnpjRemetente)}</CNPJ></CPFCNPJRemetente>` +
+    `</Cabecalho>` +
+    buildRpsElement(args) +
     `</PedidoEnvioRPS>`
   );
 }
 
 function buildPedidoEnvioLoteRpsXml(args) {
-  const cnpj = args.cnpjRemetente;
   const valor = moneyPlain(args.valor);
   const dt = dateYmd(args.dataEmissao);
-  const rpsInner = buildPedidoEnvioRpsXml(args)
-    .replace(/^<\?xml[^?]*\?>/, '')
-    .replace(`<PedidoEnvioRPS xmlns="${NS}">`, '')
-    .replace('</PedidoEnvioRPS>', '')
-    .replace(/<Cabecalho[\s\S]*?<\/Cabecalho>/, '');
-
   return (
     `<?xml version="1.0" encoding="UTF-8"?>` +
     `<PedidoEnvioLoteRPS xmlns="${NS}">` +
     `<Cabecalho Versao="1" xmlns="">` +
-    `<CPFCNPJRemetente><CNPJ>${escapeXml(cnpj)}</CNPJ></CPFCNPJRemetente>` +
+    `<CPFCNPJRemetente><CNPJ>${escapeXml(args.cnpjRemetente)}</CNPJ></CPFCNPJRemetente>` +
     `<transacao>true</transacao>` +
     `<dtInicio>${escapeXml(dt)}</dtInicio>` +
     `<dtFim>${escapeXml(dt)}</dtFim>` +
@@ -214,7 +219,7 @@ function buildPedidoEnvioLoteRpsXml(args) {
     `<ValorTotalServicos>${escapeXml(valor)}</ValorTotalServicos>` +
     `<ValorTotalDeducoes>0</ValorTotalDeducoes>` +
     `</Cabecalho>` +
-    rpsInner +
+    buildRpsElement(args) +
     `</PedidoEnvioLoteRPS>`
   );
 }
@@ -375,9 +380,10 @@ async function emitirNfsePaulistana({
       'Informe a Inscrição Municipal (CCM) de São Paulo em Configurações › NFS-e (obrigatória na Paulistana).',
     );
   }
-  if (im.length > 12) {
+  // Assinatura RPS da Paulistana usa CCM com 8 posições; CCM de SP tem no máx. 8 dígitos.
+  if (im.length > 8) {
     throw new Error(
-      'CCM de São Paulo inválido (máx. 12 dígitos). Confira a Inscrição Municipal no portal da Paulistana.',
+      'CCM de São Paulo inválido (máx. 8 dígitos). Não use a inscrição de outro município (ex.: Americana). Confira o CCM em nfpaulistana.prefeitura.sp.gov.br.',
     );
   }
 
@@ -387,9 +393,15 @@ async function emitirNfsePaulistana({
   }
 
   const valor = Number(nota.valor_total);
+  if (!Number.isFinite(valor) || valor <= 0) {
+    throw new Error('Valor da nota inválido para emissão na Paulistana.');
+  }
   const codigoServico = codigoServicoSp(config);
   const serie = String(nota.serie || config.serie || '1').slice(0, 5);
   const numero = Number(nota.numero);
+  if (!Number.isFinite(numero) || numero < 1) {
+    throw new Error('Número do RPS inválido.');
+  }
   const dataEmissao = nota.data_emissao;
   const discriminacao =
     Number(ambiente) === 2
