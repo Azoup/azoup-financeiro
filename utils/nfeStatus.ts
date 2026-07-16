@@ -50,7 +50,8 @@ export function podeCancelarNotaFiscal(nota: {
   tipo_documento?: string | null;
 }): boolean {
   if (nota.status !== 'autorizada' || !nota.chave_acesso?.trim()) return false;
-  if (nota.tipo_documento === 'nfse') return true;
+  // NFS-e (padrão do app) ou tipo ausente em registros antigos.
+  if (!nota.tipo_documento || nota.tipo_documento === 'nfse') return true;
   return Boolean(nota.protocolo_autorizacao?.trim());
 }
 

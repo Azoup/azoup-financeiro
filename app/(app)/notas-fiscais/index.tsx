@@ -39,7 +39,7 @@ export default function NotasFiscaisIndexScreen() {
   const [rows, setRows] = useState<NotaFiscalListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [homologacao] = useState(true);
+  const [homologacao] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<NotaFiscalListRow | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
   const [reemitBusyId, setReemitBusyId] = useState<string | null>(null);
@@ -219,12 +219,20 @@ export default function NotasFiscaisIndexScreen() {
             <Ionicons name="flask-outline" size={18} color={colors.petroleum} />
             <Text style={styles.homologTxt}>
               Ambiente de <Text style={styles.homologStrong}>homologação</Text> — NFS-e de serviço sem valor fiscal.
-              Produção será habilitada futuramente.
             </Text>
           </View>
-        ) : null}
+        ) : (
+          <View style={[styles.homologBanner, styles.prodBanner]}>
+            <Ionicons name="shield-checkmark-outline" size={18} color={colors.petroleum} />
+            <Text style={styles.homologTxt}>
+              Ambiente de <Text style={styles.homologStrong}>produção</Text> — NFS-e com valor fiscal. Notas
+              autorizadas podem ser canceladas abaixo (justificativa mín. 15 caracteres).
+            </Text>
+          </View>
+        )}
         <Text style={styles.lead}>
-          Notas de serviço emitidas a partir das mensalidades. Cancelamento só para NFS-e autorizada.
+          Notas de serviço emitidas a partir das mensalidades. Use &quot;Cancelar NFS-e&quot; nas autorizadas quando
+          precisar.
         </Text>
         <Pressable style={styles.configLink} onPress={() => router.push('/(app)/configuracoes/nfe')}>
           <Ionicons name="settings-outline" size={16} color={colors.orange} />

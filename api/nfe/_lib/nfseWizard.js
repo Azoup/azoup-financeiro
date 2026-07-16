@@ -35,7 +35,7 @@ function cleanupCert(certPath) {
 }
 
 /** Instancia @nfewizard/nfse com certificado temporário. */
-async function createNfseWizard({ admin, cert, senhaEnc, perfil, ambiente = 2, ibge }) {
+async function createNfseWizard({ admin, cert, senhaEnc, perfil, ambiente = 1, ibge }) {
   prepareServerlessCryptoEnv();
 
   const amb = Number(ambiente) === 1 ? 1 : 2;

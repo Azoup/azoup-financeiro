@@ -37,7 +37,7 @@ export function EnviarMensalidadeModal({
             <View style={styles.optionBody}>
               <Text style={styles.optionTitleLight}>Gerar mensalidade + NFS-e</Text>
               <Text style={styles.optionSubLight}>
-                Mensalidade, carnê em A receber e nota fiscal de serviço (homologação). Cliente precisa estar com
+                Mensalidade, carnê em A receber e nota fiscal de serviço (produção). Cliente precisa estar com
                 &quot;Com NF&quot; no cadastro e certificado A1 configurado.
               </Text>
             </View>

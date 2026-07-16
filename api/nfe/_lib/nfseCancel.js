@@ -15,7 +15,8 @@ async function cancelarNfseSefaz({ admin, nota, perfil, cert, senhaEnc, justific
   const chave = onlyDigits(nota.chave_acesso);
   const doc = onlyDigits(perfil.documento);
   const isCnpj = doc.length === 14;
-  const ambiente = 2;
+  // Usa o ambiente em que a nota foi emitida (produção=1). Fallback produção.
+  const ambiente = Number(nota.ambiente) === 2 ? 2 : 1;
 
   const evento = {
     pedRegEvento: {

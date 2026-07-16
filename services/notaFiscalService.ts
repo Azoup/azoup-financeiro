@@ -3,7 +3,7 @@ import { ensureNfeConfig, fetchCertificadoAtivo, nfeApiBaseUrl } from '@/service
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
 import { vincularNotaFiscalAoBoletoMensalidade, vincularNotaFiscalAoBoletoVenda } from '@/services/sicoobBoletoService';
 import type { CancelarNfeResult, EmitirNfeResult, NotaFiscalListRow } from '@/types/notaFiscal';
-import { AMBIENTE_FISCAL_HOMOLOGACAO } from '@/types/notaFiscal';
+import { AMBIENTE_FISCAL_ATUAL } from '@/types/notaFiscal';
 import { CLIENTE_EMBED_SELECT, mapClienteEnderecoFiscal, mapClienteJoinEmbed } from '@/utils/clientesDbMapping';
 
 type MensalidadeNfInput = {
@@ -222,7 +222,7 @@ export async function criarNotaFiscalRascunhoMensalidade(
       status: 'rascunho',
       valor_total: mensalidade.valor,
       natureza_operacao: config.natureza_operacao,
-      ambiente: AMBIENTE_FISCAL_HOMOLOGACAO,
+      ambiente: AMBIENTE_FISCAL_ATUAL,
       tipo_documento: 'nfse',
       competencia: mensalidade.competencia,
     })
@@ -271,7 +271,7 @@ export async function criarNotaFiscalRascunhoVenda(
       status: 'rascunho',
       valor_total: venda.valor_total,
       natureza_operacao: config.natureza_operacao,
-      ambiente: AMBIENTE_FISCAL_HOMOLOGACAO,
+      ambiente: AMBIENTE_FISCAL_ATUAL,
       tipo_documento: 'nfse',
       competencia: null,
     })

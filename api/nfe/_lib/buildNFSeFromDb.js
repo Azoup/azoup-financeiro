@@ -52,7 +52,7 @@ function money2(n) {
 
 /** Monta DPS/NFS-e nacional a partir dos dados do banco (mensalidade = serviço). */
 function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
-  const ambiente = 2; // homologação fixa por enquanto
+  const ambiente = 1; // produção
   const ibge = onlyDigits(config.codigo_ibge_emitente).slice(0, 7);
   if (ibge.length < 7) {
     throw new Error('Código IBGE do município do prestador inválido (7 dígitos).');
@@ -77,15 +77,9 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   }
 
   const descricaoBase = itens[0]?.descricao ?? config.descricao_servico_padrao;
-  const xDescServ =
-    ambiente === 2
-      ? `NOTA FISCAL EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL - ${descricaoBase}`
-      : descricaoBase;
+  const xDescServ = descricaoBase;
 
-  const tomadorNome =
-    ambiente === 2
-      ? 'NOTA FISCAL EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL'
-      : nomeCliente(cliente);
+  const tomadorNome = nomeCliente(cliente);
 
   const valor = Number(nota.valor_total);
   const tribMun = Number(config.trib_issqn ?? 1);

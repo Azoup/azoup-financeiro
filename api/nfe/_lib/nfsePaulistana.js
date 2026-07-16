@@ -368,7 +368,7 @@ async function emitirNfsePaulistana({
   perfil,
   cliente,
   config,
-  ambiente = 2,
+  ambiente = 1,
 }) {
   const cnpj = onlyDigits(perfil.documento);
   if (cnpj.length !== 14) {

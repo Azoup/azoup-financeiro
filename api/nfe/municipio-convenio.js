@@ -18,7 +18,7 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ ok: false, message: 'Informe ?ibge= com 7 dígitos.' });
   }
 
-  const gateway = resolveNfseGateway(ibge, 2);
+  const gateway = resolveNfseGateway(ibge, 1);
   if (gateway.mode === 'municipal' || gateway.mode === 'paulistana') {
     return res.status(200).json({
       ok: true,
@@ -28,7 +28,7 @@ module.exports = async function handler(req, res) {
       message:
         gateway.mode === 'paulistana'
           ? `${gateway.nome}: emissão via WebService LoteNFe (nfews.prefeitura.sp.gov.br). Informe CCM e código de serviço SP (4–5 dígitos).`
-          : `${gateway.nome}: emissão via API municipal (homologação). Certifique-se de que o CNPJ está credenciado na prefeitura.`,
+          : `${gateway.nome}: emissão via API municipal (produção). CNPJ precisa de Autorização para Emissão em nfse.americana.sp.gov.br.`,
     });
   }
 
@@ -63,7 +63,7 @@ module.exports = async function handler(req, res) {
         cert,
         senhaEnc: sec.senha_criptografada,
         perfil,
-        ambiente: 2,
+        ambiente: 1,
         ibge,
       });
       try {

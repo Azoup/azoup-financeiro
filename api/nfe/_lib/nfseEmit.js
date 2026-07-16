@@ -39,7 +39,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
           perfil,
           cliente,
           config,
-          ambiente: 2,
+          ambiente: 1,
         }),
       );
       if (!result.success && result.message) {
@@ -65,7 +65,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
       cert,
       senhaEnc,
       perfil,
-      ambiente: 2,
+      ambiente: 1,
       ibge: config.codigo_ibge_emitente,
     });
 
@@ -94,7 +94,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
         const hint =
           gw.mode === 'municipal' &&
           !/L327|L906|L2103|E0039|E0314|E314|TSDec15V2|vTotTribMun/i.test(raw)
-            ? ' Verifique se o CNPJ está credenciado para integração em americanahomologacao.nfe.com.br.'
+            ? ' Verifique se o CNPJ tem Autorização para Emissão em nfse.americana.sp.gov.br.'
             : '';
         return {
           success: false,

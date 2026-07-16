@@ -186,7 +186,7 @@ export default function NfeConfigScreen() {
       setConvenioOk(res.ok);
       setConvenioMsg(
         res.ok
-          ? `Município ${res.ibge} habilitado no emissor nacional (homologação).`
+          ? `Município ${res.ibge} habilitado no emissor nacional (produção).`
           : res.message ?? 'Município não habilitado no Sistema Nacional NFS-e.',
       );
       if (res.ok) {
@@ -304,7 +304,7 @@ export default function NfeConfigScreen() {
           Toast.show({
             type: 'success',
             text1: 'Configuração e certificado salvos.',
-            text2: prontidao.pronto ? 'Pronto para emitir em homologação.' : undefined,
+            text2: prontidao.pronto ? 'Pronto para emitir em produção.' : undefined,
           });
         } catch (certErr) {
           Toast.show({
@@ -317,7 +317,7 @@ export default function NfeConfigScreen() {
         Toast.show({
           type: 'success',
           text1: 'Configuração de NFS-e salva.',
-          text2: certOk ? 'Pronto para emitir em homologação.' : 'Envie o certificado A1 quando for emitir.',
+          text2: certOk ? 'Pronto para emitir em produção.' : 'Envie o certificado A1 quando for emitir.',
         });
       }
 
@@ -341,7 +341,7 @@ export default function NfeConfigScreen() {
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.lead}>
         Configure a emissão de NFS-e (nota fiscal de serviço) para mensalidades: prestador, certificado A1 e
-        parâmetros do serviço. Por enquanto, apenas ambiente de homologação.
+        parâmetros do serviço. Ambiente: produção (NFS-e com valor fiscal).
       </Text>
 
       <Card style={[styles.card, prontidao.pronto ? styles.cardOk : styles.cardWarn]}>
@@ -361,7 +361,7 @@ export default function NfeConfigScreen() {
         ))}
         <Text style={styles.prontoResumo}>
           {prontidao.pronto
-            ? 'Tudo configurado. Pode gerar mensalidade + NFS-e em homologação.'
+            ? 'Tudo configurado. Pode gerar mensalidade + NFS-e em produção.'
             : 'Complete os itens pendentes e clique em Salvar tudo.'}
         </Text>
       </Card>
@@ -487,9 +487,9 @@ export default function NfeConfigScreen() {
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.h}>3. Município e numeração (homologação)</Text>
+        <Text style={styles.h}>3. Município e numeração (produção)</Text>
         <View style={styles.homologBadge}>
-          <Text style={styles.homologBadgeTxt}>Ambiente fixo: homologação (testes — sem valor fiscal)</Text>
+          <Text style={styles.homologBadgeTxt}>Ambiente: produção — NFS-e com valor fiscal</Text>
         </View>
         <FormTextInput label="Série do RPS" value={serie} onChangeText={setSerie} />
         <FormTextInput
@@ -512,7 +512,7 @@ export default function NfeConfigScreen() {
         <Text style={styles.fieldHint}>
           Código da cidade do prestador (IBGE, 7 dígitos).
           {'\n'}
-          • Americana = 3501608 → API municipal (americanahomologacao.nfe.com.br)
+          • Americana = 3501608 → API municipal (nfse.americana.sp.gov.br)
           {'\n'}
           • São Paulo capital = 3550308 → Paulistana (somente com CCM da capital)
           {'\n'}
@@ -552,7 +552,7 @@ export default function NfeConfigScreen() {
         </Text>
         <NfseEnumField
           label="Situação no Simples Nacional (opSimpNac)"
-          hint="Confira em americanahomologacao.nfe.com.br › perfil da empresa. ME/EPP costuma ser opção 3."
+          hint="Confira em nfse.americana.sp.gov.br › perfil da empresa. ME/EPP costuma ser opção 3."
           value={opSimpNac}
           options={OP_SIMP_NAC_OPCOES}
           onChange={setOpSimpNac}

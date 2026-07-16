@@ -94,5 +94,8 @@ export type EmitirNfeResult = {
   message?: string;
 };
 
-/** Ambiente fiscal fixo em homologação até liberação de produção. */
+/** Ambiente fiscal de emissão NFS-e: 1 = produção, 2 = homologação. */
+export const AMBIENTE_FISCAL_PRODUCAO = 1 as const;
 export const AMBIENTE_FISCAL_HOMOLOGACAO = 2 as const;
+/** Ambiente em uso no app (produção). */
+export const AMBIENTE_FISCAL_ATUAL = AMBIENTE_FISCAL_PRODUCAO;

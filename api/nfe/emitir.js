@@ -106,7 +106,7 @@ module.exports = async function handler(req, res) {
         danfe_storage_path: result.danfe_storage_path,
         codigo_verificacao: result.codigo_verificacao ?? null,
         tipo_documento: 'nfse',
-        ambiente: 2,
+        ambiente: 1,
         motivo_rejeicao: null,
       })
       .eq('id', notaFiscalId);

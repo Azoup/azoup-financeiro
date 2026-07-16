@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import type { EmpresaCertificado, NfeConfig, NfeConfigInput } from '@/types/notaFiscal';
-import { AMBIENTE_FISCAL_HOMOLOGACAO } from '@/types/notaFiscal';
+import { AMBIENTE_FISCAL_ATUAL } from '@/types/notaFiscal';
 import { encryptCertificadoSenha } from '@/utils/certificadoCrypto';
 import * as DocumentPicker from 'expo-document-picker';
 import { Platform } from 'react-native';
@@ -8,7 +8,7 @@ import { Platform } from 'react-native';
 const DEFAULT_NFE_CONFIG: NfeConfigInput = {
   serie: '1',
   proximo_numero: 1,
-  ambiente: AMBIENTE_FISCAL_HOMOLOGACAO,
+  ambiente: AMBIENTE_FISCAL_ATUAL,
   inscricao_estadual: '',
   regime_tributario: 1,
   // Azoup / prestador em Americana — API municipal ADN (não Paulistana).
@@ -48,7 +48,7 @@ export async function upsertNfeConfig(userId: string, input: Partial<NfeConfigIn
     user_id: userId,
     serie: (input.serie ?? current.serie).trim() || '1',
     proximo_numero: input.proximo_numero ?? current.proximo_numero ?? 1,
-    ambiente: AMBIENTE_FISCAL_HOMOLOGACAO,
+    ambiente: AMBIENTE_FISCAL_ATUAL,
     inscricao_estadual: (input.inscricao_estadual ?? current.inscricao_estadual ?? '').trim(),
     regime_tributario: input.regime_tributario ?? current.regime_tributario ?? 1,
     codigo_ibge_emitente: (input.codigo_ibge_emitente ?? current.codigo_ibge_emitente ?? '').trim(),

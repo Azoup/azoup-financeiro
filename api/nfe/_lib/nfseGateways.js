@@ -43,7 +43,7 @@ function normalizeIbge(ibge) {
   return onlyDigits(ibge).padStart(7, '0').slice(0, 7);
 }
 
-function resolveNfseGateway(ibge, ambiente = 2) {
+function resolveNfseGateway(ibge, ambiente = 1) {
   const cod = normalizeIbge(ibge);
   const gw = GATEWAYS_BY_IBGE[cod];
   if (!gw) {
@@ -75,7 +75,7 @@ function resolveNfseGateway(ibge, ambiente = 2) {
 }
 
 /** Define NFSE_URL_OVERRIDES para o @nfewizard/shared (patch em postinstall). */
-function applyNfseGatewayEnv(ibge, ambiente = 2) {
+function applyNfseGatewayEnv(ibge, ambiente = 1) {
   const gateway = resolveNfseGateway(ibge, ambiente);
   if (gateway.urlOverrides) {
     process.env.NFSE_URL_OVERRIDES = JSON.stringify(gateway.urlOverrides);

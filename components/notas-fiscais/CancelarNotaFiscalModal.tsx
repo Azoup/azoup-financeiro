@@ -33,7 +33,8 @@ export function CancelarNotaFiscalModal({ visible, nota, loading, onClose, onCon
             </Text>
           ) : null}
           <Text style={styles.hint}>
-            O cancelamento será enviado ao ambiente de homologação da NFS-e. Mínimo 15 caracteres na justificativa.
+            O cancelamento será enviado à prefeitura (produção). A NFS-e deixará de ter validade fiscal. Mínimo 15
+            caracteres na justificativa.
           </Text>
           <FormTextInput
             label="Motivo do cancelamento"

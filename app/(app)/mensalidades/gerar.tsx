@@ -614,7 +614,7 @@ export default function GerarMensalidadeScreen() {
         </Text>
         <PrimaryButton title="Enviar" loading={busy} onPress={onAbrirEnviar} style={styles.enviar} />
         <Text style={styles.footerHint}>
-          Ao enviar, escolha gerar só mensalidade ou mensalidade com NFS-e de serviço (homologação). Carnês em A receber.
+          Ao enviar, escolha gerar só mensalidade ou mensalidade com NFS-e de serviço (produção). Carnês em A receber.
         </Text>
       </ScrollView>
       <EnviarMensalidadeModal
