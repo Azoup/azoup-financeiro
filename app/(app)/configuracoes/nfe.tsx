@@ -512,7 +512,7 @@ export default function NfeConfigScreen() {
         <Text style={styles.fieldHint}>
           Código da cidade do prestador (IBGE, 7 dígitos).
           {'\n'}
-          • Americana = 3501608 → API municipal (nfse.americana.sp.gov.br)
+          • Americana = 3501608 → WebService ABRASF TipLan (nfse.americana.sp.gov.br)
           {'\n'}
           • São Paulo capital = 3550308 → Paulistana (somente com CCM da capital)
           {'\n'}

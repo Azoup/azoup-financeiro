@@ -29,12 +29,10 @@ function humanizeNfseRejection(message, ibge) {
 
   if (/L906/i.test(raw)) {
     return [
-      'L906 — A prefeitura de Americana não liberou este serviço/atividade para emissão neste CNPJ (regra municipal).',
-      'Não é erro de layout da DPS: o webservice está certo; falta liberação no cadastro.',
-      '1) Acesse https://nfse.americana.sp.gov.br com certificado A1 ou Senha Web.',
-      '2) Menu Autorização para Emissão → solicite liberação para integração.',
-      '3) Confirme se a atividade 01.07 (cTribNac 010701 / CNAE correspondente) está habilitada para o CNPJ.',
-      'Homologação (americanahomologacao.nfe.com.br) só testa após o mesmo cadastro/liberação existir lá.',
+      'L906 — A prefeitura rejeitou a atividade/serviço deste envio para o CNPJ.',
+      '1) No Delphi, anote ItemListaServico / CódigoTributacaoMunicipio / CNAE da nota que autoriza.',
+      '2) Em Configurações › NFS-e, use os mesmos códigos (cTribNac 6 dígitos → ItemListaServico; cTribMun).',
+      '3) Em nfse.americana.sp.gov.br › Autorização para Emissão, confirme liberação do WebService.',
     ].join(' ');
   }
 
@@ -60,9 +58,9 @@ function humanizeNfseRejection(message, ibge) {
     const cod = onlyDigits(ibge).padStart(7, '0').slice(0, 7) || 'informado';
     if (cod === '3501608') {
       return [
-        `E0039 — Americana (IBGE ${cod}): a prefeitura não aceita emissão direta pelo SEFIN nacional.`,
-        'O sistema deve usar a API municipal (americanahomologacao.nfe.com.br). Faça redeploy da versão mais recente.',
-        'Credencie o CNPJ do certificado A1 no portal de homologação da prefeitura de Americana.',
+        `E0039 — Americana (IBGE ${cod}): a prefeitura não aceita emissão pelo SEFIN nacional.`,
+        'O sistema deve usar o WebService ABRASF TipLan (nfse.americana.sp.gov.br). Faça redeploy da versão mais recente.',
+        'Credencie o CNPJ do certificado A1 e a Autorização para Emissão no portal da prefeitura.',
       ].join(' ');
     }
     return [

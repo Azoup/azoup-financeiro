@@ -53,7 +53,7 @@ export function avaliarProntidaoNfe(
       id: 'ibge',
       label: 'Código IBGE do município do prestador (cidade, 7 dígitos)',
       ok: Boolean(config?.codigo_ibge_emitente?.trim()?.length >= 6),
-      hint: 'Ex.: Americana = 3501608. Cidades com emissor municipal são roteadas automaticamente.',
+      hint: 'Ex.: Americana = 3501608 (ABRASF TipLan). Cidades com emissor próprio são roteadas automaticamente.',
     },
     {
       id: 'servico',

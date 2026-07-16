@@ -11,7 +11,7 @@ const DEFAULT_NFE_CONFIG: NfeConfigInput = {
   ambiente: AMBIENTE_FISCAL_ATUAL,
   inscricao_estadual: '',
   regime_tributario: 1,
-  // Azoup / prestador em Americana — API municipal ADN (não Paulistana).
+  // Azoup / prestador em Americana — WebService ABRASF TipLan (não Paulistana).
   codigo_ibge_emitente: '3501608',
   ncm_servico: '00000000',
   cfop_padrao: '5933',

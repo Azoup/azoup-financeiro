@@ -1,7 +1,7 @@
 /**
  * Roteamento de emissão NFS-e por município (IBGE).
  * - 3550308 São Paulo capital → WebService Paulistana (SOAP)
- * - 3501608 Americana → API ADN municipal (Tiplan)
+ * - 3501608 Americana → WebService ABRASF 2.03 TipLan (mesmo canal típico do Delphi)
  * - demais → SEFIN Nacional (ADN)
  */
 const GATEWAYS_BY_IBGE = {
@@ -12,25 +12,19 @@ const GATEWAYS_BY_IBGE = {
     urlOverrides: null,
   },
   '3501608': {
-    nome: 'Americana/SP — emissor municipal ADN',
-    mode: 'municipal',
+    nome: 'Americana/SP — WebService ABRASF TipLan',
+    mode: 'abrasf',
     skipConvenioNacional: true,
+    // Mantido para cancelamento/consulta ADN se necessário.
     H: {
       NFSe_Autorizacao: 'https://americanahomologacao.nfe.com.br/api/adn/dps/recepcao',
       NFSe_Eventos: 'https://americanahomologacao.nfe.com.br/api/adn/dps/evento',
-      NFSe_Consulta: 'https://americanahomologacao.nfe.com.br/api/adn/dps/recepcao',
-      NFSe_ConsultaDPS: 'https://americanahomologacao.nfe.com.br/api/adn/dps/recepcao',
-      NFSe_ChaveAcesso: 'https://americanahomologacao.nfe.com.br/api/adn/dps/chave-acesso',
-      NFSe_Xml: 'https://americanahomologacao.nfe.com.br/api/adn/dps/xml',
+      NFSe_Ws: 'https://americanahomologacao.nfe.com.br/nfse/wsnacional2/nfse.asmx',
     },
     P: {
       NFSe_Autorizacao: 'https://nfse.americana.sp.gov.br/api/adn/dps/recepcao',
       NFSe_Eventos: 'https://nfse.americana.sp.gov.br/api/adn/dps/evento',
-      NFSe_Consulta: 'https://nfse.americana.sp.gov.br/api/adn/dps/recepcao',
-      NFSe_ConsultaDPS: 'https://nfse.americana.sp.gov.br/api/adn/dps/recepcao',
-      // Manual Tiplan 1.4: path de produção difere do de homologação.
-      NFSe_ChaveAcesso: 'https://nfse.americana.sp.gov.br/api/adn/dps/recepcao/chave-acesso',
-      NFSe_Xml: 'https://nfse.americana.sp.gov.br/api/adn/dps/xml',
+      NFSe_Ws: 'https://nfse.americana.sp.gov.br/nfse/wsnacional2/nfse.asmx',
     },
   },
 };
@@ -55,13 +49,14 @@ function resolveNfseGateway(ibge, ambiente = 1) {
       urlOverrides: null,
     };
   }
-  if (gw.mode === 'paulistana') {
+  if (gw.mode === 'paulistana' || gw.mode === 'abrasf') {
+    const amb = Number(ambiente) === 1 ? 'P' : 'H';
     return {
-      mode: 'paulistana',
+      mode: gw.mode,
       ibge: cod,
       nome: gw.nome,
       skipConvenioNacional: true,
-      urlOverrides: null,
+      urlOverrides: gw[amb] ?? gw.P ?? null,
     };
   }
   const amb = Number(ambiente) === 1 ? 'P' : 'H';

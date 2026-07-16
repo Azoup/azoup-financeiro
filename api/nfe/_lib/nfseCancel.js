@@ -1,22 +1,58 @@
-const { createNfseWizard, cleanupCert, onlyDigits } = require('./nfseWizard');
+const { createNfseWizard, cleanupCert, onlyDigits, downloadCertToTemp } = require('./nfseWizard');
+const { decryptCertPassword } = require('./crypto');
 const { withHomologTlsRelaxed } = require('./tlsHomolog');
 const { installMunicipalAxiosRedirect } = require('./municipalAxiosRedirect');
 const { resolveNfseGateway } = require('./nfseGateways');
+const { cancelarNfseAbrasfAmericana } = require('./nfseAbrasfAmericana');
 
-async function cancelarNfseSefaz({ admin, nota, perfil, cert, senhaEnc, justificativa, codigoIbgeEmitente }) {
+async function cancelarNfseSefaz({
+  admin,
+  nota,
+  perfil,
+  cert,
+  senhaEnc,
+  justificativa,
+  codigoIbgeEmitente,
+  inscricaoMunicipal,
+}) {
   const xJust = String(justificativa ?? '').trim();
   if (xJust.length < 15) {
     throw new Error('A justificativa de cancelamento deve ter no mínimo 15 caracteres.');
   }
-  if (!nota.chave_acesso) {
-    throw new Error('Nota sem chave de acesso para cancelar.');
+  if (!nota.chave_acesso && !nota.codigo_verificacao && !nota.protocolo_autorizacao) {
+    throw new Error('Nota sem chave/código de verificação para cancelar.');
+  }
+
+  const ambiente = Number(nota.ambiente) === 2 ? 2 : 1;
+  const gateway = resolveNfseGateway(codigoIbgeEmitente, ambiente);
+
+  // Americana ABRASF
+  if (gateway.mode === 'abrasf') {
+    const senha = await decryptCertPassword(admin, senhaEnc);
+    const certPath = await downloadCertToTemp(admin, cert.storage_path);
+    try {
+      return await withHomologTlsRelaxed(() =>
+        cancelarNfseAbrasfAmericana({
+          certPath,
+          senha,
+          nota,
+          perfil,
+          config: {
+            inscricao_municipal:
+              inscricaoMunicipal || perfil.inscricao_municipal || '',
+          },
+          justificativa: xJust,
+          ambiente,
+        }),
+      );
+    } finally {
+      cleanupCert(certPath);
+    }
   }
 
   const chave = onlyDigits(nota.chave_acesso);
   const doc = onlyDigits(perfil.documento);
   const isCnpj = doc.length === 14;
-  // Usa o ambiente em que a nota foi emitida (produção=1). Fallback produção.
-  const ambiente = Number(nota.ambiente) === 2 ? 2 : 1;
 
   const evento = {
     pedRegEvento: {
@@ -38,7 +74,6 @@ async function cancelarNfseSefaz({ admin, nota, perfil, cert, senhaEnc, justific
   };
 
   return withHomologTlsRelaxed(async () => {
-    const gateway = resolveNfseGateway(codigoIbgeEmitente, ambiente);
     const { wizard, certPath } = await createNfseWizard({
       admin,
       cert,

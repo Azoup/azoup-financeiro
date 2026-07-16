@@ -37,7 +37,11 @@ module.exports = async function handler(req, res) {
     const [{ data: perfil }, { data: cert }, { data: config }] = await Promise.all([
       admin.from('perfil_cobranca').select('*').eq('user_id', user.id).maybeSingle(),
       admin.from('empresa_certificado').select('*').eq('user_id', user.id).eq('ativo', true).maybeSingle(),
-      admin.from('nfe_config').select('codigo_ibge_emitente').eq('user_id', user.id).maybeSingle(),
+      admin
+        .from('nfe_config')
+        .select('codigo_ibge_emitente, inscricao_municipal')
+        .eq('user_id', user.id)
+        .maybeSingle(),
     ]);
 
     if (!perfil?.documento) {
@@ -64,6 +68,7 @@ module.exports = async function handler(req, res) {
       senhaEnc: sec.senha_criptografada,
       justificativa,
       codigoIbgeEmitente: config?.codigo_ibge_emitente,
+      inscricaoMunicipal: config?.inscricao_municipal,
     });
 
     if (!result.success) {

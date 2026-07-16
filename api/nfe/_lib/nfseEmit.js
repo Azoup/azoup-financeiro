@@ -6,6 +6,7 @@ const { humanizeNfseRejection, validarConvenioMunicipio } = require('./nfseError
 const { installMunicipalAxiosRedirect } = require('./municipalAxiosRedirect');
 const { resolveNfseGateway } = require('./nfseGateways');
 const { emitirNfsePaulistana } = require('./nfsePaulistana');
+const { emitirNfseAbrasfAmericana } = require('./nfseAbrasfAmericana');
 const { prepareServerlessCryptoEnv } = require('./serverlessEnv');
 
 function extrairXml(ret) {
@@ -21,9 +22,10 @@ function extrairXml(ret) {
 }
 
 async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, cert, senhaEnc }) {
-  const gateway = resolveNfseGateway(config.codigo_ibge_emitente, 2);
+  const ambiente = 1; // produção
+  const gateway = resolveNfseGateway(config.codigo_ibge_emitente, ambiente);
 
-  // São Paulo capital → WebService Paulistana (não usa SEFIN/ADN nacional)
+  // São Paulo capital → WebService Paulistana
   if (gateway.mode === 'paulistana') {
     prepareServerlessCryptoEnv();
     const senha = await decryptCertPassword(admin, senhaEnc);
@@ -39,7 +41,41 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
           perfil,
           cliente,
           config,
-          ambiente: 1,
+          ambiente,
+        }),
+      );
+      if (!result.success && result.message) {
+        result.message = humanizeNfseRejection(result.message, config.codigo_ibge_emitente);
+      }
+      return result;
+    } catch (e) {
+      return {
+        success: false,
+        status: 'ERR',
+        message: humanizeNfseRejection(e?.message ?? String(e), config.codigo_ibge_emitente),
+      };
+    } finally {
+      cleanupCert(certPath);
+    }
+  }
+
+  // Americana → ABRASF TipLan (mesmo canal típico do Delphi)
+  if (gateway.mode === 'abrasf') {
+    prepareServerlessCryptoEnv();
+    const senha = await decryptCertPassword(admin, senhaEnc);
+    const certPath = await downloadCertToTemp(admin, cert.storage_path);
+    try {
+      console.info('[nfse] gateway ABRASF', gateway.nome);
+      const result = await withHomologTlsRelaxed(() =>
+        emitirNfseAbrasfAmericana({
+          certPath,
+          senha,
+          nota,
+          itens,
+          perfil,
+          cliente,
+          config,
+          ambiente,
         }),
       );
       if (!result.success && result.message) {
@@ -65,7 +101,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
       cert,
       senhaEnc,
       perfil,
-      ambiente: 1,
+      ambiente,
       ibge: config.codigo_ibge_emitente,
     });
 
