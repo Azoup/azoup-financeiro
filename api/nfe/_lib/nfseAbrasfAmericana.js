@@ -147,14 +147,25 @@ function buildGerarNfseXml({
     cliente.nome_fantasia || cliente.nome_cliente || cliente.nome || 'Tomador';
   // ADN opSimpNac: 1=não optante → ABRASF OptanteSimplesNacional 2; demais → 1 (sim).
   const optante = Number(config.op_simp_nac ?? 3) === 1 ? '2' : '1';
-  const idInf = `rps${serie}${numero}`;
+  const idInf = `RPS_${serie}_${numero}`;
+  const nbs = onlyDigits(config.codigo_nbs).slice(0, 9);
+  // TipLan (XSD Americana): IBSCBS dentro de Servico — IndOp / CST / cClassTrib.
+  const operacao =
+    onlyDigits(config.codigo_operacao_ibscbs).padStart(6, '0').slice(0, 6) || '100501';
+  const sitTrib =
+    onlyDigits(config.situacao_tributaria_ibscbs).padStart(3, '0').slice(0, 3) || '000';
+  const classTribRaw = onlyDigits(config.classificacao_tributaria_ibscbs);
+  const classTrib =
+    classTribRaw.length === 6 ? classTribRaw : `${sitTrib}${classTribRaw.padStart(3, '0').slice(0, 3) || '001'}`;
 
   const endLog = escapeXml(cliente.logradouro || perfil.logradouro || 'Nao informado');
   const endNum = escapeXml(cliente.numero || perfil.numero || 'S/N');
   const endBai = escapeXml(cliente.bairro || perfil.bairro || 'Centro');
   const endCep = onlyDigits(cliente.cep || perfil.cep).padStart(8, '0').slice(0, 8);
   const endUf = escapeXml(String(cliente.estado || cliente.uf || perfil.uf || 'SP').slice(0, 2));
+  const regEsp = Number(config.reg_esp_trib ?? 0);
 
+  // Schema TipLan: tag é Tomador (não TomadorServico do ABRASF puro).
   return (
     `<GerarNfseEnvio xmlns="${NS_ABRASF}">` +
     `<Rps>` +
@@ -172,32 +183,33 @@ function buildGerarNfseXml({
     `<Servico>` +
     `<Valores>` +
     `<ValorServicos>${valor}</ValorServicos>` +
-    `<ValorDeducoes>0.00</ValorDeducoes>` +
-    `<ValorPis>0.00</ValorPis>` +
-    `<ValorCofins>0.00</ValorCofins>` +
-    `<ValorInss>0.00</ValorInss>` +
-    `<ValorIr>0.00</ValorIr>` +
-    `<ValorCsll>0.00</ValorCsll>` +
-    `<OutrasRetencoes>0.00</OutrasRetencoes>` +
-    `<ValorIss>${money2(valorIss)}</ValorIss>` +
-    `<Aliquota>${money2(aliquotaPct)}</Aliquota>` +
-    `<DescontoIncondicionado>0.00</DescontoIncondicionado>` +
-    `<DescontoCondicionado>0.00</DescontoCondicionado>` +
+    (aliquotaPct > 0
+      ? `<ValorIss>${money2(valorIss)}</ValorIss><Aliquota>${money2(aliquotaPct)}</Aliquota>`
+      : '') +
     `</Valores>` +
     `<IssRetido>2</IssRetido>` +
     `<ItemListaServico>${escapeXml(itemLista)}</ItemListaServico>` +
     `<CodigoCnae>${escapeXml(cnae)}</CodigoCnae>` +
     `<CodigoTributacaoMunicipio>${escapeXml(tribMun)}</CodigoTributacaoMunicipio>` +
+    (nbs.length === 9 ? `<CodigoNbs>${escapeXml(nbs)}</CodigoNbs>` : '') +
     `<Discriminacao>${escapeXml(desc)}</Discriminacao>` +
     `<CodigoMunicipio>${ibge}</CodigoMunicipio>` +
     `<ExigibilidadeISS>1</ExigibilidadeISS>` +
     `<MunicipioIncidencia>${ibge}</MunicipioIncidencia>` +
+    `<IBSCBS>` +
+    `<OperacaoUsoConsumoPessoal>0</OperacaoUsoConsumoPessoal>` +
+    `<Operacao>${operacao}</Operacao>` +
+    `<ValoresTributos>` +
+    `<SituacaoTributaria>${sitTrib}</SituacaoTributaria>` +
+    `<ClassificacaoTributaria>${classTrib}</ClassificacaoTributaria>` +
+    `</ValoresTributos>` +
+    `</IBSCBS>` +
     `</Servico>` +
     `<Prestador>` +
     `<CpfCnpj><Cnpj>${cnpj}</Cnpj></CpfCnpj>` +
     `<InscricaoMunicipal>${im}</InscricaoMunicipal>` +
     `</Prestador>` +
-    `<TomadorServico>` +
+    `<Tomador>` +
     `<IdentificacaoTomador>` +
     `<CpfCnpj>${isCpf ? `<Cpf>${tomadorDoc}</Cpf>` : `<Cnpj>${tomadorDoc}</Cnpj>`}</CpfCnpj>` +
     `</IdentificacaoTomador>` +
@@ -210,7 +222,8 @@ function buildGerarNfseXml({
     `<Uf>${endUf}</Uf>` +
     `<Cep>${endCep}</Cep>` +
     `</Endereco>` +
-    `</TomadorServico>` +
+    `</Tomador>` +
+    (regEsp > 0 ? `<RegimeEspecialTributacao>${regEsp}</RegimeEspecialTributacao>` : '') +
     `<OptanteSimplesNacional>${optante}</OptanteSimplesNacional>` +
     `<IncentivoFiscal>2</IncentivoFiscal>` +
     `</InfDeclaracaoPrestacaoServico>` +

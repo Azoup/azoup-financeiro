@@ -27,6 +27,14 @@ function humanizeNfseRejection(message, ibge) {
     ].join(' ');
   }
 
+  if (/X160/i.test(raw)) {
+    return [
+      'X160 — XML rejeitado pelo schema ABRASF TipLan de Americana (estrutura inválida).',
+      'Faça redeploy da versão que usa a tag Tomador e o grupo IBSCBS (conforme XSD municipal).',
+      'Se persistir, confira ItemListaServico (ex.: 01.07), CNAE e códigos IBS/CBS.',
+    ].join(' ');
+  }
+
   if (/L906/i.test(raw)) {
     return [
       'L906 — A prefeitura rejeitou a atividade/serviço deste envio para o CNPJ.',
