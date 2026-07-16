@@ -516,7 +516,7 @@ export default function NfeConfigScreen() {
           {'\n'}
           • São Paulo capital = 3550308 → Paulistana (somente com CCM da capital)
           {'\n'}
-          Azoup está em Americana: use 3501608, IM 69842 e cTribMun 001.
+          Azoup está em Americana: use 3501608, IM 69842. No ABRASF o cTribMun ADN (001) não é enviado.
         </Text>
         <PrimaryButton
           title={busyConvenio ? 'Verificando município…' : 'Verificar adesão do município'}

@@ -55,10 +55,23 @@ function parseCompetenciaIso(competencia, fallbackDate) {
   return dateYmd(fallbackDate);
 }
 
-/** cTribNac 010701 → ItemListaServico 01.07 */
+/** cTribNac 010701 → ItemListaServico 01.07 (padrão TipLan/ABRASF). */
 function itemListaServico(cTribNac) {
-  const d = onlyDigits(cTribNac).padStart(6, '0').slice(0, 6);
+  const raw = String(cTribNac ?? '').trim();
+  const dotted = raw.match(/^(\d{1,2})\.(\d{2})$/);
+  if (dotted) return `${dotted[1].padStart(2, '0')}.${dotted[2]}`;
+  const d = onlyDigits(raw).padStart(6, '0').slice(0, 6);
   return `${d.slice(0, 2)}.${d.slice(2, 4)}`;
+}
+
+/**
+ * Código de tributação municipal no ABRASF TipLan (atividade municipal).
+ * O valor ADN curto (ex.: 001) NÃO deve ir neste campo — causa rejeição X30.
+ */
+function codigoTributacaoMunicipioAbrasf(config) {
+  const mun = onlyDigits(config.codigo_tributacao_municipal);
+  if (mun.length >= 4) return mun.slice(0, 20);
+  return '';
 }
 
 function codigoCnae(config) {
@@ -125,8 +138,6 @@ function buildGerarNfseXml({
   perfil,
   cliente,
   config,
-  aliquotaPct,
-  valorIss,
 }) {
   const cnpj = onlyDigits(perfil.documento);
   const im = onlyDigits(config.inscricao_municipal);
@@ -138,7 +149,7 @@ function buildGerarNfseXml({
   const competencia = parseCompetenciaIso(nota.competencia, nota.data_emissao);
   const valor = money2(nota.valor_total);
   const itemLista = itemListaServico(config.codigo_tributacao_nacional);
-  const tribMun = onlyDigits(config.codigo_tributacao_municipal).slice(0, 3) || '001';
+  const tribMun = codigoTributacaoMunicipioAbrasf(config);
   const cnae = codigoCnae(config);
   const ibge = onlyDigits(config.codigo_ibge_emitente).padStart(7, '0').slice(0, 7);
   const desc =
@@ -165,7 +176,7 @@ function buildGerarNfseXml({
   const endUf = escapeXml(String(cliente.estado || cliente.uf || perfil.uf || 'SP').slice(0, 2));
   const regEsp = Number(config.reg_esp_trib ?? 0);
 
-  // Schema TipLan: tag é Tomador (não TomadorServico do ABRASF puro).
+  // TipLan: ValorIss/Aliquota NÃO devem ser enviados (A14 — prefeitura calcula; Simples idem).
   return (
     `<GerarNfseEnvio xmlns="${NS_ABRASF}">` +
     `<Rps>` +
@@ -183,14 +194,11 @@ function buildGerarNfseXml({
     `<Servico>` +
     `<Valores>` +
     `<ValorServicos>${valor}</ValorServicos>` +
-    (aliquotaPct > 0
-      ? `<ValorIss>${money2(valorIss)}</ValorIss><Aliquota>${money2(aliquotaPct)}</Aliquota>`
-      : '') +
     `</Valores>` +
     `<IssRetido>2</IssRetido>` +
     `<ItemListaServico>${escapeXml(itemLista)}</ItemListaServico>` +
     `<CodigoCnae>${escapeXml(cnae)}</CodigoCnae>` +
-    `<CodigoTributacaoMunicipio>${escapeXml(tribMun)}</CodigoTributacaoMunicipio>` +
+    (tribMun ? `<CodigoTributacaoMunicipio>${escapeXml(tribMun)}</CodigoTributacaoMunicipio>` : '') +
     (nbs.length === 9 ? `<CodigoNbs>${escapeXml(nbs)}</CodigoNbs>` : '') +
     `<Discriminacao>${escapeXml(desc)}</Discriminacao>` +
     `<CodigoMunicipio>${ibge}</CodigoMunicipio>` +
@@ -377,9 +385,6 @@ async function emitirNfseAbrasfAmericana({
     throw new Error('Valor da nota inválido.');
   }
 
-  const aliquotaPct = Number(config.trib_issqn ?? 1) === 1 ? 4 : 0;
-  const valorIss = (valor * aliquotaPct) / 100;
-
   const { privateKeyPem, certificatePem } = loadPfx(certPath, senha);
   let dadosXml = buildGerarNfseXml({
     nota,
@@ -387,8 +392,6 @@ async function emitirNfseAbrasfAmericana({
     perfil,
     cliente,
     config,
-    aliquotaPct,
-    valorIss,
   });
   dadosXml = signInfDeclaracao(dadosXml, privateKeyPem, certificatePem);
 
@@ -548,4 +551,5 @@ module.exports = {
   cancelarNfseAbrasfAmericana,
   itemListaServico,
   codigoCnae,
+  codigoTributacaoMunicipioAbrasf,
 };

@@ -27,6 +27,22 @@ function humanizeNfseRejection(message, ibge) {
     ].join(' ');
   }
 
+  if (/A14|ValorISS informado indevidamente/i.test(raw)) {
+    return [
+      'A14 — Em Americana (TipLan) o ValorISS/Alíquota não devem ser enviados: a prefeitura calcula o ISS.',
+      'Faça redeploy da versão corrigida e reemitir.',
+    ].join(' ');
+  }
+
+  if (/X30|E30|Item da lista de serviço/i.test(raw)) {
+    return [
+      'X30 — Item da lista de serviço inválido ou inexistente no cadastro municipal.',
+      'Em Configurações › NFS-e, confira o código de tributação nacional (ex.: 010701 → ItemListaServico 01.07).',
+      'Compare com o ItemListaServico de uma nota autorizada no Delphi.',
+      'Não use cTribMun ADN (001) como CódigoTributacaoMunicipio do ABRASF.',
+    ].join(' ');
+  }
+
   if (/X160/i.test(raw)) {
     return [
       'X160 — XML rejeitado pelo schema ABRASF TipLan de Americana (estrutura inválida).',
