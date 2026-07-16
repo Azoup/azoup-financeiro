@@ -66,12 +66,19 @@ function itemListaServico(cTribNac) {
 
 /**
  * Código de tributação municipal no ABRASF TipLan (atividade municipal).
- * O valor ADN curto (ex.: 001) NÃO deve ir neste campo — causa rejeição X30.
+ * Americana espera o subitem no formato XX.XX. A configuração antiga ADN
+ * guarda "001"; nesse caso, reutilizamos o ItemListaServico (ex.: 01.07).
  */
 function codigoTributacaoMunicipioAbrasf(config) {
-  const mun = onlyDigits(config.codigo_tributacao_municipal);
-  if (mun.length >= 4) return mun.slice(0, 20);
-  return '';
+  const raw = String(config.codigo_tributacao_municipal ?? '').trim();
+  const dotted = raw.match(/^(\d{1,2})\.(\d{2})$/);
+  if (dotted) return `${dotted[1].padStart(2, '0')}.${dotted[2]}`;
+
+  const mun = onlyDigits(raw);
+  if (mun.length >= 4) {
+    return `${mun.slice(0, 2)}.${mun.slice(2, 4)}`;
+  }
+  return itemListaServico(config.codigo_tributacao_nacional);
 }
 
 function codigoCnae(config) {

@@ -39,7 +39,7 @@ function humanizeNfseRejection(message, ibge) {
       'X30 — Item da lista de serviço inválido ou inexistente no cadastro municipal.',
       'Em Configurações › NFS-e, confira o código de tributação nacional (ex.: 010701 → ItemListaServico 01.07).',
       'Compare com o ItemListaServico de uma nota autorizada no Delphi.',
-      'Não use cTribMun ADN (001) como CódigoTributacaoMunicipio do ABRASF.',
+      'No ABRASF de Americana, o sistema converte o cTribMun antigo 001 para o subitem 01.07.',
     ].join(' ');
   }
 
