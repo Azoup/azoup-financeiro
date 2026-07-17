@@ -22,8 +22,6 @@ const WS_URL = {
 
 /** NBS usado pela Azoup no Delphi (suporte/manutenção em TI). */
 const NBS_DEFAULT_AZOUP = '115013000';
-/** Alíquota ISS da lista municipal Americana para 01.07 (informática). */
-const ALIQUOTA_ISS_PCT_0107 = 2;
 
 function onlyDigits(s) {
   return String(s ?? '').replace(/\D/g, '');
@@ -176,8 +174,6 @@ function buildEnviarLoteRpsSincronoXml({
   const competencia = dh;
   const valorNum = Number(nota.valor_total);
   const valor = money2(valorNum);
-  // Delphi envia ValorIss (ex.: 2.00 → 0.05). Lista municipal 01.07 = 2%.
-  const valorIss = money2((valorNum * ALIQUOTA_ISS_PCT_0107) / 100);
   const itemLista = itemListaServico(config.codigo_tributacao_nacional);
   const tribMun = codigoTributacaoMunicipioAbrasf(config);
   const cnae = codigoCnae(config);
@@ -223,7 +219,6 @@ function buildEnviarLoteRpsSincronoXml({
     `<Servico>` +
     `<Valores>` +
     `<ValorServicos>${valor}</ValorServicos>` +
-    `<ValorIss>${valorIss}</ValorIss>` +
     `<SituacaoTributariaPISCOFINS>00</SituacaoTributariaPISCOFINS>` +
     `</Valores>` +
     `<IssRetido>2</IssRetido>` +
@@ -347,9 +342,13 @@ function parseLoteResult(soapBody) {
     ),
   ].map((m) => `${m[1].trim()}: ${m[2].trim()}`);
 
+  // TipLan: A* = alerta (ex. A14); E*/X* = erro que impede autorização.
+  const erros = mensagens.filter((m) => !/^A\d+/i.test(m));
+  const alertas = mensagens.filter((m) => /^A\d+/i.test(m));
+
   const numero =
     inner.match(/<InfNfse[\s\S]*?<Numero>\s*([^<]+)\s*<\/Numero>/i)?.[1]?.trim() ??
-    inner.match(/<Numero>\s*([^<]+)\s*<\/Numero>/i)?.[1]?.trim() ??
+    inner.match(/<ListaNfse[\s\S]*?<Numero>\s*([^<]+)\s*<\/Numero>/i)?.[1]?.trim() ??
     null;
   const codVerif =
     inner.match(/<CodigoVerificacao>\s*([^<]+)\s*<\/CodigoVerificacao>/i)?.[1]?.trim() ?? null;
@@ -360,14 +359,16 @@ function parseLoteResult(soapBody) {
     inner.match(/<chNFSe>\s*([^<]+)\s*<\/chNFSe>/i)?.[1]?.trim() ??
     null;
 
-  const hasNfse = /<CompNfse[\s>]/i.test(inner) || /<Nfse[\s>]/i.test(inner);
+  const hasNfse =
+    /<CompNfse[\s>]/i.test(inner) ||
+    /<ListaNfse[\s>]/i.test(inner) ||
+    /<Nfse[\s>]/i.test(inner);
   const situacao = inner.match(/<Situacao>\s*([^<]+)\s*<\/Situacao>/i)?.[1]?.trim();
-  const hasErroLista = /<ListaMensagemRetorno[\s>]/i.test(inner) && mensagens.length > 0;
 
-  if (hasNfse && (codVerif || numero || chave)) {
+  if (hasNfse && (codVerif || numero || chave) && erros.length === 0) {
     return {
       sucesso: true,
-      erros: mensagens,
+      erros: alertas,
       numero,
       codigoVerificacao: codVerif,
       chaveAcesso: chave || codVerif || numero,
@@ -376,11 +377,23 @@ function parseLoteResult(soapBody) {
     };
   }
 
-  // Situacao 4 = processado com sucesso em alguns provedores TipLan
-  if (situacao === '4' && !hasErroLista && (codVerif || numero)) {
+  if (hasNfse && (codVerif || numero || chave)) {
     return {
       sucesso: true,
-      erros: mensagens,
+      erros: alertas,
+      numero,
+      codigoVerificacao: codVerif,
+      chaveAcesso: chave || codVerif || numero,
+      protocolo,
+      xml: inner,
+    };
+  }
+
+  // Situacao 4 = processado com sucesso no TipLan (alertas A* não bloqueiam).
+  if (situacao === '4' && erros.length === 0 && (codVerif || numero || hasNfse)) {
+    return {
+      sucesso: true,
+      erros: alertas,
       numero,
       codigoVerificacao: codVerif,
       chaveAcesso: chave || codVerif || numero,
@@ -391,11 +404,7 @@ function parseLoteResult(soapBody) {
 
   return {
     sucesso: false,
-    erros: mensagens.length
-      ? mensagens
-      : hasErroLista
-        ? ['Rejeitada pela prefeitura (ABRASF).']
-        : [],
+    erros: erros.length ? erros : alertas.length ? alertas : mensagens.length ? mensagens : ['Rejeitada pela prefeitura (ABRASF).'],
     numero: null,
     codigoVerificacao: null,
     chaveAcesso: null,

@@ -50,7 +50,6 @@ const required = [
   '<Status>1</Status>',
   '<Competencia>2026-07-17</Competencia>',
   '<ValorServicos>2.00</ValorServicos>',
-  '<ValorIss>0.04</ValorIss>',
   '<SituacaoTributariaPISCOFINS>00</SituacaoTributariaPISCOFINS>',
   '<IssRetido>2</IssRetido>',
   '<ItemListaServico>01.07</ItemListaServico>',
@@ -68,7 +67,7 @@ const required = [
   '<IncentivoFiscal>2</IncentivoFiscal>',
 ];
 
-const forbidden = ['GerarNfseEnvio', 'IBSCBS', 'TomadorServico', '<Aliquota>'];
+const forbidden = ['GerarNfseEnvio', 'IBSCBS', 'TomadorServico', '<Aliquota>', '<ValorIss>'];
 
 let ok = true;
 for (const s of required) {
