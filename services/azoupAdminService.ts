@@ -42,6 +42,14 @@ export async function fetchAzoupDashboard(): Promise<AzoupDashboardData> {
     desconto_centavos: body.desconto_centavos ?? 0,
     assinaturas_com_desconto: body.assinaturas_com_desconto ?? 0,
     planos_clientes: body.planos_clientes ?? [],
-    clientes: body.clientes ?? [],
+    clientes: (body.clientes ?? []).map((c) => ({
+      ...c,
+      valor_centavos: c.valor_centavos ?? 0,
+      valor_bruto_centavos: c.valor_bruto_centavos ?? c.valor_centavos ?? 0,
+      desconto_centavos: c.desconto_centavos ?? 0,
+      empresa_matriz_nome: c.empresa_matriz_nome ?? null,
+      empresa_matriz_cnpj: c.empresa_matriz_cnpj ?? null,
+      pode_emitir_nf: Boolean(c.pode_emitir_nf),
+    })),
   };
 }

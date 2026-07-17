@@ -1,6 +1,9 @@
 import { Card } from '@/components/Card';
+import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmitirNfseModal';
+import { useAuth } from '@/context/AuthContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import { fetchAzoupDashboard } from '@/services/azoupAdminService';
+import { emitirNfseClienteAzoup } from '@/services/azoupNfseService';
 import { colors, radius, spacing } from '@/theme/colors';
 import { fonts } from '@/theme/typography';
 import type { AzoupClienteResumo, AzoupDashboardData, AzoupStatusGrupo } from '@/types/azoupAdmin';
@@ -10,7 +13,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -84,6 +89,7 @@ function MetricPill({
 }
 
 export default function AzoupDashboardScreen() {
+  const { user } = useAuth();
   const [data, setData] = useState<AzoupDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -92,6 +98,9 @@ export default function AzoupDashboardScreen() {
   const debouncedSearch = useDebounce(search, 280);
   const [statusFilter, setStatusFilter] = useState<StatusFiltro>('todos');
   const [pagina, setPagina] = useState(1);
+  const [nfCliente, setNfCliente] = useState<AzoupClienteResumo | null>(null);
+  const [nfLoading, setNfLoading] = useState(false);
+  const [nfMsg, setNfMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const d = await fetchAzoupDashboard();
@@ -136,7 +145,15 @@ export default function AzoupDashboardScreen() {
     return list.filter((c) => {
       if (statusFilter !== 'todos' && c.status_grupo !== statusFilter) return false;
       if (!term) return true;
-      const hay = [c.nome, c.email ?? '', c.telefone ?? '', c.plano_nome ?? '', c.status_label]
+      const hay = [
+        c.nome,
+        c.email ?? '',
+        c.telefone ?? '',
+        c.plano_nome ?? '',
+        c.status_label,
+        c.empresa_matriz_cnpj ?? '',
+        c.empresa_matriz_nome ?? '',
+      ]
         .join(' ')
         .toLowerCase();
       return hay.includes(term);
@@ -159,8 +176,51 @@ export default function AzoupDashboardScreen() {
 
   const maxPlano = Math.max(1, ...(data?.planos_clientes.map((p) => p.total) ?? [1]));
 
+  const onEmitirNf = useCallback(
+    async (emitenteId: string) => {
+      if (!user?.id || !nfCliente) return;
+      setNfLoading(true);
+      setNfMsg(null);
+      try {
+        const res = await emitirNfseClienteAzoup(user.id, nfCliente.id, {
+          emitenteId: emitenteId || null,
+          usarValorBruto: false,
+        });
+        if (res.success) {
+          setNfMsg(`NFS-e autorizada (${nfCliente.nome}).`);
+          setNfCliente(null);
+        } else {
+          setNfMsg(res.message ?? 'Falha ao emitir NFS-e.');
+        }
+      } catch (e) {
+        setNfMsg((e as Error).message);
+      } finally {
+        setNfLoading(false);
+      }
+    },
+    [user?.id, nfCliente],
+  );
+
+  const pedirEmitirNf = useCallback((item: AzoupClienteResumo) => {
+    if (!item.pode_emitir_nf) {
+      const msg =
+        'Este cliente Azoup não tem CNPJ da empresa matriz. Cadastre a matriz no Azoup para emitir NFS-e.';
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(msg);
+      } else {
+        Alert.alert('Sem CNPJ', msg);
+      }
+      return;
+    }
+    setNfMsg(null);
+    setNfCliente(item);
+  }, []);
+
   const renderCliente = ({ item }: { item: AzoupClienteResumo }) => {
     const tone = statusTone(item.status_grupo);
+    const liquido = centavosParaReais(item.valor_centavos);
+    const bruto = centavosParaReais(item.valor_bruto_centavos);
+    const temDesconto = item.desconto_centavos > 0 || bruto > liquido + 0.001;
     return (
       <Card style={styles.clienteCard} padded={false}>
         <View style={styles.clienteTop}>
@@ -180,7 +240,15 @@ export default function AzoupDashboardScreen() {
         ) : (
           <Text style={styles.clientePlanoMuted}>Sem plano</Text>
         )}
-        <Text style={styles.clienteValor}>{formatBRL(centavosParaReais(item.valor_centavos))}</Text>
+        <Text style={styles.clienteValor}>{formatBRL(liquido)}</Text>
+        {temDesconto ? (
+          <Text style={styles.clienteValorBruto}>Cheio {formatBRL(bruto)}</Text>
+        ) : null}
+        {item.empresa_matriz_cnpj ? (
+          <Text style={styles.clienteMeta} numberOfLines={1}>
+            CNPJ {item.empresa_matriz_cnpj}
+          </Text>
+        ) : null}
         {item.email ? (
           <Text style={styles.clienteMeta} numberOfLines={1}>
             {item.email}
@@ -191,6 +259,20 @@ export default function AzoupDashboardScreen() {
             {item.telefone}
           </Text>
         ) : null}
+        <Pressable
+          style={[styles.nfBtn, !item.pode_emitir_nf && styles.nfBtnDisabled]}
+          onPress={() => pedirEmitirNf(item)}
+          disabled={!item.pode_emitir_nf}
+        >
+          <Ionicons
+            name="receipt-outline"
+            size={14}
+            color={item.pode_emitir_nf ? colors.orange : colors.gray400}
+          />
+          <Text style={[styles.nfBtnTxt, !item.pode_emitir_nf && styles.nfBtnTxtDisabled]}>
+            Emitir NFS-e
+          </Text>
+        </Pressable>
       </Card>
     );
   };
@@ -201,12 +283,12 @@ export default function AzoupDashboardScreen() {
         <Text style={styles.heroEyebrow}>AZOUP - WEB</Text>
         <Text style={styles.heroTitle}>Painel SaaS</Text>
         <Text style={styles.heroLead}>
-          Visão somente leitura dos clientes, planos e MRR do outro sistema.
+          Clientes, planos e MRR (líquido e valor cheio). Emita NFS-e dos assinantes com CNPJ.
         </Text>
         {data ? (
           <Text style={styles.heroUpdated}>
             Atualizado {formatDateTimeBRFromISO(data.gerado_em) || 'agora'} · fonte{' '}
-            {data.mrr_fonte === 'stripe' ? 'Stripe' : 'local'}
+            {data.mrr_fonte === 'stripe' ? 'Stripe (cupons)' : 'local'}
           </Text>
         ) : null}
       </View>
@@ -230,10 +312,21 @@ export default function AzoupDashboardScreen() {
           <Card style={styles.mrrCard} padded={false}>
             <View style={styles.mrrInner}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.mrrLabel}>MRR líquido</Text>
+                <Text style={styles.mrrLabel}>MRR líquido (após cupom)</Text>
                 <Text style={styles.mrrValue}>{formatBRL(centavosParaReais(data.mrr_centavos))}</Text>
                 <Text style={styles.mrrSub}>
-                  {data.clientes_assinatura_ativa} assinaturas ativas · receita mensal recorrente
+                  Valor cheio: {formatBRL(centavosParaReais(data.mrr_bruto_centavos))}
+                  {data.desconto_centavos > 0
+                    ? ` · Descontos: ${formatBRL(centavosParaReais(data.desconto_centavos))}`
+                    : ''}
+                </Text>
+                <Text style={styles.mrrSub}>
+                  {data.clientes_assinatura_ativa} ativas
+                  {data.assinaturas_com_desconto > 0
+                    ? ` · ${data.assinaturas_com_desconto} com cupom`
+                    : data.mrr_fonte === 'stripe'
+                      ? ' · nenhum cupom no próximo ciclo'
+                      : ' · configure AZOUP_STRIPE_SECRET_KEY p/ cupons'}
                 </Text>
               </View>
               <View style={styles.mrrBadge}>
@@ -241,6 +334,12 @@ export default function AzoupDashboardScreen() {
               </View>
             </View>
           </Card>
+
+          {nfMsg ? (
+            <Card style={styles.nfMsgCard}>
+              <Text style={styles.nfMsgTxt}>{nfMsg}</Text>
+            </Card>
+          ) : null}
 
           <View style={styles.metricsGrid}>
             <MetricPill
@@ -399,6 +498,27 @@ export default function AzoupDashboardScreen() {
             <Text style={styles.empty}>Nenhum cliente com os filtros atuais.</Text>
           ) : null
         }
+      />
+      <ConfirmarEmitirNfseModal
+        visible={Boolean(nfCliente)}
+        titulo="Emitir NFS-e Azoup?"
+        descricao={
+          nfCliente
+            ? `Gera NFS-e de ${formatBRL(centavosParaReais(nfCliente.valor_centavos))} para ${nfCliente.nome}${
+                nfCliente.empresa_matriz_cnpj ? ` (CNPJ ${nfCliente.empresa_matriz_cnpj})` : ''
+              }. O cadastro local será criado/atualizado automaticamente.`
+            : ''
+        }
+        botaoPrimario="Gerar e emitir NFS-e"
+        botaoSecundario="Cancelar"
+        loading={nfLoading}
+        onClose={() => {
+          if (!nfLoading) setNfCliente(null);
+        }}
+        onEmitir={(emitenteId) => void onEmitirNf(emitenteId)}
+        onDepois={() => {
+          if (!nfLoading) setNfCliente(null);
+        }}
       />
     </View>
   );
@@ -680,11 +800,53 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.orange,
   },
+  clienteValorBruto: {
+    marginTop: 2,
+    fontFamily: fonts.medium,
+    fontSize: 10,
+    color: colors.gray600,
+  },
   clienteMeta: {
     marginTop: 2,
     fontFamily: fonts.regular,
     fontSize: 10,
     color: colors.gray600,
+  },
+  nfBtn: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(234, 88, 12, 0.35)',
+    backgroundColor: colors.orangeSoft,
+  },
+  nfBtnDisabled: {
+    borderColor: colors.gray200,
+    backgroundColor: colors.gray50,
+  },
+  nfBtnTxt: {
+    fontFamily: fonts.semibold,
+    fontSize: 11,
+    color: colors.orangeDark,
+  },
+  nfBtnTxtDisabled: {
+    color: colors.gray400,
+  },
+  nfMsgCard: {
+    marginBottom: spacing.md,
+    backgroundColor: colors.successSoft,
+    borderColor: 'rgba(46, 125, 50, 0.2)',
+  },
+  nfMsgTxt: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.petroleum,
+    lineHeight: 18,
   },
   empty: {
     textAlign: 'center',

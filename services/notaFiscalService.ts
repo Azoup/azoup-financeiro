@@ -433,6 +433,69 @@ export async function gerarNotaFiscalParaMensalidade(
   return { success: false, notaId, message: res.message };
 }
 
+type AvulsaNfInput = {
+  cliente_id: string;
+  valor: number;
+  descricao: string;
+  competencia?: string | null;
+};
+
+/** NFS-e avulsa (ex.: assinatura Azoup) sem vínculo com mensalidade/venda. */
+export async function criarNotaFiscalRascunhoAvulsa(
+  userId: string,
+  input: AvulsaNfInput,
+  opts?: EmitOpts,
+): Promise<string> {
+  const { emitente } = await validarPreEmissaoNfse(userId, input.cliente_id, opts?.emitenteId);
+
+  const numero = emitente.proximo_numero;
+  const descricao =
+    input.descricao.trim().slice(0, 2000) ||
+    descricaoItem(input.competencia ?? null, emitente.descricao_servico_padrao);
+
+  const insertRow: Record<string, unknown> = {
+    user_id: userId,
+    mensalidade_id: null,
+    venda_id: null,
+    cliente_id: input.cliente_id,
+    serie: emitente.serie,
+    numero,
+    status: 'rascunho',
+    valor_total: input.valor,
+    natureza_operacao: emitente.natureza_operacao,
+    ambiente: AMBIENTE_FISCAL_ATUAL,
+    tipo_documento: 'nfse',
+    competencia: input.competencia ?? null,
+  };
+  if (emitente.id) insertRow.emitente_id = emitente.id;
+
+  const { data: nf, error: nfErr } = await supabase
+    .from('nota_fiscal')
+    .insert(insertRow)
+    .select('id')
+    .single();
+  if (nfErr || !nf) throw wrapNotaFiscalInsertError(nfErr?.message);
+
+  const notaId = nf.id as string;
+  await inserirItensNotaFiscal(notaId, emitente, descricao, input.valor);
+  await bumpProximoNumero(userId, emitente, numero + 1);
+
+  return notaId;
+}
+
+export async function gerarNotaFiscalAvulsa(
+  userId: string,
+  input: AvulsaNfInput,
+  opts?: EmitOpts,
+): Promise<{ success: boolean; notaId?: string; message?: string }> {
+  const notaId = await criarNotaFiscalRascunhoAvulsa(userId, input, opts);
+  const res = await emitirNotaFiscalSefaz(notaId);
+  if (res.success) {
+    return { success: true, notaId };
+  }
+  return { success: false, notaId, message: res.message };
+}
+
 export async function reemitirNotaFiscalSefaz(notaFiscalId: string): Promise<EmitirNfeResult> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user?.id;
