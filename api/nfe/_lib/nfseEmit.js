@@ -6,7 +6,8 @@ const { humanizeNfseRejection, validarConvenioMunicipio } = require('./nfseError
 const { installMunicipalAxiosRedirect } = require('./municipalAxiosRedirect');
 const { resolveNfseGateway } = require('./nfseGateways');
 const { emitirNfsePaulistana } = require('./nfsePaulistana');
-const { emitirNfseAbrasfAmericana } = require('./nfseAbrasfAmericana');
+const { emitirNfseAbrasfAmericana, itemListaServico } = require('./nfseAbrasfAmericana');
+const { salvarArtefatosNfseAbrasf } = require('./nfseDanfseArtifacts');
 const { prepareServerlessCryptoEnv } = require('./serverlessEnv');
 
 function extrairXml(ret) {
@@ -80,6 +81,40 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
       );
       if (!result.success && result.message) {
         result.message = humanizeNfseRejection(result.message, config.codigo_ibge_emitente);
+      }
+      if (result.success) {
+        const onlyDigits = (s) => String(s ?? '').replace(/\D/g, '');
+        const artefatos = await salvarArtefatosNfseAbrasf({
+          admin,
+          userId: nota.user_id,
+          chave:
+            result.codigo_verificacao ||
+            result.chave_acesso ||
+            result.protocolo_autorizacao ||
+            `${nota.serie}-${nota.numero}`,
+          xmlRaw: result.xml_autorizado,
+          meta: {
+            prestadorNome: perfil.razao_social || perfil.nome_fantasia || 'Prestador',
+            prestadorDoc: onlyDigits(perfil.documento),
+            prestadorIm: onlyDigits(config.inscricao_municipal),
+            tomadorNome:
+              cliente.nome_fantasia || cliente.nome_cliente || cliente.nome || 'Tomador',
+            tomadorDoc: onlyDigits(cliente.cnpj) || onlyDigits(cliente.documento),
+            numero: String(nota.numero),
+            serie: String(nota.serie || config.serie || '1'),
+            codigoVerificacao: result.codigo_verificacao,
+            chaveAcesso: result.chave_acesso,
+            discriminacao:
+              itens[0]?.descricao || config.descricao_servico_padrao || 'Prestação de serviços',
+            valor: nota.valor_total,
+            itemLista: itemListaServico(config.codigo_tributacao_nacional),
+            competencia: nota.competencia || '',
+            dataEmissao: String(nota.data_emissao || '').slice(0, 10),
+          },
+        });
+        result.xml_autorizado = artefatos.xml_autorizado || result.xml_autorizado;
+        result.danfe_url = artefatos.danfe_url;
+        result.danfe_storage_path = artefatos.danfe_storage_path;
       }
       return result;
     } catch (e) {

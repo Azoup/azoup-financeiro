@@ -3,21 +3,28 @@ import { CancelarNotaFiscalModal } from '@/components/notas-fiscais/CancelarNota
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
 import { cancelarNotaFiscalSefaz, fetchNotasFiscaisLista, reemitirNotaFiscalSefaz } from '@/services/notaFiscalService';
+import { nfeApiBaseUrl } from '@/services/nfeConfigService';
+import { supabase } from '@/lib/supabase';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { NotaFiscalListRow } from '@/types/notaFiscal';
+import { showAppToast } from '@/utils/appToast';
 import { formatBRL } from '@/utils/currency';
+import { buildDanfseHtmlFromNota } from '@/utils/danfseHtml';
 import { formatDateTimeBRFromISO } from '@/utils/date';
 import {
   corNotaFiscalStatus,
   labelAmbienteNfe,
   labelTipoDocumentoFiscal,
   labelNotaFiscalStatus,
+  podeBaixarXmlNfse,
   podeCancelarNotaFiscal,
   podeImprimirDanfe,
   podeReemitirNotaFiscal,
 } from '@/utils/nfeStatus';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -30,8 +37,20 @@ import {
   Text,
   View,
 } from 'react-native';
-import { showAppToast } from '@/utils/appToast';
 import Toast from 'react-native-toast-message';
+
+function baixarXmlNoNavegador(xml: string, nomeArquivo: string) {
+  const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nomeArquivo;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 export default function NotasFiscaisIndexScreen() {
   const { user } = useAuth();
@@ -43,6 +62,7 @@ export default function NotasFiscaisIndexScreen() {
   const [cancelTarget, setCancelTarget] = useState<NotaFiscalListRow | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
   const [reemitBusyId, setReemitBusyId] = useState<string | null>(null);
+  const [printBusyId, setPrintBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -86,18 +106,97 @@ export default function NotasFiscaisIndexScreen() {
   }, [load]);
 
   const imprimirDanfe = async (item: NotaFiscalListRow) => {
-    const url = item.danfe_url?.trim();
-    if (!url) {
-      Toast.show({ type: 'info', text1: 'DANFSe ainda não disponível para esta nota.' });
+    setPrintBusyId(item.id);
+    try {
+      let url = item.danfe_url?.trim() || '';
+      if (!url && item.status === 'autorizada') {
+        const base = nfeApiBaseUrl();
+        const { data: session } = await supabase.auth.getSession();
+        const token = session.session?.access_token;
+        if (base && token) {
+          const res = await fetch(`${base}/api/nfe/artefatos`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ notaFiscalId: item.id }),
+          });
+          const body = (await res.json().catch(() => ({}))) as { danfe_url?: string };
+          if (body.danfe_url) {
+            url = body.danfe_url;
+            await load();
+          }
+        }
+      }
+
+      if (url) {
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.open(url, '_blank', 'noopener,noreferrer');
+          return;
+        }
+        const ok = await Linking.canOpenURL(url);
+        if (ok) await Linking.openURL(url);
+        else Toast.show({ type: 'error', text1: 'Não foi possível abrir o DANFE.' });
+        return;
+      }
+
+      const html = buildDanfseHtmlFromNota(item);
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const w = window.open('', '_blank', 'noopener,noreferrer');
+        if (w) {
+          w.document.write(html);
+          w.document.close();
+          return;
+        }
+      }
+      const { uri } = await Print.printToFileAsync({ html });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/pdf',
+          dialogTitle: `DANFSe ${item.serie}-${item.numero}`,
+        });
+      } else {
+        await Print.printAsync({ html });
+      }
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message || 'Falha ao gerar DANFSe.' });
+    } finally {
+      setPrintBusyId(null);
+    }
+  };
+
+  const baixarXml = async (item: NotaFiscalListRow) => {
+    const xml = item.xml_autorizado?.trim();
+    if (!xml) {
+      Toast.show({
+        type: 'info',
+        text1: 'XML ainda não disponível nesta nota.',
+        text2: 'Notas emitidas antes do ajuste: use Imprimir DANFSe ou confira no portal da prefeitura.',
+      });
       return;
     }
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.open(url, '_blank', 'noopener,noreferrer');
-      return;
+    const nome = `NFSe_${item.serie}_${item.numero}.xml`;
+    try {
+      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+        baixarXmlNoNavegador(xml, nome);
+        Toast.show({ type: 'success', text1: 'Download do XML iniciado.' });
+        return;
+      }
+      const FileSystem = await import('expo-file-system');
+      const path = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}${nome}`;
+      await FileSystem.writeAsStringAsync(path, xml, { encoding: 'utf8' });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(path, {
+          mimeType: 'application/xml',
+          dialogTitle: nome,
+        });
+      } else {
+        Toast.show({ type: 'info', text1: 'Arquivo XML salvo.', text2: path });
+      }
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message || 'Falha ao baixar XML.' });
     }
-    const ok = await Linking.canOpenURL(url);
-    if (ok) await Linking.openURL(url);
-    else Toast.show({ type: 'error', text1: 'Não foi possível abrir o DANFE.' });
   };
 
   const confirmarCancelamento = async (justificativa: string) => {
@@ -122,7 +221,11 @@ export default function NotasFiscaisIndexScreen() {
       if (res.success) {
         showAppToast('success', 'NFS-e autorizada.');
       } else {
-        showAppToast('error', res.message ?? 'NFS-e rejeitada.', 'Veja o motivo na nota abaixo e corrija antes de reemitir.');
+        showAppToast(
+          'error',
+          res.message ?? 'NFS-e rejeitada.',
+          'Veja o motivo na nota abaixo e corrija antes de reemitir.',
+        );
       }
       await load();
     } catch (e) {
@@ -136,9 +239,11 @@ export default function NotasFiscaisIndexScreen() {
     const st = corNotaFiscalStatus(item.status);
     const cli = item.cliente?.nome_cliente ?? '—';
     const podeDanfe = podeImprimirDanfe(item);
+    const podeXml = podeBaixarXmlNfse(item);
     const podeCancelar = podeCancelarNotaFiscal(item);
     const podeReemitir = podeReemitirNotaFiscal(item);
     const reemitindo = reemitBusyId === item.id;
+    const imprimindo = printBusyId === item.id;
 
     return (
       <Card style={styles.card}>
@@ -190,10 +295,17 @@ export default function NotasFiscaisIndexScreen() {
             />
           ) : null}
           <PrimaryButton
-            title="Imprimir DANFSe"
+            title={imprimindo ? 'Abrindo…' : 'Imprimir DANFSe'}
             variant="secondary"
             onPress={() => void imprimirDanfe(item)}
-            disabled={!podeDanfe}
+            disabled={!podeDanfe || imprimindo}
+            style={styles.btnAcao}
+          />
+          <PrimaryButton
+            title="Baixar XML"
+            variant="secondary"
+            onPress={() => void baixarXml(item)}
+            disabled={!podeXml}
             style={styles.btnAcao}
           />
           {podeCancelar ? (

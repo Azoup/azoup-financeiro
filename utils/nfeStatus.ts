@@ -39,8 +39,27 @@ export function labelTipoDocumentoFiscal(tipo: string | undefined | null): strin
   return tipo === 'nfe' ? 'NF-e' : 'NFS-e';
 }
 
-export function podeImprimirDanfe(nota: { status: string; danfe_url?: string | null }): boolean {
-  return nota.status === 'autorizada' && Boolean(nota.danfe_url?.trim());
+export function podeImprimirDanfe(nota: {
+  status: string;
+  danfe_url?: string | null;
+  codigo_verificacao?: string | null;
+  chave_acesso?: string | null;
+  xml_autorizado?: string | null;
+}): boolean {
+  if (nota.status !== 'autorizada') return false;
+  return Boolean(
+    nota.danfe_url?.trim() ||
+      nota.codigo_verificacao?.trim() ||
+      nota.chave_acesso?.trim() ||
+      nota.xml_autorizado?.trim(),
+  );
+}
+
+export function podeBaixarXmlNfse(nota: {
+  status: string;
+  xml_autorizado?: string | null;
+}): boolean {
+  return nota.status === 'autorizada' && Boolean(nota.xml_autorizado?.trim());
 }
 
 export function podeCancelarNotaFiscal(nota: {
