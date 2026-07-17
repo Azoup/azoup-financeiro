@@ -19,9 +19,10 @@ type Props = {
   value: Date | null;
   onChange: (d: Date | null) => void;
   minimumDate?: Date;
+  compact?: boolean;
 };
 
-export function DatePickerField({ label, value, onChange, minimumDate }: Props) {
+export function DatePickerField({ label, value, onChange, minimumDate, compact }: Props) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Date>(value ?? new Date());
   const webInputRef = useRef<HTMLInputElement | null>(null);
@@ -75,16 +76,16 @@ export function DatePickerField({ label, value, onChange, minimumDate }: Props) 
       pointerEvents: 'none',
     };
     return (
-      <View style={styles.wrap}>
-        <Text style={styles.label}>{label}</Text>
+      <View style={[styles.wrap, compact && styles.wrapCompact]}>
+        <Text style={[styles.label, compact && styles.labelCompact]}>{label}</Text>
         <Pressable
-          style={[styles.field, styles.fieldPressable]}
+          style={[styles.field, styles.fieldPressable, compact && styles.fieldCompact]}
           onPress={openWebDatePicker}
           accessibilityRole="button"
           accessibilityLabel={label}
         >
           <Text
-            style={[styles.fieldText, !value && styles.placeholder]}
+            style={[styles.fieldText, compact && styles.fieldTextCompact, !value && styles.placeholder]}
             pointerEvents="none"
           >
             {value ? display : 'Selecionar data'}
@@ -115,14 +116,14 @@ export function DatePickerField({ label, value, onChange, minimumDate }: Props) 
   }
 
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.label}>{label}</Text>
+    <View style={[styles.wrap, compact && styles.wrapCompact]}>
+      <Text style={[styles.label, compact && styles.labelCompact]}>{label}</Text>
       <Pressable
         onPress={openPicker}
-        style={styles.field}
+        style={[styles.field, compact && styles.fieldCompact]}
         hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
       >
-        <Text style={[styles.fieldText, !value && styles.placeholder]}>
+        <Text style={[styles.fieldText, compact && styles.fieldTextCompact, !value && styles.placeholder]}>
           {value ? display : 'Selecionar data'}
         </Text>
       </Pressable>
@@ -173,11 +174,18 @@ const styles = StyleSheet.create({
   wrap: {
     marginBottom: spacing.md,
   },
+  wrapCompact: {
+    marginBottom: spacing.sm,
+  },
   label: {
     fontSize: 13,
     fontWeight: '600',
     color: colors.gray600,
     marginBottom: spacing.sm,
+  },
+  labelCompact: {
+    fontSize: 11,
+    marginBottom: 4,
   },
   field: {
     borderWidth: 1,
@@ -188,12 +196,22 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     position: 'relative',
   },
+  fieldCompact: {
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 8,
+    minHeight: 34,
+    justifyContent: 'center',
+  },
   fieldPressable: {
     minHeight: 48,
   },
   fieldText: {
     fontSize: 16,
     color: colors.gray800,
+  },
+  fieldTextCompact: {
+    fontSize: 13,
   },
   placeholder: {
     color: colors.gray400,

@@ -9,7 +9,7 @@ import { useDebounce } from '@/hooks/useDebounce';
 import { sincronizarCarnesMensalidadesFaltantes } from '@/services/boletoParcelaService';
 import {
   fetchMensalidadesGeradasHistorico,
-  fetchPagamentosMensalidadeGerada,
+  fetchPagamentosMensalidadesPorIds,
   mensalidadeGeradaStatusVisual,
   podeRegistrarPagamentoMensalidadeGerada,
   registrarPagamentoMensalidadeGerada,
@@ -108,9 +108,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
   const [statusFilter, setStatusFilter] = useState<StatusFiltro>('todos');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [expanded, setExpanded] = useState<string | null>(null);
   const [pagamentos, setPagamentos] = useState<Record<string, PagamentoMensalidadeGerada[]>>({});
-  const [loadingPay, setLoadingPay] = useState<string | null>(null);
   const [registroPagamento, setRegistroPagamento] = useState<MensalidadeGerada | null>(null);
   const [nfPosPagamento, setNfPosPagamento] = useState<MensalidadeGerada | null>(null);
   const [nfBusyId, setNfBusyId] = useState<string | null>(null);
@@ -183,6 +181,29 @@ export default function HistoricoMensalidadesGeradasScreen() {
     setPagina((atual) => Math.min(atual, totalPaginas));
   }, [totalPaginas]);
 
+  useEffect(() => {
+    let alive = true;
+    const ids = rowsPagina.map((m) => m.id);
+    if (!ids.length) {
+      setPagamentos({});
+      return;
+    }
+    (async () => {
+      try {
+        const map = await fetchPagamentosMensalidadesPorIds(ids);
+        if (alive) setPagamentos(map);
+      } catch (e) {
+        if (alive) {
+          setPagamentos({});
+          showAppError((e as Error).message);
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [rowsPagina]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -194,31 +215,11 @@ export default function HistoricoMensalidadesGeradasScreen() {
     }
   }, [load]);
 
-  const toggleExpand = async (id: string) => {
-    if (expanded === id) {
-      setExpanded(null);
-      return;
-    }
-    setExpanded(id);
-    if (pagamentos[id]) return;
-    setLoadingPay(id);
-    try {
-      const list = await fetchPagamentosMensalidadeGerada(id);
-      setPagamentos((p) => ({ ...p, [id]: list }));
-    } catch (e) {
-      showAppError((e as Error).message);
-    } finally {
-      setLoadingPay(null);
-    }
-  };
-
   const onMarcarPago = async (payload: Parameters<typeof registrarPagamentoMensalidadeGerada>[2]) => {
     if (!user?.id || !registroPagamento) return;
     const mensalidade = registroPagamento;
     await registrarPagamentoMensalidadeGerada(user.id, mensalidade.id, payload);
     setRegistroPagamento(null);
-    setPagamentos({});
-    setExpanded(null);
     await load();
     const existente = await fetchNotaFiscalPorMensalidade(user.id, mensalidade.id).catch(() => null);
     if (!existente && mensalidade.status !== 'cancelado') {
@@ -308,15 +309,14 @@ export default function HistoricoMensalidadesGeradasScreen() {
     const nfEmitida = nfEmitidas[m.id];
     const showNf = m.status !== 'cancelado' && !nfEmitida;
     const nfBusy = nfBusyId === m.id;
-    const exp = expanded === m.id;
-    const pays = pagamentos[m.id];
+    const pays = pagamentos[m.id] ?? [];
     const venc = m.data_vencimento.split('-').reverse().join('/');
 
     return (
-      <Card style={styles.card}>
+      <Card style={styles.card} padded={false}>
         <View style={styles.cardHead}>
           <View style={styles.cardTitleCol}>
-            <Text style={styles.cli} numberOfLines={1}>
+            <Text style={styles.cli} numberOfLines={2}>
               {cli.nome}
             </Text>
             {cli.empresa ? (
@@ -331,45 +331,56 @@ export default function HistoricoMensalidadesGeradasScreen() {
         </View>
 
         <View style={styles.compactMeta}>
-          {m.competencia ? <Text style={styles.metaTxt}>Comp. {m.competencia}</Text> : null}
-          <Text style={styles.metaTxt}>Venc. {venc}</Text>
-          <Text style={styles.metaTxt}>
-            {formatBRL(m.valor)} · pago {formatBRL(m.valor_pago)} · pend. {formatBRL(pend)}
+          {m.competencia ? <Text style={styles.metaTxt} numberOfLines={1}>Comp. {m.competencia}</Text> : null}
+          <Text style={styles.metaTxt} numberOfLines={1}>Venc. {venc}</Text>
+          <Text style={styles.metaTxt} numberOfLines={2}>
+            {formatBRL(m.valor)} · pago {formatBRL(m.valor_pago)}
           </Text>
+          <Text style={styles.metaTxt} numberOfLines={1}>Pend. {formatBRL(pend)}</Text>
+        </View>
+
+        <View style={styles.hist}>
+          <Text style={styles.histTitle}>Pagamentos</Text>
+          {!pays.length ? (
+            <Text style={styles.histEmpty}>Nenhum pagamento.</Text>
+          ) : (
+            pays.map((p) => (
+              <View key={p.id} style={styles.histRow}>
+                <Text style={styles.histVal}>{formatBRL(p.valor_pago)}</Text>
+                <Text style={styles.histMeta} numberOfLines={2}>
+                  {p.data_pagamento.split('-').reverse().join('/')} · {p.forma_pagamento}
+                </Text>
+              </View>
+            ))
+          )}
         </View>
 
         <View style={styles.btnRow}>
           {showPay ? (
             <Pressable style={styles.btnSmLancar} onPress={() => setRegistroPagamento(m)}>
-              <Ionicons name="cash-outline" size={14} color={colors.white} />
-              <Text style={styles.btnSmPagoTxt}>Lançar pagamento</Text>
+              <Ionicons name="cash-outline" size={13} color={colors.white} />
+              <Text style={styles.btnSmPagoTxt} numberOfLines={1}>
+                Lançar pgt.
+              </Text>
             </Pressable>
           ) : jaPago ? (
             <View style={styles.btnSmPago} accessibilityState={{ disabled: true }}>
-              <Ionicons name="checkmark-circle" size={14} color={colors.white} />
+              <Ionicons name="checkmark-circle" size={13} color={colors.white} />
               <Text style={styles.btnSmPagoTxt}>Pago</Text>
             </View>
           ) : null}
-          <Pressable style={styles.btnSmGhost} onPress={() => toggleExpand(m.id)}>
-            {loadingPay === m.id ? (
-              <ActivityIndicator size="small" color={colors.orange} />
-            ) : (
-              <Ionicons name="list-outline" size={14} color={colors.petroleum} />
-            )}
-            <Text style={styles.btnSmGhostTxt}>{exp ? 'Ocultar' : 'Pagtos'}</Text>
-          </Pressable>
         </View>
 
         {nfEmitida ? (
           <View style={styles.nfEmitidaBadge}>
-            <Ionicons name="document-text-outline" size={14} color={colors.success} />
-            <Text style={styles.nfEmitidaTxt}>
-              NFS-e já emitida{nfEmitida.numero != null ? ` — nº ${nfEmitida.numero}` : ''}
+            <Ionicons name="document-text-outline" size={13} color={colors.success} />
+            <Text style={styles.nfEmitidaTxt} numberOfLines={2}>
+              NFS-e emitida{nfEmitida.numero != null ? ` nº ${nfEmitida.numero}` : ''}
             </Text>
           </View>
         ) : showNf ? (
           <PrimaryButton
-            title={nfBusy ? 'Emitindo NFS-e…' : 'Emitir NFS-e'}
+            title={nfBusy ? 'Emitindo…' : 'Emitir NFS-e'}
             variant="secondary"
             size="compact"
             onPress={() => setNfConfirmMensalidade(m)}
@@ -377,23 +388,6 @@ export default function HistoricoMensalidadesGeradasScreen() {
             disabled={nfBusy}
             style={styles.btnEmitirNf}
           />
-        ) : null}
-
-        {exp ? (
-          <View style={styles.hist}>
-            {!pays?.length ? (
-              <Text style={styles.histEmpty}>Nenhum pagamento.</Text>
-            ) : (
-              pays.map((p) => (
-                <View key={p.id} style={styles.histRow}>
-                  <Text style={styles.histVal}>{formatBRL(p.valor_pago)}</Text>
-                  <Text style={styles.histMeta}>
-                    {p.data_pagamento.split('-').reverse().join('/')} · {p.forma_pagamento}
-                  </Text>
-                </View>
-              ))
-            )}
-          </View>
         ) : null}
       </Card>
     );
@@ -517,6 +511,8 @@ export default function HistoricoMensalidadesGeradasScreen() {
         data={rowsPagina}
         keyExtractor={(m) => m.id}
         renderItem={renderItem}
+        numColumns={2}
+        columnWrapperStyle={styles.columnWrapper}
         ListHeaderComponent={listHeader}
         ListFooterComponent={listFooter}
         contentContainerStyle={styles.listContent}
@@ -575,8 +571,12 @@ export default function HistoricoMensalidadesGeradasScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.gray50 },
   listContent: {
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.sm,
     paddingBottom: spacing.xl * 2,
+  },
+  columnWrapper: {
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
   },
   banner: {
     flexDirection: 'row',
@@ -674,23 +674,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   card: {
-    marginBottom: spacing.sm,
+    flex: 1,
+    minWidth: 0,
     paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.sm,
   },
   cardHead: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'flex-start',
-    gap: spacing.sm,
+    gap: spacing.xs,
   },
   cardTitleCol: {
     flex: 1,
     minWidth: 0,
   },
   cli: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: colors.petroleum,
+    lineHeight: 17,
   },
   emp: {
     fontSize: 11,
@@ -712,87 +714,75 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   metaTxt: {
-    fontSize: 11,
+    fontSize: 10,
     color: colors.gray600,
-    lineHeight: 15,
+    lineHeight: 14,
   },
   btnRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: spacing.xs,
     marginTop: spacing.sm,
   },
   btnSmLancar: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
     backgroundColor: colors.orange,
     paddingVertical: 6,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.xs,
     borderRadius: radius.sm,
-    minHeight: 32,
+    minHeight: 30,
   },
   btnSmPago: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
     backgroundColor: colors.success,
     paddingVertical: 6,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.xs,
     borderRadius: radius.sm,
-    minHeight: 32,
+    minHeight: 30,
   },
   btnSmPagoTxt: {
     color: colors.white,
     fontWeight: '700',
-    fontSize: 12,
+    fontSize: 11,
   },
   btnEmitirNf: { marginTop: spacing.sm },
   nfEmitidaBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 4,
     backgroundColor: colors.successSoft,
     borderRadius: radius.sm,
-    paddingVertical: 6,
-    paddingHorizontal: spacing.sm,
-    minHeight: 32,
+    paddingVertical: 5,
+    paddingHorizontal: spacing.xs,
+    minHeight: 28,
     marginTop: spacing.sm,
   },
   nfEmitidaTxt: {
+    flex: 1,
     color: colors.success,
     fontWeight: '700',
-    fontSize: 12,
-  },
-  btnSmGhost: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingVertical: 6,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.gray200,
-    backgroundColor: colors.white,
-    minHeight: 32,
-  },
-  btnSmGhostTxt: {
-    color: colors.petroleum,
-    fontWeight: '600',
-    fontSize: 12,
+    fontSize: 10,
+    lineHeight: 13,
   },
   hist: {
     marginTop: spacing.sm,
     paddingTop: spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.gray100,
+  },
+  histTitle: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.gray600,
+    textTransform: 'uppercase',
+    marginBottom: 4,
   },
   histEmpty: {
     fontSize: 11,
@@ -802,12 +792,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   histVal: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: colors.petroleum,
   },
   histMeta: {
-    fontSize: 11,
+    fontSize: 10,
     color: colors.gray600,
   },
   paginacao: {

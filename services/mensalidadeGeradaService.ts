@@ -100,6 +100,27 @@ export async function fetchPagamentosMensalidadeGerada(
   return (data as PagamentoMensalidadeGerada[] | null) ?? [];
 }
 
+export async function fetchPagamentosMensalidadesPorIds(
+  mensalidadeIds: string[],
+): Promise<Record<string, PagamentoMensalidadeGerada[]>> {
+  const map: Record<string, PagamentoMensalidadeGerada[]> = {};
+  if (!mensalidadeIds.length) return map;
+
+  const { data, error } = await supabase
+    .from('pagamentos_mensalidades')
+    .select('*')
+    .in('mensalidade_id', mensalidadeIds)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+
+  for (const row of (data as PagamentoMensalidadeGerada[] | null) ?? []) {
+    const list = map[row.mensalidade_id] ?? [];
+    list.push(row);
+    map[row.mensalidade_id] = list;
+  }
+  return map;
+}
+
 /** Última data de vencimento gerada por cliente (mensalidades não canceladas). */
 export async function fetchUltimoVencimentoMensalidadePorCliente(
   userId: string,

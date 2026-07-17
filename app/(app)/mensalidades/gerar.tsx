@@ -417,6 +417,7 @@ export default function GerarMensalidadeScreen() {
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="always">
         <ExportReportButtons
+          compact
           disabled={loading}
           getReport={() =>
             buildGerarMensalidadeExport(rows, {
@@ -432,19 +433,19 @@ export default function GerarMensalidadeScreen() {
           }
         />
         <Text style={styles.lead}>
-          Use o filtro por mês de reajuste para listar quem reajusta no período, marque os clientes, aplique o
-          percentual e depois gere as mensalidades.
+          Filtre por mês de reajuste, selecione os clientes, aplique o percentual e gere as mensalidades.
         </Text>
 
-        <Card style={styles.card}>
+        <Card style={styles.card} padded={false}>
           <Text style={styles.h}>Reajuste do mês</Text>
           <Text style={styles.hint}>
-            Informe o mês (MM/AAAA) em que a data de reajuste do cadastro cai — ex.: 06/2026 para junho. Só entram
-            clientes com essa data de reajuste no cadastro.
+            Mês (MM/AAAA) da data de reajuste no cadastro — ex.: 06/2026.
           </Text>
           <View style={styles.switchRow}>
-            <Text style={styles.label}>Filtrar clientes com reajuste no mês</Text>
-            <Switch value={filtrarPorMesReajuste} onValueChange={setFiltrarPorMesReajuste} />
+            <Text style={styles.label}>Filtrar por mês de reajuste</Text>
+            <View style={styles.switchScale}>
+              <Switch value={filtrarPorMesReajuste} onValueChange={setFiltrarPorMesReajuste} />
+            </View>
           </View>
           <Text style={styles.label}>Mês do reajuste</Text>
           <TextInput
@@ -484,14 +485,16 @@ export default function GerarMensalidadeScreen() {
           />
           <View style={styles.reajusteBtnRow}>
             <PrimaryButton
-              title="Selecionar todos da lista"
+              title="Selec. todos"
               variant="secondary"
+              size="compact"
               onPress={selecionarTodosLista}
               disabled={!rows.length || loading}
               style={styles.reajusteBtnFlex}
             />
             <PrimaryButton
               title="Aplicar reajuste"
+              size="compact"
               loading={busy}
               onPress={onAdicionarReajuste}
               disabled={!rows.length}
@@ -500,10 +503,10 @@ export default function GerarMensalidadeScreen() {
           </View>
         </Card>
 
-        <Card style={styles.card}>
-          <Text style={styles.h}>Outros filtros da lista</Text>
+        <Card style={styles.card} padded={false}>
+          <Text style={styles.h}>Filtros</Text>
           <View style={styles.searchRow}>
-            <Ionicons name="search" size={18} color={colors.gray400} />
+            <Ionicons name="search" size={15} color={colors.gray400} />
             <TextInput
               style={styles.searchIn}
               placeholder="Nome, empresa ou documento"
@@ -537,7 +540,9 @@ export default function GerarMensalidadeScreen() {
           </ScrollView>
           <View style={styles.switchRow}>
             <Text style={styles.label}>Incluir cancelados</Text>
-            <Switch value={incluirCancelados} onValueChange={setIncluirCancelados} />
+            <View style={styles.switchScale}>
+              <Switch value={incluirCancelados} onValueChange={setIncluirCancelados} />
+            </View>
           </View>
           {filtrarPorMesReajuste ? (
             <Pressable
@@ -595,33 +600,27 @@ export default function GerarMensalidadeScreen() {
                 <View style={styles.check}>
                   <Ionicons
                     name={on ? 'checkbox' : 'square-outline'}
-                    size={24}
+                    size={20}
                     color={on ? colors.orange : colors.gray400}
                   />
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.nome}>{r.nome_cliente}</Text>
-                  {r.nome_empresa ? <Text style={styles.emp}>{r.nome_empresa}</Text> : null}
-                  <Text style={styles.meta}>Segmento: {seg}</Text>
-                  <Text style={styles.metaReaj}>
-                    Reaj.:{' '}
-                    {r.data_reajuste
-                      ? formatBRDate(parseISODate(r.data_reajuste)) || r.data_reajuste
-                      : '—'}
-                    {' · '}1º venc.:{' '}
-                    {r.data_inicio
-                      ? formatBRDate(parseISODate(r.data_inicio)) || r.data_inicio
-                      : '—'}
+                <View style={styles.rowBody}>
+                  <Text style={styles.nome} numberOfLines={2}>{r.nome_cliente}</Text>
+                  {r.nome_empresa ? <Text style={styles.emp} numberOfLines={1}>{r.nome_empresa}</Text> : null}
+                  <Text style={styles.meta} numberOfLines={1}>Seg. {seg}</Text>
+                  <Text style={styles.metaReaj} numberOfLines={2}>
+                    Reaj. {r.data_reajuste ? formatBRDate(parseISODate(r.data_reajuste)) || r.data_reajuste : '—'}
+                    {' · '}1º venc. {r.data_inicio ? formatBRDate(parseISODate(r.data_inicio)) || r.data_inicio : '—'}
                   </Text>
-                  <Text style={styles.metaProx}>Próx. mensalidade: {proxLabel}</Text>
-                  <Text style={[styles.metaNf, !r.emite_nf && styles.metaNfOff]}>
-                    NFS-e: {r.emite_nf ? 'Com NF' : 'Sem NF — não emite nota'}
+                  <Text style={styles.metaProx} numberOfLines={1}>Próx. {proxLabel}</Text>
+                  <Text style={[styles.metaNf, !r.emite_nf && styles.metaNfOff]} numberOfLines={1}>
+                    {r.emite_nf ? 'Com NFS-e' : 'Sem NFS-e'}
                   </Text>
                   {r.cancelado ? <Text style={styles.cancel}>Cancelado</Text> : null}
                   <Text style={styles.val}>{formatBRL(valorExibido)}</Text>
                   {valorTemporario != null ? (
-                    <Text style={styles.valorOriginal}>
-                      Somente neste mês · cadastro: {formatBRL(r.valor_mensalidade)}
+                    <Text style={styles.valorOriginal} numberOfLines={1}>
+                      Só este mês · cadastro {formatBRL(r.valor_mensalidade)}
                     </Text>
                   ) : null}
                   {on ? (
@@ -646,8 +645,7 @@ export default function GerarMensalidadeScreen() {
                             salvarValorTemporario(r.id);
                           }}
                         >
-                          <Ionicons name="checkmark" size={16} color={colors.white} />
-                          <Text style={styles.valorSalvarTxt}>Salvar</Text>
+                          <Ionicons name="checkmark" size={14} color={colors.white} />
                         </Pressable>
                         <Pressable
                           style={styles.valorCancelarBtn}
@@ -657,7 +655,7 @@ export default function GerarMensalidadeScreen() {
                             setValorEdicao('');
                           }}
                         >
-                          <Ionicons name="close" size={17} color={colors.gray600} />
+                          <Ionicons name="close" size={15} color={colors.gray600} />
                         </Pressable>
                       </View>
                     ) : (
@@ -668,8 +666,8 @@ export default function GerarMensalidadeScreen() {
                           abrirEdicaoValor(r);
                         }}
                       >
-                        <Ionicons name="create-outline" size={15} color={colors.orangeDark} />
-                        <Text style={styles.alterarValorTxt}>Alterar valor deste mês</Text>
+                        <Ionicons name="create-outline" size={12} color={colors.orangeDark} />
+                        <Text style={styles.alterarValorTxt}>Alterar valor</Text>
                       </Pressable>
                     )
                   ) : null}
@@ -731,33 +729,35 @@ export default function GerarMensalidadeScreen() {
           </>
         ) : null}
 
-        <Card style={styles.card}>
+        <Card style={styles.card} padded={false}>
           <Text style={styles.h}>Dados da mensalidade</Text>
           <Text style={styles.hint}>
-            Por padrão, cada cliente usa o próximo vencimento: última mensalidade gerada + 30 dias, ou o primeiro
-            vencimento do cadastro (+ 30 em 30 se já passou).
+            Vencimento automático: última mensalidade + 30 dias ou 1º vencimento do cadastro.
           </Text>
           {targetIds.length > 1 && !usarMesmaDataTodos ? (
             <Text style={styles.autoHint}>
-              {targetIds.length} clientes: vencimento calculado individualmente na geração.
+              {targetIds.length} clientes com vencimento individual.
             </Text>
           ) : null}
           <View style={styles.switchRow}>
-            <Text style={styles.label}>Usar a mesma data para todos</Text>
-            <Switch
-              value={usarMesmaDataTodos}
-              onValueChange={(v) => {
-                setUsarMesmaDataTodos(v);
-                if (!v && targetIds.length === 1) {
-                  const row = rows.find((r) => r.id === targetIds[0]);
-                  if (row) setVencimento(vencimentoPorCliente(row.id, row.data_inicio ?? null));
-                }
-              }}
-            />
+            <Text style={styles.label}>Mesma data para todos</Text>
+            <View style={styles.switchScale}>
+              <Switch
+                value={usarMesmaDataTodos}
+                onValueChange={(v) => {
+                  setUsarMesmaDataTodos(v);
+                  if (!v && targetIds.length === 1) {
+                    const row = rows.find((r) => r.id === targetIds[0]);
+                    if (row) setVencimento(vencimentoPorCliente(row.id, row.data_inicio ?? null));
+                  }
+                }}
+              />
+            </View>
           </View>
           {usarMesmaDataTodos || targetIds.length <= 1 ? (
             <DatePickerField
-              label={usarMesmaDataTodos ? 'Vencimento (todos os clientes)' : 'Próximo vencimento (sugestão)'}
+              compact
+              label={usarMesmaDataTodos ? 'Vencimento (todos)' : 'Próximo vencimento'}
               value={vencimento}
               onChange={setVencimento}
             />
@@ -773,11 +773,11 @@ export default function GerarMensalidadeScreen() {
         </Card>
 
         <Text style={styles.hintGerar}>
-          Se o percentual ainda estiver preenchido, o reajuste será aplicado de novo antes de gerar as mensalidades.
+          Percentual preenchido será reaplicado antes de gerar.
         </Text>
-        <PrimaryButton title="Enviar" loading={busy} onPress={onAbrirEnviar} style={styles.enviar} />
+        <PrimaryButton title="Enviar" size="compact" loading={busy} onPress={onAbrirEnviar} style={styles.enviar} />
         <Text style={styles.footerHint}>
-          Ao enviar, escolha gerar só mensalidade ou mensalidade com NFS-e de serviço (produção). Carnês em A receber.
+          Escolha gerar só mensalidade ou com NFS-e. Carnês em A receber.
         </Text>
       </ScrollView>
       <EnviarMensalidadeModal
@@ -793,175 +793,191 @@ export default function GerarMensalidadeScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.gray50 },
-  scroll: { padding: spacing.md, paddingBottom: spacing.xl * 2 },
+  scroll: { padding: spacing.sm, paddingBottom: spacing.xl },
   lead: {
-    fontSize: 14,
-    color: colors.gray600,
-    lineHeight: 20,
-    marginBottom: spacing.md,
-  },
-  card: { marginBottom: spacing.md },
-  h: { fontSize: 16, fontWeight: '800', color: colors.petroleum, marginBottom: spacing.sm },
-  hint: { fontSize: 12, color: colors.gray600, marginBottom: spacing.sm, lineHeight: 18 },
-  autoHint: {
     fontSize: 12,
+    color: colors.gray600,
+    lineHeight: 17,
+    marginBottom: spacing.sm,
+  },
+  card: {
+    marginBottom: spacing.sm,
+    padding: spacing.sm,
+  },
+  h: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.petroleum,
+    marginBottom: 4,
+  },
+  hint: {
+    fontSize: 11,
+    color: colors.gray600,
+    marginBottom: spacing.xs,
+    lineHeight: 15,
+  },
+  autoHint: {
+    fontSize: 11,
     fontWeight: '600',
     color: colors.petroleum,
-    marginBottom: spacing.sm,
-    lineHeight: 17,
+    marginBottom: spacing.xs,
+    lineHeight: 14,
   },
-  label: { fontSize: 13, fontWeight: '600', color: colors.gray600, marginBottom: 4 },
+  label: { fontSize: 11, fontWeight: '600', color: colors.gray600, marginBottom: 2 },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: spacing.xs,
     borderWidth: 1,
     borderColor: colors.gray100,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.md,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.sm,
+    minHeight: 34,
   },
-  searchIn: { flex: 1, paddingVertical: spacing.sm, fontSize: 15, color: colors.petroleum },
-  chips: { marginBottom: spacing.md, flexGrow: 0 },
+  searchIn: { flex: 1, paddingVertical: 6, fontSize: 13, color: colors.petroleum },
+  chips: { marginBottom: spacing.sm, flexGrow: 0 },
   chip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.gray200,
-    marginRight: spacing.sm,
+    marginRight: spacing.xs,
   },
   chipOn: { backgroundColor: colors.petroleum, borderColor: colors.petroleum },
-  chipTxt: { fontSize: 13, color: colors.gray800 },
+  chipTxt: { fontSize: 11, color: colors.gray800 },
   chipTxtOn: { color: colors.white, fontWeight: '600' },
   switchRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  switchScale: {
+    transform: [{ scale: 0.82 }],
   },
   mesResumo: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '600',
     color: colors.petroleum,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xs,
   },
-  warnTxt: { fontSize: 12, color: colors.danger, marginBottom: spacing.sm },
-  linkBtnInline: { alignSelf: 'flex-start', marginBottom: spacing.md },
-  reajusteBtnRow: { flexDirection: 'row', gap: spacing.sm },
+  warnTxt: { fontSize: 10, color: colors.danger, marginBottom: spacing.xs },
+  linkBtnInline: { alignSelf: 'flex-start', marginBottom: spacing.sm },
+  reajusteBtnRow: { flexDirection: 'row', gap: spacing.xs },
   reajusteBtnFlex: { flex: 1 },
-  clearDate: { marginTop: spacing.sm, marginBottom: spacing.xs },
-  clearDateTxt: { color: colors.orange, fontWeight: '700', fontSize: 14 },
+  clearDate: { marginTop: spacing.xs, marginBottom: 2 },
+  clearDateTxt: { color: colors.orange, fontWeight: '700', fontSize: 12 },
   input: {
     borderWidth: 1,
     borderColor: colors.gray100,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    fontSize: 16,
+    borderRadius: radius.sm,
+    paddingVertical: 8,
+    paddingHorizontal: spacing.sm,
+    fontSize: 13,
     color: colors.petroleum,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xs,
   },
   hintGerar: {
-    fontSize: 12,
+    fontSize: 11,
     color: colors.gray600,
-    marginBottom: spacing.sm,
-    lineHeight: 17,
+    marginBottom: spacing.xs,
+    lineHeight: 15,
   },
   listHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xs,
   },
-  linkBtn: { padding: spacing.sm },
-  linkTxt: { color: colors.orange, fontWeight: '700', fontSize: 14 },
-  empty: { textAlign: 'center', color: colors.gray400, marginVertical: spacing.lg },
+  linkBtn: { padding: spacing.xs },
+  linkTxt: { color: colors.orange, fontWeight: '700', fontSize: 12 },
+  empty: { textAlign: 'center', color: colors.gray400, marginVertical: spacing.md, fontSize: 12 },
   fetchError: {
-    marginHorizontal: spacing.md,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xs,
     color: colors.danger,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 11,
+    lineHeight: 15,
   },
   emptyAction: {
-    marginHorizontal: spacing.md,
-    marginBottom: spacing.md,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: 'rgba(232, 106, 36, 0.12)',
+    marginBottom: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: radius.sm,
+    backgroundColor: colors.orangeSoft,
     borderWidth: 1,
-    borderColor: colors.orange,
+    borderColor: colors.orangeMuted,
   },
   emptyActionTxt: {
     color: colors.petroleum,
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 16,
   },
   rowCard: {
     flexDirection: 'row',
     backgroundColor: colors.white,
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.gray100,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
+    padding: spacing.sm,
+    marginBottom: spacing.xs,
   },
-  rowCardOn: { borderColor: colors.orange, backgroundColor: '#fffaf7' },
-  check: { marginRight: spacing.sm, justifyContent: 'center' },
-  nome: { fontSize: 16, fontWeight: '700', color: colors.petroleum },
-  emp: { fontSize: 13, color: colors.gray600, marginTop: 2 },
-  meta: { fontSize: 12, color: colors.gray600, marginTop: 4 },
-  metaReaj: { fontSize: 12, color: colors.gray800, marginTop: 2 },
-  metaProx: { fontSize: 11, color: colors.gray600, marginTop: 2 },
-  metaNf: { fontSize: 11, fontWeight: '700', color: colors.success, marginTop: 2 },
+  rowCardOn: { borderColor: colors.orangeMuted, backgroundColor: '#fffaf7' },
+  check: { marginRight: spacing.xs, justifyContent: 'flex-start', paddingTop: 1 },
+  rowBody: { flex: 1, minWidth: 0 },
+  nome: { fontSize: 13, fontWeight: '700', color: colors.petroleum, lineHeight: 16 },
+  emp: { fontSize: 10, color: colors.gray600, marginTop: 1 },
+  meta: { fontSize: 10, color: colors.gray600, marginTop: 2 },
+  metaReaj: { fontSize: 10, color: colors.gray800, marginTop: 1, lineHeight: 13 },
+  metaProx: { fontSize: 10, color: colors.gray600, marginTop: 1 },
+  metaNf: { fontSize: 10, fontWeight: '700', color: colors.success, marginTop: 1 },
   metaNfOff: { color: colors.danger },
-  cancel: { fontSize: 11, fontWeight: '700', color: colors.danger, marginTop: 4 },
-  val: { fontSize: 17, fontWeight: '800', color: colors.orange, marginTop: 6 },
-  valorOriginal: { fontSize: 11, color: colors.gray600, marginTop: 2 },
+  cancel: { fontSize: 10, fontWeight: '700', color: colors.danger, marginTop: 2 },
+  val: { fontSize: 14, fontWeight: '800', color: colors.orange, marginTop: 4 },
+  valorOriginal: { fontSize: 10, color: colors.gray600, marginTop: 1 },
   alterarValorBtn: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    marginTop: spacing.sm,
-    paddingVertical: 5,
-    paddingHorizontal: spacing.sm,
+    gap: 3,
+    marginTop: spacing.xs,
+    paddingVertical: 3,
+    paddingHorizontal: 6,
     borderRadius: radius.sm,
     backgroundColor: colors.orangeSoft,
   },
-  alterarValorTxt: { color: colors.orangeDark, fontSize: 12, fontWeight: '700' },
+  alterarValorTxt: { color: colors.orangeDark, fontSize: 10, fontWeight: '700' },
   valorEdicaoBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    marginTop: spacing.sm,
+    gap: 4,
+    marginTop: spacing.xs,
   },
   valorEdicaoInput: {
     flex: 1,
-    minHeight: 36,
+    minHeight: 30,
     borderWidth: 1,
-    borderColor: colors.orange,
+    borderColor: colors.orangeMuted,
     borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.xs,
     color: colors.petroleum,
     backgroundColor: colors.white,
-    fontSize: 14,
+    fontSize: 12,
   },
   valorSalvarBtn: {
-    minHeight: 36,
-    flexDirection: 'row',
+    width: 30,
+    height: 30,
     alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: spacing.sm,
+    justifyContent: 'center',
     borderRadius: radius.sm,
     backgroundColor: colors.orange,
   },
-  valorSalvarTxt: { color: colors.white, fontSize: 12, fontWeight: '700' },
   valorCancelarBtn: {
-    width: 36,
-    height: 36,
+    width: 30,
+    height: 30,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radius.sm,
@@ -973,17 +989,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-    marginBottom: spacing.md,
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
   },
   paginaBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
-    minHeight: 36,
-    paddingHorizontal: spacing.sm,
+    minHeight: 30,
+    paddingHorizontal: spacing.xs,
     borderWidth: 1,
     borderColor: colors.gray200,
     borderRadius: radius.sm,
@@ -993,32 +1009,32 @@ const styles = StyleSheet.create({
     backgroundColor: colors.gray50,
     borderColor: colors.gray100,
   },
-  paginaBtnTxt: { color: colors.petroleum, fontSize: 12, fontWeight: '700' },
+  paginaBtnTxt: { color: colors.petroleum, fontSize: 11, fontWeight: '700' },
   paginaBtnTxtDisabled: { color: colors.gray400 },
-  paginaInfo: { color: colors.gray600, fontSize: 12, fontWeight: '600' },
+  paginaInfo: { color: colors.gray600, fontSize: 11, fontWeight: '600' },
   totalSelecionado: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: spacing.md,
+    gap: spacing.sm,
     backgroundColor: colors.orangeSoft,
     borderWidth: 1,
     borderColor: colors.orangeMuted,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
+    borderRadius: radius.sm,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
   },
   totalSelecionadoLabel: {
     flex: 1,
     color: colors.petroleum,
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '700',
   },
   totalSelecionadoValor: {
     color: colors.orangeDark,
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: '800',
   },
-  enviar: { marginTop: spacing.md },
-  footerHint: { fontSize: 12, color: colors.gray600, marginTop: spacing.sm, lineHeight: 18 },
+  enviar: { marginTop: spacing.sm },
+  footerHint: { fontSize: 11, color: colors.gray600, marginTop: spacing.xs, lineHeight: 15 },
 });
