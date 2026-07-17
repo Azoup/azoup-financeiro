@@ -22,7 +22,8 @@ const DEFAULT_NFE_CONFIG: NfeConfigInput = {
   inscricao_municipal: '69842',
   codigo_tributacao_nacional: '010701',
   codigo_tributacao_municipal: '001',
-  codigo_nbs: '106043000',
+  // NBS usado pela Azoup no Delphi / Americana (suporte e manutenção em TI).
+  codigo_nbs: '115013000',
   op_simp_nac: 3,
   reg_esp_trib: 0,
   trib_issqn: 1,
@@ -64,7 +65,7 @@ export async function upsertNfeConfig(userId: string, input: Partial<NfeConfigIn
     codigo_tributacao_nacional: (input.codigo_tributacao_nacional ?? current.codigo_tributacao_nacional ?? '010701')
       .replace(/\D/g, '')
       .slice(0, 6),
-    codigo_nbs: (input.codigo_nbs ?? current.codigo_nbs ?? '106043000').replace(/\D/g, '').slice(0, 9),
+    codigo_nbs: (input.codigo_nbs ?? current.codigo_nbs ?? '115013000').replace(/\D/g, '').slice(0, 9),
     op_simp_nac: Math.min(4, Math.max(1, Number(input.op_simp_nac ?? current.op_simp_nac ?? 3))) as 1 | 2 | 3 | 4,
     reg_esp_trib: input.reg_esp_trib ?? current.reg_esp_trib ?? 0,
     trib_issqn: input.trib_issqn ?? current.trib_issqn ?? 1,
@@ -97,8 +98,19 @@ export async function ensureNfeConfig(userId: string): Promise<NfeConfig> {
           String(existing.inscricao_municipal ?? '').replace(/\D/g, '') || '69842',
         codigo_tributacao_municipal: '001',
         codigo_tributacao_nacional: existing.codigo_tributacao_nacional || '010701',
+        codigo_nbs:
+          String(existing.codigo_nbs ?? '').replace(/\D/g, '') === '106043000'
+            ? '115013000'
+            : existing.codigo_nbs || '115013000',
         op_simp_nac: (existing.op_simp_nac === 1 ? 3 : existing.op_simp_nac) || 3,
       });
+      const fixed = await fetchNfeConfig(userId);
+      if (fixed) return fixed;
+    }
+    // Azoup: NBS do Delphi (115013000) substitui o default ADN antigo.
+    const nbs = String(existing.codigo_nbs ?? '').replace(/\D/g, '');
+    if (ibge === '3501608' && (!nbs || nbs === '106043000')) {
+      await upsertNfeConfig(userId, { codigo_nbs: '115013000' });
       const fixed = await fetchNfeConfig(userId);
       if (fixed) return fixed;
     }

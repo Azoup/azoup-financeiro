@@ -1,8 +1,8 @@
 /**
- * NFS-e Americana/SP — WebService ABRASF 2.03 (TipLan), mesmo canal típico do Delphi.
+ * NFS-e Americana/SP — WebService ABRASF 2.03 TipLan.
+ * Layout alinhado ao XML que o Delphi emite com sucesso:
+ * EnviarLoteRpsSincronoEnvio + assinatura do LoteRps (C14N inclusivo).
  * Produção: https://nfse.americana.sp.gov.br/nfse/wsnacional2/nfse.asmx
- * Método: GerarNfse (1 RPS síncrono).
- * Fonte envelope: ACBr Tiplanv2.ini
  */
 const fs = require('fs');
 const https = require('https');
@@ -11,13 +11,19 @@ const { SignedXml } = require('xml-crypto');
 
 const NS_ABRASF = 'http://www.abrasf.org.br/nfse.xsd';
 const NS_SOAP_OP = 'http://nfse.abrasf.org.br/';
-const SOAP_ACTION_GERAR = 'http://nfse.abrasf.org.br/GerarNfse';
+const SOAP_ACTION_LOTE_SYNC = 'http://nfse.abrasf.org.br/RecepcionarLoteRpsSincrono';
 const SOAP_ACTION_CANCELAR = 'http://nfse.abrasf.org.br/CancelarNfse';
+const C14N_INCLUSIVE = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315';
 
 const WS_URL = {
   1: 'https://nfse.americana.sp.gov.br/nfse/wsnacional2/nfse.asmx',
   2: 'https://americanahomologacao.nfe.com.br/nfse/wsnacional2/nfse.asmx',
 };
+
+/** NBS usado pela Azoup no Delphi (suporte/manutenção em TI). */
+const NBS_DEFAULT_AZOUP = '115013000';
+/** Alíquota ISS da lista municipal Americana para 01.07 (informática). */
+const ALIQUOTA_ISS_PCT_0107 = 2;
 
 function onlyDigits(s) {
   return String(s ?? '').replace(/\D/g, '');
@@ -39,11 +45,15 @@ function money2(n) {
 }
 
 function dateYmd(iso) {
+  const raw = String(iso ?? '').trim();
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
   const d = new Date(iso ?? Date.now());
+  // Evita deslocamento UTC: monta Y-M-D com componentes locais.
   const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return `${y}-${mo}-${day}`;
 }
 
 function parseCompetenciaIso(competencia, fallbackDate) {
@@ -55,7 +65,7 @@ function parseCompetenciaIso(competencia, fallbackDate) {
   return dateYmd(fallbackDate);
 }
 
-/** cTribNac 010701 → ItemListaServico 01.07 (padrão TipLan/ABRASF). */
+/** cTribNac 010701 → ItemListaServico 01.07 */
 function itemListaServico(cTribNac) {
   const raw = String(cTribNac ?? '').trim();
   const dotted = raw.match(/^(\d{1,2})\.(\d{2})$/);
@@ -65,9 +75,8 @@ function itemListaServico(cTribNac) {
 }
 
 /**
- * Código de tributação municipal no ABRASF TipLan (atividade municipal).
- * Americana espera o subitem no formato XX.XX. A configuração antiga ADN
- * guarda "001"; nesse caso, reutilizamos o ItemListaServico (ex.: 01.07).
+ * Código de tributação municipal TipLan: formato XX.XX (mesmo do ItemListaServico).
+ * Config ADN antiga "001" → converte para 01.07 via cTribNac.
  */
 function codigoTributacaoMunicipioAbrasf(config) {
   const raw = String(config.codigo_tributacao_municipal ?? '').trim();
@@ -84,8 +93,14 @@ function codigoTributacaoMunicipioAbrasf(config) {
 function codigoCnae(config) {
   const c = onlyDigits(config.codigo_cnae);
   if (c.length >= 7) return c.slice(0, 7);
-  // CNAE da Azoup no portal de Americana (desenvolvimento de software).
   return '6209100';
+}
+
+function codigoNbs(config) {
+  const nbs = onlyDigits(config.codigo_nbs).slice(0, 9);
+  if (nbs.length === 9 && nbs !== '106043000') return nbs;
+  // Azoup Delphi usa 115013000; 106043000 era default ADN genérico.
+  return NBS_DEFAULT_AZOUP;
 }
 
 function loadPfx(certPath, senha) {
@@ -105,26 +120,26 @@ function loadPfx(certPath, senha) {
   };
 }
 
-function signInfDeclaracao(xml, privateKeyPem, certificatePem) {
+/** Assina LoteRps (como o Delphi) com C14N inclusivo. */
+function signLoteRps(xml, privateKeyPem, certificatePem) {
   const sig = new SignedXml({
     privateKey: privateKeyPem,
     publicCert: certificatePem,
     signatureAlgorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
-    canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+    canonicalizationAlgorithm: C14N_INCLUSIVE,
     getKeyInfoContent: SignedXml.getKeyInfoContent,
   });
   sig.addReference({
-    xpath: "//*[local-name(.)='InfDeclaracaoPrestacaoServico']",
+    xpath: "//*[local-name(.)='LoteRps']",
     transforms: [
       'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
-      'http://www.w3.org/2001/10/xml-exc-c14n#',
+      C14N_INCLUSIVE,
     ],
     digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
   });
-  // ABRASF: Signature é irmã de InfDeclaracaoPrestacaoServico (dentro de Rps).
   sig.computeSignature(xml, {
     location: {
-      reference: "//*[local-name(.)='InfDeclaracaoPrestacaoServico']",
+      reference: "//*[local-name(.)='LoteRps']",
       action: 'after',
     },
   });
@@ -139,7 +154,10 @@ function buildCabecalho() {
   );
 }
 
-function buildGerarNfseXml({
+/**
+ * Monta EnviarLoteRpsSincronoEnvio idêntico ao layout Delphi que autoriza.
+ */
+function buildEnviarLoteRpsSincronoXml({
   nota,
   itens,
   perfil,
@@ -152,42 +170,46 @@ function buildGerarNfseXml({
   const isCpf = tomadorDoc.length === 11;
   const serie = String(Number(String(nota.serie || config.serie || '1').replace(/\D/g, '') || '1'));
   const numero = String(Number(nota.numero));
+  const numeroLote = numero;
   const dh = dateYmd(nota.data_emissao);
-  const competencia = parseCompetenciaIso(nota.competencia, nota.data_emissao);
-  const valor = money2(nota.valor_total);
+  // Delphi usa a data de emissão também em Competencia (não o 1º do mês).
+  const competencia = dh;
+  const valorNum = Number(nota.valor_total);
+  const valor = money2(valorNum);
+  // Delphi envia ValorIss (ex.: 2.00 → 0.05). Lista municipal 01.07 = 2%.
+  const valorIss = money2((valorNum * ALIQUOTA_ISS_PCT_0107) / 100);
   const itemLista = itemListaServico(config.codigo_tributacao_nacional);
   const tribMun = codigoTributacaoMunicipioAbrasf(config);
   const cnae = codigoCnae(config);
+  const nbs = codigoNbs(config);
   const ibge = onlyDigits(config.codigo_ibge_emitente).padStart(7, '0').slice(0, 7);
   const desc =
     itens[0]?.descricao ?? config.descricao_servico_padrao ?? 'Prestacao de servicos';
   const tomadorNome =
     cliente.nome_fantasia || cliente.nome_cliente || cliente.nome || 'Tomador';
-  // ADN opSimpNac: 1=não optante → ABRASF OptanteSimplesNacional 2; demais → 1 (sim).
+  // ADN: 1=não optante → ABRASF 2; demais (ME/EPP) → 1 (sim), igual ao Delphi.
   const optante = Number(config.op_simp_nac ?? 3) === 1 ? '2' : '1';
-  const idInf = `RPS_${serie}_${numero}`;
-  const nbs = onlyDigits(config.codigo_nbs).slice(0, 9);
-  // TipLan (XSD Americana): IBSCBS dentro de Servico — IndOp / CST / cClassTrib.
-  const operacao =
-    onlyDigits(config.codigo_operacao_ibscbs).padStart(6, '0').slice(0, 6) || '100501';
-  const sitTrib =
-    onlyDigits(config.situacao_tributaria_ibscbs).padStart(3, '0').slice(0, 3) || '000';
-  const classTribRaw = onlyDigits(config.classificacao_tributaria_ibscbs);
-  const classTrib =
-    classTribRaw.length === 6 ? classTribRaw : `${sitTrib}${classTribRaw.padStart(3, '0').slice(0, 3) || '001'}`;
+  const idLote = `Lote_${numeroLote}`;
+  const idDec = `Dec_${numero}`;
 
   const endLog = escapeXml(cliente.logradouro || perfil.logradouro || 'Nao informado');
   const endNum = escapeXml(cliente.numero || perfil.numero || 'S/N');
+  const endComp = String(cliente.complemento ?? '').trim();
   const endBai = escapeXml(cliente.bairro || perfil.bairro || 'Centro');
   const endCep = onlyDigits(cliente.cep || perfil.cep).padStart(8, '0').slice(0, 8);
   const endUf = escapeXml(String(cliente.estado || cliente.uf || perfil.uf || 'SP').slice(0, 2));
-  const regEsp = Number(config.reg_esp_trib ?? 0);
+  const email = String(cliente.email ?? '').trim();
 
-  // TipLan: ValorIss/Aliquota NÃO devem ser enviados (A14 — prefeitura calcula; Simples idem).
   return (
-    `<GerarNfseEnvio xmlns="${NS_ABRASF}">` +
+    `<EnviarLoteRpsSincronoEnvio xmlns="${NS_ABRASF}">` +
+    `<LoteRps Id="${idLote}" versao="2.03">` +
+    `<NumeroLote>${escapeXml(numeroLote)}</NumeroLote>` +
+    `<CpfCnpj><Cnpj>${cnpj}</Cnpj></CpfCnpj>` +
+    `<InscricaoMunicipal>${im}</InscricaoMunicipal>` +
+    `<QuantidadeRps>1</QuantidadeRps>` +
+    `<ListaRps>` +
     `<Rps>` +
-    `<InfDeclaracaoPrestacaoServico Id="${idInf}">` +
+    `<InfDeclaracaoPrestacaoServico xmlns="${NS_ABRASF}" Id="${idDec}">` +
     `<Rps>` +
     `<IdentificacaoRps>` +
     `<Numero>${escapeXml(numero)}</Numero>` +
@@ -201,24 +223,18 @@ function buildGerarNfseXml({
     `<Servico>` +
     `<Valores>` +
     `<ValorServicos>${valor}</ValorServicos>` +
+    `<ValorIss>${valorIss}</ValorIss>` +
+    `<SituacaoTributariaPISCOFINS>00</SituacaoTributariaPISCOFINS>` +
     `</Valores>` +
     `<IssRetido>2</IssRetido>` +
     `<ItemListaServico>${escapeXml(itemLista)}</ItemListaServico>` +
     `<CodigoCnae>${escapeXml(cnae)}</CodigoCnae>` +
-    (tribMun ? `<CodigoTributacaoMunicipio>${escapeXml(tribMun)}</CodigoTributacaoMunicipio>` : '') +
-    (nbs.length === 9 ? `<CodigoNbs>${escapeXml(nbs)}</CodigoNbs>` : '') +
+    `<CodigoTributacaoMunicipio>${escapeXml(tribMun)}</CodigoTributacaoMunicipio>` +
+    `<CodigoNbs>${escapeXml(nbs)}</CodigoNbs>` +
     `<Discriminacao>${escapeXml(desc)}</Discriminacao>` +
     `<CodigoMunicipio>${ibge}</CodigoMunicipio>` +
     `<ExigibilidadeISS>1</ExigibilidadeISS>` +
     `<MunicipioIncidencia>${ibge}</MunicipioIncidencia>` +
-    `<IBSCBS>` +
-    `<OperacaoUsoConsumoPessoal>0</OperacaoUsoConsumoPessoal>` +
-    `<Operacao>${operacao}</Operacao>` +
-    `<ValoresTributos>` +
-    `<SituacaoTributaria>${sitTrib}</SituacaoTributaria>` +
-    `<ClassificacaoTributaria>${classTrib}</ClassificacaoTributaria>` +
-    `</ValoresTributos>` +
-    `</IBSCBS>` +
     `</Servico>` +
     `<Prestador>` +
     `<CpfCnpj><Cnpj>${cnpj}</Cnpj></CpfCnpj>` +
@@ -232,30 +248,33 @@ function buildGerarNfseXml({
     `<Endereco>` +
     `<Endereco>${endLog}</Endereco>` +
     `<Numero>${endNum}</Numero>` +
+    (endComp ? `<Complemento>${escapeXml(endComp)}</Complemento>` : '') +
     `<Bairro>${endBai}</Bairro>` +
     `<CodigoMunicipio>${ibge}</CodigoMunicipio>` +
     `<Uf>${endUf}</Uf>` +
     `<Cep>${endCep}</Cep>` +
     `</Endereco>` +
+    (email ? `<Contato><Email>${escapeXml(email)}</Email></Contato>` : '') +
     `</Tomador>` +
-    (regEsp > 0 ? `<RegimeEspecialTributacao>${regEsp}</RegimeEspecialTributacao>` : '') +
     `<OptanteSimplesNacional>${optante}</OptanteSimplesNacional>` +
     `<IncentivoFiscal>2</IncentivoFiscal>` +
     `</InfDeclaracaoPrestacaoServico>` +
     `</Rps>` +
-    `</GerarNfseEnvio>`
+    `</ListaRps>` +
+    `</LoteRps>` +
+    `</EnviarLoteRpsSincronoEnvio>`
   );
 }
 
-function soapGerarNfse(cabXml, dadosXml) {
+function soapRecepcionarLoteSincrono(cabXml, dadosXml) {
   return (
     `<?xml version="1.0" encoding="utf-8"?>` +
     `<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:nfse="${NS_SOAP_OP}">` +
     `<soap:Body>` +
-    `<nfse:GerarNfseRequest>` +
+    `<nfse:RecepcionarLoteRpsSincronoRequest>` +
     `<nfseCabecMsg>${escapeXml(cabXml)}</nfseCabecMsg>` +
     `<nfseDadosMsg>${escapeXml(dadosXml)}</nfseDadosMsg>` +
-    `</nfse:GerarNfseRequest>` +
+    `</nfse:RecepcionarLoteRpsSincronoRequest>` +
     `</soap:Body>` +
     `</soap:Envelope>`
   );
@@ -312,16 +331,15 @@ function httpsSoap({ url, body, pfx, passphrase, soapAction }) {
 }
 
 function decodeSoapInner(soapBody) {
-  let s = soapBody
+  return soapBody
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
-  return s;
 }
 
-function parseGerarResult(soapBody) {
+function parseLoteResult(soapBody) {
   const inner = decodeSoapInner(soapBody);
   const mensagens = [
     ...inner.matchAll(
@@ -330,15 +348,20 @@ function parseGerarResult(soapBody) {
   ].map((m) => `${m[1].trim()}: ${m[2].trim()}`);
 
   const numero =
-    inner.match(/<Numero>\s*([^<]+)\s*<\/Numero>/i)?.[1]?.trim() ?? null;
+    inner.match(/<InfNfse[\s\S]*?<Numero>\s*([^<]+)\s*<\/Numero>/i)?.[1]?.trim() ??
+    inner.match(/<Numero>\s*([^<]+)\s*<\/Numero>/i)?.[1]?.trim() ??
+    null;
   const codVerif =
     inner.match(/<CodigoVerificacao>\s*([^<]+)\s*<\/CodigoVerificacao>/i)?.[1]?.trim() ?? null;
+  const protocolo =
+    inner.match(/<Protocolo>\s*([^<]+)\s*<\/Protocolo>/i)?.[1]?.trim() ?? null;
   const chave =
     inner.match(/<ChaveAcesso>\s*([^<]+)\s*<\/ChaveAcesso>/i)?.[1]?.trim() ??
     inner.match(/<chNFSe>\s*([^<]+)\s*<\/chNFSe>/i)?.[1]?.trim() ??
     null;
 
   const hasNfse = /<CompNfse[\s>]/i.test(inner) || /<Nfse[\s>]/i.test(inner);
+  const situacao = inner.match(/<Situacao>\s*([^<]+)\s*<\/Situacao>/i)?.[1]?.trim();
   const hasErroLista = /<ListaMensagemRetorno[\s>]/i.test(inner) && mensagens.length > 0;
 
   if (hasNfse && (codVerif || numero || chave)) {
@@ -348,22 +371,41 @@ function parseGerarResult(soapBody) {
       numero,
       codigoVerificacao: codVerif,
       chaveAcesso: chave || codVerif || numero,
+      protocolo,
+      xml: inner,
+    };
+  }
+
+  // Situacao 4 = processado com sucesso em alguns provedores TipLan
+  if (situacao === '4' && !hasErroLista && (codVerif || numero)) {
+    return {
+      sucesso: true,
+      erros: mensagens,
+      numero,
+      codigoVerificacao: codVerif,
+      chaveAcesso: chave || codVerif || numero,
+      protocolo,
       xml: inner,
     };
   }
 
   return {
     sucesso: false,
-    erros: mensagens.length ? mensagens : hasErroLista ? ['Rejeitada pela prefeitura (ABRASF).'] : [],
+    erros: mensagens.length
+      ? mensagens
+      : hasErroLista
+        ? ['Rejeitada pela prefeitura (ABRASF).']
+        : [],
     numero: null,
     codigoVerificacao: null,
     chaveAcesso: null,
+    protocolo: null,
     xml: inner,
   };
 }
 
 /**
- * Emite NFS-e via GerarNfse ABRASF TipLan (produção por padrão).
+ * Emite NFS-e via RecepcionarLoteRpsSincrono (mesmo método do Delphi).
  */
 async function emitirNfseAbrasfAmericana({
   certPath,
@@ -393,28 +435,35 @@ async function emitirNfseAbrasfAmericana({
   }
 
   const { privateKeyPem, certificatePem } = loadPfx(certPath, senha);
-  let dadosXml = buildGerarNfseXml({
+  let dadosXml = buildEnviarLoteRpsSincronoXml({
     nota,
     itens,
     perfil,
     cliente,
     config,
   });
-  dadosXml = signInfDeclaracao(dadosXml, privateKeyPem, certificatePem);
+  dadosXml = signLoteRps(dadosXml, privateKeyPem, certificatePem);
 
   const cab = buildCabecalho();
-  const soap = soapGerarNfse(cab, dadosXml);
+  const soap = soapRecepcionarLoteSincrono(cab, dadosXml);
   const url = WS_URL[Number(ambiente) === 2 ? 2 : 1];
   const pfxBuf = fs.readFileSync(certPath);
 
-  console.info('[nfse] gateway ABRASF Americana', url, 'ItemListaServico', itemListaServico(config.codigo_tributacao_nacional));
+  console.info(
+    '[nfse] gateway ABRASF Americana RecepcionarLoteRpsSincrono',
+    url,
+    'ItemListaServico',
+    itemListaServico(config.codigo_tributacao_nacional),
+    'NBS',
+    codigoNbs(config),
+  );
 
   const httpRes = await httpsSoap({
     url,
     body: soap,
     pfx: pfxBuf,
     passphrase: senha,
-    soapAction: SOAP_ACTION_GERAR,
+    soapAction: SOAP_ACTION_LOTE_SYNC,
   });
 
   if (httpRes.statusCode === 403) {
@@ -435,7 +484,7 @@ async function emitirNfseAbrasfAmericana({
     };
   }
 
-  const parsed = parseGerarResult(httpRes.body);
+  const parsed = parseLoteResult(httpRes.body);
   if (!parsed.sucesso) {
     const msg = parsed.erros.join(' | ') || 'Rejeitada pelo WebService ABRASF de Americana.';
     return { success: false, status: 'ERR', message: msg, xml_autorizado: parsed.xml };
@@ -445,7 +494,7 @@ async function emitirNfseAbrasfAmericana({
     success: true,
     status: '100',
     chave_acesso: parsed.chaveAcesso,
-    protocolo_autorizacao: parsed.numero,
+    protocolo_autorizacao: parsed.protocolo || parsed.numero,
     codigo_verificacao: parsed.codigoVerificacao,
     xml_autorizado: parsed.xml,
     danfe_url: null,
@@ -497,14 +546,14 @@ async function cancelarNfseAbrasfAmericana({
     privateKey: privateKeyPem,
     publicCert: certificatePem,
     signatureAlgorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
-    canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+    canonicalizationAlgorithm: C14N_INCLUSIVE,
     getKeyInfoContent: SignedXml.getKeyInfoContent,
   });
   sig.addReference({
     xpath: "//*[local-name(.)='InfPedidoCancelamento']",
     transforms: [
       'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
-      'http://www.w3.org/2001/10/xml-exc-c14n#',
+      C14N_INCLUSIVE,
     ],
     digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
   });
@@ -559,4 +608,6 @@ module.exports = {
   itemListaServico,
   codigoCnae,
   codigoTributacaoMunicipioAbrasf,
+  codigoNbs,
+  buildEnviarLoteRpsSincronoXml,
 };

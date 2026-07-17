@@ -29,8 +29,8 @@ function humanizeNfseRejection(message, ibge) {
 
   if (/A14|ValorISS informado indevidamente/i.test(raw)) {
     return [
-      'A14 — Em Americana (TipLan) o ValorISS/Alíquota não devem ser enviados: a prefeitura calcula o ISS.',
-      'Faça redeploy da versão corrigida e reemitir.',
+      'A14 — Alerta TipLan sobre ValorISS (a prefeitura pode recalcular).',
+      'O XML segue o layout do Delphi (ValorIss sem Aliquota). Se bloquear a emissão, informe o retorno completo.',
     ].join(' ');
   }
 

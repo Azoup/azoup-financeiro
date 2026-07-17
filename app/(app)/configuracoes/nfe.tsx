@@ -79,7 +79,7 @@ export default function NfeConfigScreen() {
   const [inscricaoMunicipal, setInscricaoMunicipal] = useState('');
   const [codTribNac, setCodTribNac] = useState('010701');
   const [codTribMun, setCodTribMun] = useState('001');
-  const [codNbs, setCodNbs] = useState('106043000');
+  const [codNbs, setCodNbs] = useState('115013000');
   const [descricao, setDescricao] = useState('Serviço de mensalidade');
   const [opSimpNac, setOpSimpNac] = useState(3);
   const [regEspTrib, setRegEspTrib] = useState(0);
@@ -112,7 +112,7 @@ export default function NfeConfigScreen() {
         c.codigo_tributacao_municipal?.trim() ||
           (c.codigo_ibge_emitente === '3501608' ? '001' : c.codigo_ibge_emitente === '3550308' ? '' : ''),
       );
-      setCodNbs(c.codigo_nbs ?? '106043000');
+      setCodNbs(c.codigo_nbs ?? '115013000');
       setDescricao(c.descricao_servico_padrao);
       setOpSimpNac(Number(c.op_simp_nac ?? 3));
       setRegEspTrib(Number(c.reg_esp_trib ?? 0));
@@ -612,7 +612,7 @@ export default function NfeConfigScreen() {
           value={codNbs}
           onChangeText={setCodNbs}
           keyboardType="number-pad"
-          placeholder="9 dígitos — ex.: 106043000"
+          placeholder="9 dígitos — ex.: 115013000"
         />
         <Text style={styles.fieldHint}>
           Nomenclatura Brasileira de Serviços (NBS), vinculada ao tipo de serviço. Também deve ser validada com a
