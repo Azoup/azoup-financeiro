@@ -43,12 +43,8 @@ function nomeCliente(c) {
   );
 }
 
-function valorAssinaturaCentavos(a, plano) {
-  const local = mrrLocalDeAssinatura(a);
-  if (local > 0) return local;
-  if (plano?.valor_mensal_centavos != null) return Number(plano.valor_mensal_centavos) || 0;
-  if (plano?.preco_base != null) return Math.round(Number(plano.preco_base) * 100) || 0;
-  return 0;
+function valorAssinaturaCentavos(a) {
+  return mrrLocalDeAssinatura(a);
 }
 
 async function carregarDashboardAzoup(admin) {
@@ -59,10 +55,7 @@ async function carregarDashboardAzoup(admin) {
 
   const [assinaturasRes, planosRes, clientesRes] = await Promise.all([
     admin.from('assinaturas_clientes').select('*').limit(8000),
-    admin
-      .from('planos_assinatura')
-      .select('id,nome,valor_mensal_centavos,preco_base')
-      .limit(500),
+    admin.from('planos_assinatura').select('id,nome'),
     admin
       .from('clientes_azoup')
       .select(
@@ -82,7 +75,7 @@ async function carregarDashboardAzoup(admin) {
 
   const planosMap = new Map();
   for (const p of planos) {
-    planosMap.set(String(p.id), p);
+    planosMap.set(String(p.id), p.nome ?? String(p.id));
   }
 
   const porCliente = pickAssinaturaPorCliente(assinaturas);
@@ -115,7 +108,7 @@ async function carregarDashboardAzoup(admin) {
   const planosClientes = [...porPlano.entries()]
     .map(([plano_id, counts]) => ({
       plano_id,
-      nome: planosMap.get(plano_id)?.nome ?? `Plano #${plano_id}`,
+      nome: planosMap.get(plano_id) ?? `Plano #${plano_id}`,
       ativos: counts.ativos,
       inativos: counts.inativos,
       total: counts.ativos + counts.inativos,
@@ -124,18 +117,18 @@ async function carregarDashboardAzoup(admin) {
 
   const listaClientes = clientes.map((c) => {
     const assinatura = porCliente.get(c.id) ?? null;
-    const plano = assinatura?.plano_id != null ? planosMap.get(String(assinatura.plano_id)) : null;
     const grupo = classificarStatusAssinatura(assinatura);
+    const planoId = assinatura?.plano_id != null ? String(assinatura.plano_id) : null;
     return {
       id: c.id,
       nome: nomeCliente(c),
       email: c.email ?? null,
       telefone: c.telefone || c.celular || null,
       created_at: c.created_at ?? null,
-      plano_nome: plano?.nome ?? null,
+      plano_nome: planoId ? planosMap.get(planoId) ?? null : null,
       status_grupo: grupo,
       status_label: assinatura?.status ?? 'Sem assinatura',
-      valor_centavos: assinatura ? valorAssinaturaCentavos(assinatura, plano) : 0,
+      valor_centavos: assinatura ? valorAssinaturaCentavos(assinatura) : 0,
     };
   });
 
