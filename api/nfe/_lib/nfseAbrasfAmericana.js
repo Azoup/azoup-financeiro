@@ -592,7 +592,8 @@ async function cancelarNfseAbrasfAmericana({
     (im ? `<InscricaoMunicipal>${im}</InscricaoMunicipal>` : '') +
     `<CodigoMunicipio>3501608</CodigoMunicipio>` +
     `</IdentificacaoNfse>` +
-    `<CodigoCancelamento>1</CodigoCancelamento>` +
+    // 1=Erro emissão → TipLan X206 (exige SubstituirNfse). CancelarNfse aceita 2=Serviço não prestado.
+    `<CodigoCancelamento>2</CodigoCancelamento>` +
     `</InfPedidoCancelamento>` +
     `</Pedido>` +
     `</CancelarNfseEnvio>`;

@@ -51,6 +51,14 @@ function humanizeNfseRejection(message, ibge) {
     ].join(' ');
   }
 
+  if (/X206|E206/i.test(raw)) {
+    return [
+      'X206 — Motivo "erro na emissão" (código 1) não pode ser usado no CancelarNfse.',
+      'Nesse caso a prefeitura exige substituição da NFS-e (SubstituirNfse) ou o portal.',
+      'No Azoup o cancelamento envia código 2 (serviço não prestado). Faça redeploy e tente de novo.',
+    ].join(' ');
+  }
+
   if (/E79|E80|E86|não encontrada|nao encontrada|inexistente/i.test(raw)) {
     return [
       raw.split('|')[0]?.trim() || raw,
