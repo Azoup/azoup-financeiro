@@ -207,6 +207,8 @@ export async function criarMensalidadeGerada(
 export async function criarMensalidadesGeradasLote(params: {
   userId: string;
   clienteIds: string[];
+  /** Valor excepcional por cliente, aplicado somente às mensalidades deste lote. */
+  valoresPorCliente?: Record<string, number>;
   /** Se informado, usa a mesma data para todos os clientes do lote. */
   dataVencimentoOverride?: string | null;
   competencia?: string | null;
@@ -244,7 +246,11 @@ export async function criarMensalidadesGeradasLote(params: {
       .maybeSingle();
     if (e0) throw new Error(e0.message);
     const cli = c as { mensalidade: number | null; data_inicio: string | null } | null;
-    const valor = Number(cli?.mensalidade);
+    const valorTemporario = params.valoresPorCliente?.[clienteId];
+    const valor =
+      valorTemporario != null && Number.isFinite(valorTemporario)
+        ? valorTemporario
+        : Number(cli?.mensalidade);
     if (!valor || valor <= 0) {
       ignorados += 1;
       continue;

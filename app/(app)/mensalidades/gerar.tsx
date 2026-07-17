@@ -48,6 +48,8 @@ import {
 } from 'react-native';
 import Toast from 'react-native-toast-message';
 
+const CLIENTES_POR_PAGINA = 10;
+
 function targetsFromSelection(rows: ClienteListItem[], selected: Set<string>): string[] {
   const rowIds = rows.map((r) => r.id);
   const rowSet = new Set(rowIds);
@@ -83,6 +85,10 @@ export default function GerarMensalidadeScreen() {
   const [ultimosVencimento, setUltimosVencimento] = useState<Map<string, string>>(new Map());
   const [usarMesmaDataTodos, setUsarMesmaDataTodos] = useState(false);
   const [vencimento, setVencimento] = useState<Date | null>(null);
+  const [pagina, setPagina] = useState(1);
+  const [valoresTemporarios, setValoresTemporarios] = useState<Record<string, number>>({});
+  const [editandoValorId, setEditandoValorId] = useState<string | null>(null);
+  const [valorEdicao, setValorEdicao] = useState('');
 
   const mesReajusteRange = useMemo(() => {
     if (!filtrarPorMesReajuste) return null;
@@ -174,6 +180,31 @@ export default function GerarMensalidadeScreen() {
     [rows, selected],
   );
 
+  const totalPaginas = Math.max(1, Math.ceil(rows.length / CLIENTES_POR_PAGINA));
+  const rowsPagina = useMemo(() => {
+    const inicio = (pagina - 1) * CLIENTES_POR_PAGINA;
+    return rows.slice(inicio, inicio + CLIENTES_POR_PAGINA);
+  }, [pagina, rows]);
+  const totalMensalidadesSelecionadas = useMemo(() => {
+    const ids = new Set(targetIds);
+    return rows.reduce(
+      (total, row) =>
+        total +
+        (ids.has(row.id)
+          ? (valoresTemporarios[row.id] ?? Number(row.valor_mensalidade)) || 0
+          : 0),
+      0,
+    );
+  }, [rows, targetIds, valoresTemporarios]);
+
+  useEffect(() => {
+    setPagina(1);
+  }, [filters]);
+
+  useEffect(() => {
+    setPagina((atual) => Math.min(atual, totalPaginas));
+  }, [totalPaginas]);
+
   useEffect(() => {
     if (usarMesmaDataTodos) return;
     if (targetIds.length !== 1) {
@@ -207,6 +238,23 @@ export default function GerarMensalidadeScreen() {
 
   const selecionarTodosLista = () => {
     setSelected(new Set(rows.map((r) => r.id)));
+  };
+
+  const abrirEdicaoValor = (row: ClienteListItem) => {
+    const atual = (valoresTemporarios[row.id] ?? Number(row.valor_mensalidade)) || 0;
+    setEditandoValorId(row.id);
+    setValorEdicao(atual.toFixed(2).replace('.', ','));
+  };
+
+  const salvarValorTemporario = (clienteId: string) => {
+    const valor = Number(valorEdicao.trim().replace(/\./g, '').replace(',', '.'));
+    if (!Number.isFinite(valor) || valor <= 0) {
+      Toast.show({ type: 'error', text1: 'Informe um valor de mensalidade válido.' });
+      return;
+    }
+    setValoresTemporarios((atuais) => ({ ...atuais, [clienteId]: valor }));
+    setEditandoValorId(null);
+    setValorEdicao('');
   };
 
   const onAdicionarReajuste = async () => {
@@ -304,6 +352,7 @@ export default function GerarMensalidadeScreen() {
       const { criados, ignorados, semVencimento, avisoBoleto, nf } = await criarMensalidadesGeradasLote({
         userId: user.id,
         clienteIds: ids,
+        valoresPorCliente: valoresTemporarios,
         dataVencimentoOverride: usarMesmaDataTodos && vencimento ? toISODate(vencimento) : null,
         competencia: competencia.trim() || null,
         gerarNotaFiscal,
@@ -530,9 +579,11 @@ export default function GerarMensalidadeScreen() {
               : 'Nenhum cliente com os filtros atuais.'}
           </Text>
         ) : (
-          rows.map((r) => {
+          rowsPagina.map((r) => {
             const seg = r.segmento_cliente?.nome ?? r.segmento_cliente_codigo ?? '—';
             const on = selected.has(r.id);
+            const valorTemporario = valoresTemporarios[r.id];
+            const valorExibido = (valorTemporario ?? Number(r.valor_mensalidade)) || 0;
             const proxVenc = vencimentoPorCliente(r.id, r.data_inicio ?? null);
             const proxLabel = proxVenc
               ? formatBRDate(proxVenc)
@@ -567,12 +618,118 @@ export default function GerarMensalidadeScreen() {
                     NFS-e: {r.emite_nf ? 'Com NF' : 'Sem NF — não emite nota'}
                   </Text>
                   {r.cancelado ? <Text style={styles.cancel}>Cancelado</Text> : null}
-                  <Text style={styles.val}>{formatBRL(r.valor_mensalidade)}</Text>
+                  <Text style={styles.val}>{formatBRL(valorExibido)}</Text>
+                  {valorTemporario != null ? (
+                    <Text style={styles.valorOriginal}>
+                      Somente neste mês · cadastro: {formatBRL(r.valor_mensalidade)}
+                    </Text>
+                  ) : null}
+                  {on ? (
+                    editandoValorId === r.id ? (
+                      <View style={styles.valorEdicaoBox}>
+                        <TextInput
+                          style={styles.valorEdicaoInput}
+                          value={valorEdicao}
+                          onChangeText={(texto) =>
+                            setValorEdicao(texto.replace(/[^\d.,]/g, ''))
+                          }
+                          keyboardType="decimal-pad"
+                          placeholder="0,00"
+                          placeholderTextColor={colors.gray400}
+                          autoFocus
+                          onPressIn={(evento) => evento.stopPropagation()}
+                        />
+                        <Pressable
+                          style={styles.valorSalvarBtn}
+                          onPress={(evento) => {
+                            evento.stopPropagation();
+                            salvarValorTemporario(r.id);
+                          }}
+                        >
+                          <Ionicons name="checkmark" size={16} color={colors.white} />
+                          <Text style={styles.valorSalvarTxt}>Salvar</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.valorCancelarBtn}
+                          onPress={(evento) => {
+                            evento.stopPropagation();
+                            setEditandoValorId(null);
+                            setValorEdicao('');
+                          }}
+                        >
+                          <Ionicons name="close" size={17} color={colors.gray600} />
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <Pressable
+                        style={styles.alterarValorBtn}
+                        onPress={(evento) => {
+                          evento.stopPropagation();
+                          abrirEdicaoValor(r);
+                        }}
+                      >
+                        <Ionicons name="create-outline" size={15} color={colors.orangeDark} />
+                        <Text style={styles.alterarValorTxt}>Alterar valor deste mês</Text>
+                      </Pressable>
+                    )
+                  ) : null}
                 </View>
               </Pressable>
             );
           })
         )}
+
+        {!loading && rows.length > 0 ? (
+          <>
+            <View style={styles.paginacao}>
+              <Pressable
+                style={[styles.paginaBtn, pagina === 1 && styles.paginaBtnDisabled]}
+                onPress={() => setPagina((p) => Math.max(1, p - 1))}
+                disabled={pagina === 1}
+              >
+                <Ionicons
+                  name="chevron-back"
+                  size={16}
+                  color={pagina === 1 ? colors.gray400 : colors.petroleum}
+                />
+                <Text style={[styles.paginaBtnTxt, pagina === 1 && styles.paginaBtnTxtDisabled]}>
+                  Anterior
+                </Text>
+              </Pressable>
+              <Text style={styles.paginaInfo}>
+                Página {pagina} de {totalPaginas}
+              </Text>
+              <Pressable
+                style={[styles.paginaBtn, pagina === totalPaginas && styles.paginaBtnDisabled]}
+                onPress={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+                disabled={pagina === totalPaginas}
+              >
+                <Text
+                  style={[
+                    styles.paginaBtnTxt,
+                    pagina === totalPaginas && styles.paginaBtnTxtDisabled,
+                  ]}
+                >
+                  Próxima
+                </Text>
+                <Ionicons
+                  name="chevron-forward"
+                  size={16}
+                  color={pagina === totalPaginas ? colors.gray400 : colors.petroleum}
+                />
+              </Pressable>
+            </View>
+
+            <View style={styles.totalSelecionado}>
+              <Text style={styles.totalSelecionadoLabel}>
+                Total das mensalidades selecionadas ({targetIds.length})
+              </Text>
+              <Text style={styles.totalSelecionadoValor}>
+                {formatBRL(totalMensalidadesSelecionadas)}
+              </Text>
+            </View>
+          </>
+        ) : null}
 
         <Card style={styles.card}>
           <Text style={styles.h}>Dados da mensalidade</Text>
@@ -762,6 +919,106 @@ const styles = StyleSheet.create({
   metaNfOff: { color: colors.danger },
   cancel: { fontSize: 11, fontWeight: '700', color: colors.danger, marginTop: 4 },
   val: { fontSize: 17, fontWeight: '800', color: colors.orange, marginTop: 6 },
+  valorOriginal: { fontSize: 11, color: colors.gray600, marginTop: 2 },
+  alterarValorBtn: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: spacing.sm,
+    paddingVertical: 5,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    backgroundColor: colors.orangeSoft,
+  },
+  alterarValorTxt: { color: colors.orangeDark, fontSize: 12, fontWeight: '700' },
+  valorEdicaoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  valorEdicaoInput: {
+    flex: 1,
+    minHeight: 36,
+    borderWidth: 1,
+    borderColor: colors.orange,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    color: colors.petroleum,
+    backgroundColor: colors.white,
+    fontSize: 14,
+  },
+  valorSalvarBtn: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    backgroundColor: colors.orange,
+  },
+  valorSalvarTxt: { color: colors.white, fontSize: 12, fontWeight: '700' },
+  valorCancelarBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+    backgroundColor: colors.white,
+  },
+  paginacao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  paginaBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    minHeight: 36,
+    paddingHorizontal: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+    borderRadius: radius.sm,
+    backgroundColor: colors.white,
+  },
+  paginaBtnDisabled: {
+    backgroundColor: colors.gray50,
+    borderColor: colors.gray100,
+  },
+  paginaBtnTxt: { color: colors.petroleum, fontSize: 12, fontWeight: '700' },
+  paginaBtnTxtDisabled: { color: colors.gray400 },
+  paginaInfo: { color: colors.gray600, fontSize: 12, fontWeight: '600' },
+  totalSelecionado: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    backgroundColor: colors.orangeSoft,
+    borderWidth: 1,
+    borderColor: colors.orangeMuted,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  totalSelecionadoLabel: {
+    flex: 1,
+    color: colors.petroleum,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  totalSelecionadoValor: {
+    color: colors.orangeDark,
+    fontSize: 18,
+    fontWeight: '800',
+  },
   enviar: { marginTop: spacing.md },
   footerHint: { fontSize: 12, color: colors.gray600, marginTop: spacing.sm, lineHeight: 18 },
 });

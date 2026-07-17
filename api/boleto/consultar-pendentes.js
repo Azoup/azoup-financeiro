@@ -1,4 +1,4 @@
-const { getAdmin } = require('../../nfe/_lib/supabaseAdmin');
+const { getAdmin } = require('../nfe/_lib/supabaseAdmin');
 const { sincronizarBoletosPendentesGlobal } = require('./_lib/baixarBoletoPago');
 
 module.exports = async function handler(req, res) {

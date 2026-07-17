@@ -1,5 +1,6 @@
 const { getAdmin, getUserFromBearer } = require('../../nfe/_lib/supabaseAdmin');
 const { decryptCertPassword } = require('../../nfe/_lib/crypto');
+const { resolveCertificadoAtivo } = require('./sicoobCredentials');
 const {
   buildSicoobPayload,
   cleanupCert,
@@ -59,25 +60,14 @@ async function emitirUmBoleto(admin, userId, boletoId) {
     throw new Error('Configure Client ID e número do cliente (convênio) em Configurações › Sicoob.');
   }
 
-  const [{ data: cert }, { data: sec }] = await Promise.all([
-    admin.from('empresa_certificado').select('*').eq('user_id', userId).eq('ativo', true).maybeSingle(),
-    admin
-      .from('empresa_certificado')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('ativo', true)
-      .maybeSingle()
-      .then(async ({ data: c }) => {
-        if (!c?.id) return { data: null };
-        return admin
-          .from('empresa_certificado_secreto')
-          .select('senha_criptografada')
-          .eq('certificado_id', c.id)
-          .maybeSingle();
-      }),
-  ]);
-
+  const cert = await resolveCertificadoAtivo(admin, userId);
   if (!cert) throw new Error('Cadastre o certificado A1 em Configurações › NFS-e (reutilizado pelo Sicoob).');
+
+  const { data: sec } = await admin
+    .from('empresa_certificado_secreto')
+    .select('senha_criptografada')
+    .eq('certificado_id', cert.id)
+    .maybeSingle();
   if (!sec?.senha_criptografada) {
     throw new Error('Senha do certificado A1 não encontrada. Reenvie o certificado.');
   }

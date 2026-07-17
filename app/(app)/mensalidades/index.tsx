@@ -16,6 +16,7 @@ import {
 } from '@/services/mensalidadeGeradaService';
 import {
   fetchNotaFiscalPorMensalidade,
+  fetchNotasFiscaisPorMensalidadeIds,
   gerarNotaFiscalParaMensalidade,
 } from '@/services/notaFiscalService';
 import { colors, radius, spacing } from '@/theme/colors';
@@ -30,7 +31,7 @@ import { reaisParaCentavos } from '@/utils/vendasParcelas';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -45,6 +46,8 @@ import {
 import { showAppError, showAppInfo, showAppSuccess } from '@/utils/appToast';
 
 type StatusFiltro = 'todos' | MensalidadeGeradaStatusVisual;
+
+const MENSALIDADES_POR_PAGINA = 10;
 
 const STATUS_OPTS: { id: StatusFiltro; label: string }[] = [
   { id: 'todos', label: 'Todos' },
@@ -113,12 +116,23 @@ export default function HistoricoMensalidadesGeradasScreen() {
   const [nfBusyId, setNfBusyId] = useState<string | null>(null);
   const [nfEmitindoPosPagamento, setNfEmitindoPosPagamento] = useState(false);
   const [nfConfirmMensalidade, setNfConfirmMensalidade] = useState<MensalidadeGerada | null>(null);
+  const [nfEmitidas, setNfEmitidas] = useState<Record<string, { numero: number | null }>>({});
+  const [pagina, setPagina] = useState(1);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
     await sincronizarCarnesMensalidadesFaltantes(user.id).catch(() => undefined);
     const all = await fetchMensalidadesGeradasHistorico(user.id);
     setAllRows(all);
+    const nfMap = await fetchNotasFiscaisPorMensalidadeIds(
+      user.id,
+      all.map((m) => m.id),
+    ).catch(() => new Map());
+    const emitidas: Record<string, { numero: number | null }> = {};
+    for (const [mid, nf] of nfMap) {
+      if (nf.status === 'autorizada') emitidas[mid] = { numero: nf.numero ?? null };
+    }
+    setNfEmitidas(emitidas);
   }, [user?.id]);
 
   useFocusEffect(
@@ -154,6 +168,20 @@ export default function HistoricoMensalidadesGeradasScreen() {
     }
     return list;
   }, [allRows, clienteFiltro, debouncedSearch, statusFilter]);
+
+  const totalPaginas = Math.max(1, Math.ceil(filteredRows.length / MENSALIDADES_POR_PAGINA));
+  const rowsPagina = useMemo(() => {
+    const inicio = (pagina - 1) * MENSALIDADES_POR_PAGINA;
+    return filteredRows.slice(inicio, inicio + MENSALIDADES_POR_PAGINA);
+  }, [filteredRows, pagina]);
+
+  useEffect(() => {
+    setPagina(1);
+  }, [clienteFiltro, debouncedSearch, statusFilter]);
+
+  useEffect(() => {
+    setPagina((atual) => Math.min(atual, totalPaginas));
+  }, [totalPaginas]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -276,7 +304,9 @@ export default function HistoricoMensalidadesGeradasScreen() {
     const st = statusColor(vis);
     const pend = Math.max(0, reaisParaCentavos(m.valor) - reaisParaCentavos(m.valor_pago)) / 100;
     const showPay = podeRegistrarPagamentoMensalidadeGerada(m);
-    const showNf = m.status !== 'cancelado';
+    const jaPago = vis === 'pago';
+    const nfEmitida = nfEmitidas[m.id];
+    const showNf = m.status !== 'cancelado' && !nfEmitida;
     const nfBusy = nfBusyId === m.id;
     const exp = expanded === m.id;
     const pays = pagamentos[m.id];
@@ -310,10 +340,15 @@ export default function HistoricoMensalidadesGeradasScreen() {
 
         <View style={styles.btnRow}>
           {showPay ? (
-            <Pressable style={styles.btnSmPago} onPress={() => setRegistroPagamento(m)}>
-              <Ionicons name="checkmark" size={14} color={colors.white} />
-              <Text style={styles.btnSmPagoTxt}>Pagar</Text>
+            <Pressable style={styles.btnSmLancar} onPress={() => setRegistroPagamento(m)}>
+              <Ionicons name="cash-outline" size={14} color={colors.white} />
+              <Text style={styles.btnSmPagoTxt}>Lançar pagamento</Text>
             </Pressable>
+          ) : jaPago ? (
+            <View style={styles.btnSmPago} accessibilityState={{ disabled: true }}>
+              <Ionicons name="checkmark-circle" size={14} color={colors.white} />
+              <Text style={styles.btnSmPagoTxt}>Pago</Text>
+            </View>
           ) : null}
           <Pressable style={styles.btnSmGhost} onPress={() => toggleExpand(m.id)}>
             {loadingPay === m.id ? (
@@ -325,7 +360,14 @@ export default function HistoricoMensalidadesGeradasScreen() {
           </Pressable>
         </View>
 
-        {showNf ? (
+        {nfEmitida ? (
+          <View style={styles.nfEmitidaBadge}>
+            <Ionicons name="document-text-outline" size={14} color={colors.success} />
+            <Text style={styles.nfEmitidaTxt}>
+              NFS-e já emitida{nfEmitida.numero != null ? ` — nº ${nfEmitida.numero}` : ''}
+            </Text>
+          </View>
+        ) : showNf ? (
           <PrimaryButton
             title={nfBusy ? 'Emitindo NFS-e…' : 'Emitir NFS-e'}
             variant="secondary"
@@ -419,19 +461,64 @@ export default function HistoricoMensalidadesGeradasScreen() {
         </ScrollView>
 
         <Text style={styles.resultCount}>
-          {loading ? 'Carregando…' : `${filteredRows.length} de ${totalBase} mensalidade(s)`}
+          {loading
+            ? 'Carregando…'
+            : `${filteredRows.length} de ${totalBase} mensalidade(s)`}
         </Text>
       </View>
     </>
   );
 
+  const listFooter =
+    !loading && filteredRows.length > 0 ? (
+      <View style={styles.paginacao}>
+        <Pressable
+          style={[styles.paginaBtn, pagina === 1 && styles.paginaBtnDisabled]}
+          onPress={() => setPagina((p) => Math.max(1, p - 1))}
+          disabled={pagina === 1}
+        >
+          <Ionicons
+            name="chevron-back"
+            size={16}
+            color={pagina === 1 ? colors.gray400 : colors.petroleum}
+          />
+          <Text style={[styles.paginaBtnTxt, pagina === 1 && styles.paginaBtnTxtDisabled]}>
+            Anterior
+          </Text>
+        </Pressable>
+        <Text style={styles.paginaInfo}>
+          Página {pagina} de {totalPaginas}
+        </Text>
+        <Pressable
+          style={[styles.paginaBtn, pagina === totalPaginas && styles.paginaBtnDisabled]}
+          onPress={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+          disabled={pagina === totalPaginas}
+        >
+          <Text
+            style={[
+              styles.paginaBtnTxt,
+              pagina === totalPaginas && styles.paginaBtnTxtDisabled,
+            ]}
+          >
+            Próxima
+          </Text>
+          <Ionicons
+            name="chevron-forward"
+            size={16}
+            color={pagina === totalPaginas ? colors.gray400 : colors.petroleum}
+          />
+        </Pressable>
+      </View>
+    ) : null;
+
   return (
     <View style={styles.root}>
       <FlatList
-        data={filteredRows}
+        data={rowsPagina}
         keyExtractor={(m) => m.id}
         renderItem={renderItem}
         ListHeaderComponent={listHeader}
+        ListFooterComponent={listFooter}
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.orange} />
@@ -635,6 +722,18 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginTop: spacing.sm,
   },
+  btnSmLancar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    backgroundColor: colors.orange,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    minHeight: 32,
+  },
   btnSmPago: {
     flex: 1,
     flexDirection: 'row',
@@ -653,6 +752,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   btnEmitirNf: { marginTop: spacing.sm },
+  nfEmitidaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: colors.successSoft,
+    borderRadius: radius.sm,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.sm,
+    minHeight: 32,
+    marginTop: spacing.sm,
+  },
+  nfEmitidaTxt: {
+    color: colors.success,
+    fontWeight: '700',
+    fontSize: 12,
+  },
   btnSmGhost: {
     flex: 1,
     flexDirection: 'row',
@@ -694,4 +810,31 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.gray600,
   },
+  paginacao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  paginaBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    minHeight: 36,
+    paddingHorizontal: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+    borderRadius: radius.sm,
+    backgroundColor: colors.white,
+  },
+  paginaBtnDisabled: {
+    backgroundColor: colors.gray50,
+    borderColor: colors.gray100,
+  },
+  paginaBtnTxt: { color: colors.petroleum, fontSize: 12, fontWeight: '700' },
+  paginaBtnTxtDisabled: { color: colors.gray400 },
+  paginaInfo: { color: colors.gray600, fontSize: 12, fontWeight: '600' },
 });

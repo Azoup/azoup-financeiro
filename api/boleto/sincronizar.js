@@ -1,4 +1,4 @@
-const { getAdmin, getUserFromBearer } = require('../../nfe/_lib/supabaseAdmin');
+const { getAdmin, getUserFromBearer } = require('../nfe/_lib/supabaseAdmin');
 const { sincronizarBoletosPendentesUsuario } = require('./_lib/baixarBoletoPago');
 
 module.exports = async function handler(req, res) {
