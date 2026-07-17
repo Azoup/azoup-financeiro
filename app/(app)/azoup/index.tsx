@@ -198,7 +198,7 @@ export default function AzoupDashboardScreen() {
   const listHeader = (
     <View style={styles.headerBlock}>
       <View style={styles.hero}>
-        <Text style={styles.heroEyebrow}>AZOUP · ASSINANTES</Text>
+        <Text style={styles.heroEyebrow}>AZOUP - WEB</Text>
         <Text style={styles.heroTitle}>Painel SaaS</Text>
         <Text style={styles.heroLead}>
           Visão somente leitura dos clientes, planos e MRR do outro sistema.

@@ -16,7 +16,7 @@ export default function AzoupLayout() {
         headerShadowVisible: false,
       }}
     >
-      <Stack.Screen name="index" options={{ title: 'Assinantes Azoup' }} />
+      <Stack.Screen name="index" options={{ title: 'Azoup - Web' }} />
     </Stack>
   );
 }

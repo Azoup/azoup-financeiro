@@ -66,9 +66,9 @@ export default function AppLayout() {
       <Tabs.Screen
         name="azoup"
         options={{
-          title: 'Azoup',
+          title: 'Azoup - Web',
           headerShown: false,
-          tabBarLabel: 'Azoup',
+          tabBarLabel: 'Azoup - Web',
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons
               name={focused ? 'planet' : 'planet-outline'}
