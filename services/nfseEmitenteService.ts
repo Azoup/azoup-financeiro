@@ -88,6 +88,7 @@ function normalizeEmitentePatch(input: Partial<NfseEmitenteInput>): Partial<Nfse
     descricao_servico_padrao:
       (input.descricao_servico_padrao ?? 'Serviço de mensalidade').trim() || 'Serviço de mensalidade',
     natureza_operacao: (input.natureza_operacao ?? 'Prestação de serviço').trim(),
+    regime_tributario: Math.min(3, Math.max(1, Number(input.regime_tributario ?? 1))) as 1 | 2 | 3,
     op_simp_nac: Math.min(4, Math.max(1, Number(input.op_simp_nac ?? 3))) as 1 | 2 | 3 | 4,
     reg_esp_trib: Number(input.reg_esp_trib ?? 0),
     trib_issqn: Math.min(4, Math.max(1, Number(input.trib_issqn ?? 1))) as 1 | 2 | 3 | 4,
@@ -351,13 +352,24 @@ export async function uploadCertificadoA1Emitente(
   await uploadCertificadoA1(userId, file, senha, emitenteId);
 }
 
-export function emitenteLabel(e: Pick<NfseEmitente, 'nome' | 'documento' | 'razao_social'>): string {
+export function emitenteLabel(
+  e: Pick<NfseEmitente, 'nome' | 'documento' | 'razao_social'> & {
+    regime_tributario?: number | null;
+  },
+): string {
   const doc = onlyDigits(e.documento);
-  const cnpj =
+  const docFmt =
     doc.length === 14
       ? doc.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')
-      : doc;
-  return `${e.nome || e.razao_social} · ${cnpj}`;
+      : doc.length === 11
+        ? doc.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4')
+        : doc || '—';
+  const nome = e.nome?.trim() || e.razao_social?.trim() || 'Emitente';
+  const regime =
+    e.regime_tributario != null
+      ? ` · ${e.regime_tributario === 3 ? 'Normal' : 'Simples'}`
+      : '';
+  return `${nome} · ${docFmt}${regime}`;
 }
 
 export { nfeApiBaseUrl };

@@ -3,6 +3,15 @@ const {
   prioridadeAssinatura,
 } = require('./assinaturaStatus');
 
+/** Colunas reais de `clientes_azoup` no schema Azoup (sem razao_social/nome_fantasia/celular). */
+const CLIENTE_SELECT_COLS = 'id,nome,email,telefone,created_at';
+
+/**
+ * Campos usados da tela inicial / listagem (docs + metrics-repo / conversas-repo).
+ * Evita SELECT de colunas legadas que não existem no banco.
+ */
+const ASSINATURA_SELECT_COLS = '*';
+
 function pickAssinaturaPorCliente(assinaturas) {
   const porCliente = new Map();
   for (const a of assinaturas) {
@@ -34,17 +43,7 @@ function mrrLocalDeAssinatura(a) {
 }
 
 function nomeCliente(c) {
-  return (
-    c.nome_fantasia?.trim() ||
-    c.nome?.trim() ||
-    c.razao_social?.trim() ||
-    c.email?.trim() ||
-    `Cliente ${String(c.id).slice(0, 8)}`
-  );
-}
-
-function valorAssinaturaCentavos(a) {
-  return mrrLocalDeAssinatura(a);
+  return c.nome?.trim() || c.email?.trim() || `Cliente ${String(c.id).slice(0, 8)}`;
 }
 
 async function carregarDashboardAzoup(admin) {
@@ -54,13 +53,11 @@ async function carregarDashboardAzoup(admin) {
   if (errCount) throw new Error(errCount.message);
 
   const [assinaturasRes, planosRes, clientesRes] = await Promise.all([
-    admin.from('assinaturas_clientes').select('*').limit(8000),
+    admin.from('assinaturas_clientes').select(ASSINATURA_SELECT_COLS).limit(8000),
     admin.from('planos_assinatura').select('id,nome'),
     admin
       .from('clientes_azoup')
-      .select(
-        'id,created_at,nome,razao_social,nome_fantasia,email,telefone,celular',
-      )
+      .select(CLIENTE_SELECT_COLS)
       .order('created_at', { ascending: false })
       .limit(2000),
   ]);
@@ -123,12 +120,12 @@ async function carregarDashboardAzoup(admin) {
       id: c.id,
       nome: nomeCliente(c),
       email: c.email ?? null,
-      telefone: c.telefone || c.celular || null,
+      telefone: c.telefone ?? null,
       created_at: c.created_at ?? null,
       plano_nome: planoId ? planosMap.get(planoId) ?? null : null,
       status_grupo: grupo,
       status_label: assinatura?.status ?? 'Sem assinatura',
-      valor_centavos: assinatura ? valorAssinaturaCentavos(assinatura) : 0,
+      valor_centavos: assinatura ? mrrLocalDeAssinatura(assinatura) : 0,
     };
   });
 

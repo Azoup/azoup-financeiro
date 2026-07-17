@@ -424,17 +424,20 @@ export async function deleteCliente(userId: string, clienteId: string): Promise<
     .from('clientes')
     .select('pdf_path')
     .eq('id', clienteId)
+    .eq('user_id', userId)
     .maybeSingle();
 
   if (e0) throw new Error(e0.message);
   const pdfPath = (cur as { pdf_path: string | null } | null)?.pdf_path ?? null;
 
-  const { error } = await supabase
+  const { error, count } = await supabase
     .from('clientes')
-    .delete()
-    .eq('id', clienteId);
+    .delete({ count: 'exact' })
+    .eq('id', clienteId)
+    .eq('user_id', userId);
 
   if (error) throw new Error(error.message);
+  if (!count) throw new Error('Cliente não encontrado ou sem permissão para excluir.');
 
   if (pdfPath) {
     await removeClientePdf(pdfPath);

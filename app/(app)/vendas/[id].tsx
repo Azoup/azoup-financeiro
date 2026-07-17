@@ -29,12 +29,12 @@ import { formatDateTimeBRFromISO } from '@/utils/date';
 import { vendaDescricaoLinhas } from '@/utils/vendasDescricao';
 import { centavosParaReais, reaisParaCentavos } from '@/utils/vendasParcelas';
 import { CONSULTA, goToConsulta, useHardwareBackToConsulta } from '@/utils/navigationConsulta';
+import { confirmDestructive } from '@/utils/confirmDialog';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -113,24 +113,20 @@ export default function VendaDetailScreen() {
     await load();
   };
 
-  const onCancelar = () => {
+  const onCancelar = async () => {
     if (!user?.id || !id) return;
-    Alert.alert('Cancelar venda', 'Confirma o cancelamento desta venda?', [
-      { text: 'Não', style: 'cancel' },
-      {
-        text: 'Sim',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await cancelarVenda(user.id, id);
-            Toast.show({ type: 'success', text1: 'Venda cancelada.' });
-            goToConsulta(CONSULTA.vendas);
-          } catch (e) {
-            Toast.show({ type: 'error', text1: (e as Error).message });
-          }
-        },
-      },
-    ]);
+    const ok = await confirmDestructive(
+      'Cancelar venda',
+      'Confirma o cancelamento desta venda?',
+    );
+    if (!ok) return;
+    try {
+      await cancelarVenda(user.id, id);
+      Toast.show({ type: 'success', text1: 'Venda cancelada.' });
+      goToConsulta(CONSULTA.vendas);
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    }
   };
 
   const avisoBoletoLog = logs.find((l) => l.tipo === 'aviso_boleto');

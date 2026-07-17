@@ -30,11 +30,11 @@ import { formatBRL } from '@/utils/currency';
 import { formatBRDate, formatDateTimeBRFromISO, parseISODate } from '@/utils/date';
 import { reaisParaCentavos } from '@/utils/vendasParcelas';
 import { CONSULTA, goToConsulta, useHardwareBackToConsulta } from '@/utils/navigationConsulta';
+import { confirmDestructive } from '@/utils/confirmDialog';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Linking,
   Modal,
   Pressable,
@@ -259,28 +259,20 @@ export default function ClientDetailScreen() {
     }
   };
 
-  const onDelete = () => {
-    Alert.alert(
+  const onDelete = async () => {
+    if (!user?.id || !id) return;
+    const ok = await confirmDestructive(
       'Excluir cliente',
       'Esta ação não pode ser desfeita. Deseja excluir o cliente e todos os contatos?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Excluir',
-          style: 'destructive',
-          onPress: async () => {
-            if (!user?.id || !id) return;
-            try {
-              await deleteCliente(user.id, String(id));
-              Toast.show({ type: 'success', text1: 'Cliente excluído.' });
-              router.replace('/(app)/clients');
-            } catch (e) {
-              Toast.show({ type: 'error', text1: (e as Error).message });
-            }
-          },
-        },
-      ],
     );
+    if (!ok) return;
+    try {
+      await deleteCliente(user.id, String(id));
+      Toast.show({ type: 'success', text1: 'Cliente excluído.' });
+      router.replace('/(app)/clients');
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    }
   };
 
   if (loading && !data) {

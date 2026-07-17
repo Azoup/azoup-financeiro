@@ -624,20 +624,35 @@ export async function fetchVendaFinanceiroStats(userId: string): Promise<VendaFi
 }
 
 export async function cancelarVenda(userId: string, vendaId: string): Promise<void> {
-  const { data: ps } = await supabase
+  const { data: ps, error: ePs } = await supabase
     .from('parcelas_venda')
     .select('valor_pago')
     .eq('venda_id', vendaId);
+  if (ePs) throw new Error(ePs.message);
   const any = (ps as { valor_pago: number }[] | null)?.some((p) => reaisParaCentavos(p.valor_pago) > 0);
   if (any) throw new Error('Não é possível cancelar venda com pagamentos registrados.');
-  await supabase.from('parcelas_venda').update({ status: 'cancelado' }).eq('venda_id', vendaId);
-  await supabase.from('vendas').update({ status: 'cancelada' }).eq('id', vendaId).eq('user_id', userId);
-  await supabase.from('vendas_financeiro_log').insert({
+
+  const { error: eParc } = await supabase
+    .from('parcelas_venda')
+    .update({ status: 'cancelado' })
+    .eq('venda_id', vendaId);
+  if (eParc) throw new Error(eParc.message);
+
+  const { error: eVenda, count } = await supabase
+    .from('vendas')
+    .update({ status: 'cancelada' }, { count: 'exact' })
+    .eq('id', vendaId)
+    .eq('user_id', userId);
+  if (eVenda) throw new Error(eVenda.message);
+  if (!count) throw new Error('Venda não encontrada ou sem permissão para cancelar.');
+
+  const { error: eLog } = await supabase.from('vendas_financeiro_log').insert({
     venda_id: vendaId,
     user_id: userId,
     tipo: 'venda_cancelada',
     detalhe: {},
   });
+  if (eLog) throw new Error(eLog.message);
 }
 
 export function parcelaStatusVisual(p: ParcelaVenda): ParcelaVendaStatus {

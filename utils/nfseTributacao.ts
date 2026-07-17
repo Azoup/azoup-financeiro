@@ -1,4 +1,12 @@
 export type OpSimpNac = 1 | 2 | 3 | 4;
+export type RegimeTributario = 1 | 2 | 3;
+
+/** CRT / regime do emitente (mesmo código usado em NF-e). */
+export const REGIME_TRIBUTARIO_OPCOES: { value: RegimeTributario; label: string }[] = [
+  { value: 1, label: 'Simples Nacional' },
+  { value: 2, label: 'Simples Nacional — excesso de sublimite' },
+  { value: 3, label: 'Regime Normal' },
+];
 
 export const OP_SIMP_NAC_OPCOES: { value: OpSimpNac; label: string }[] = [
   { value: 1, label: 'Não optante pelo Simples Nacional' },
@@ -32,4 +40,25 @@ export const TP_RET_ISSQN_OPCOES = [
 
 export function labelOpSimpNac(v: number): string {
   return OP_SIMP_NAC_OPCOES.find((o) => o.value === v)?.label ?? `Código ${v}`;
+}
+
+export function labelRegimeTributario(v: number): string {
+  return REGIME_TRIBUTARIO_OPCOES.find((o) => o.value === v)?.label ?? `Regime ${v}`;
+}
+
+export function isRegimeSimples(regime: number): boolean {
+  return regime === 1 || regime === 2;
+}
+
+/** Ao mudar o CRT, alinha a flag NFS-e de optante do Simples. */
+export function opSimpNacParaRegime(regime: RegimeTributario, atual?: number): OpSimpNac {
+  if (regime === 3) return 1;
+  if (atual === 2 || atual === 3 || atual === 4) return atual as OpSimpNac;
+  return 3;
+}
+
+export function regimeCurto(regime: number): string {
+  if (regime === 3) return 'Normal';
+  if (regime === 2) return 'SN excesso';
+  return 'Simples';
 }

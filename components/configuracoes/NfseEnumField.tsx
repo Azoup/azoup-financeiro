@@ -60,6 +60,6 @@ const styles = StyleSheet.create({
     borderColor: colors.gray400,
   },
   dotActive: { borderColor: colors.orange, backgroundColor: colors.orange },
-  rowTxt: { flex: 1, fontSize: 12, color: colors.gray700, lineHeight: 16 },
+  rowTxt: { flex: 1, fontSize: 12, color: colors.gray600, lineHeight: 16 },
   rowTxtActive: { color: colors.petroleum, fontWeight: '600' },
 });

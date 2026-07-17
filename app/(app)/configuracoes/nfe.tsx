@@ -26,9 +26,14 @@ import { showAppToast } from '@/utils/appToast';
 import { avaliarProntidaoEmitente } from '@/utils/nfeProntidao';
 import {
   OP_SIMP_NAC_OPCOES,
+  REGIME_TRIBUTARIO_OPCOES,
   REG_ESP_TRIB_OPCOES,
   TP_RET_ISSQN_OPCOES,
   TRIB_ISSQN_OPCOES,
+  isRegimeSimples,
+  opSimpNacParaRegime,
+  regimeCurto,
+  type RegimeTributario,
 } from '@/utils/nfseTributacao';
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -62,6 +67,7 @@ type FormState = {
   codTribMun: string;
   codNbs: string;
   descricao: string;
+  regimeTributario: RegimeTributario;
   opSimpNac: number;
   regEspTrib: number;
   tribIssqn: number;
@@ -90,6 +96,7 @@ function formFromEmitente(e: NfseEmitente): FormState {
       (e.codigo_ibge_emitente === '3501608' ? '001' : ''),
     codNbs: e.codigo_nbs ?? '115013000',
     descricao: e.descricao_servico_padrao,
+    regimeTributario: (Math.min(3, Math.max(1, Number(e.regime_tributario ?? 1))) as RegimeTributario),
     opSimpNac: Number(e.op_simp_nac ?? 3),
     regEspTrib: Number(e.reg_esp_trib ?? 0),
     tribIssqn: Number(e.trib_issqn ?? 1),
@@ -257,17 +264,30 @@ export default function NfeConfigScreen() {
     }
     setBusy(true);
     try {
+      const primeiro = emitentes[0];
+      const primeiroSimples = primeiro
+        ? isRegimeSimples(Number(primeiro.regime_tributario ?? 1)) ||
+          Number(primeiro.op_simp_nac ?? 3) !== 1
+        : true;
+      // 2º CNPJ nasce no regime oposto ao primeiro (Simples ↔ Normal).
+      const regimeNovo: RegimeTributario = primeiroSimples ? 3 : 1;
+      const opSimpNovo = opSimpNacParaRegime(regimeNovo);
+
       const placeholder = `9${String(Date.now()).slice(-13)}`;
       const created = await createEmitente(user.id, {
-        nome: `Emitente ${emitentes.length + 1}`,
+        nome: primeiroSimples ? 'Emitente Regime Normal' : 'Emitente Simples Nacional',
         documento: placeholder,
         razao_social: 'Preencher razão social',
         padrao: false,
+        regime_tributario: regimeNovo,
+        op_simp_nac: opSimpNovo,
       });
       Toast.show({
         type: 'info',
         text1: '2º emitente criado',
-        text2: 'Substitua o CNPJ placeholder pelos dados reais, envie o A1 e salve.',
+        text2: primeiroSimples
+          ? 'Pré-definido como Regime Normal. Ajuste CNPJ, A1 e salve.'
+          : 'Pré-definido como Simples Nacional. Ajuste CNPJ, A1 e salve.',
       });
       const list = await ensureEmitentes(user.id);
       setEmitentes(list);
@@ -322,6 +342,7 @@ export default function NfeConfigScreen() {
         codigo_tributacao_municipal: form.codTribMun,
         codigo_nbs: form.codNbs,
         descricao_servico_padrao: form.descricao,
+        regime_tributario: form.regimeTributario,
         op_simp_nac: Math.min(4, Math.max(1, form.opSimpNac)) as 1 | 2 | 3 | 4,
         reg_esp_trib: form.regEspTrib,
         trib_issqn: Math.min(4, Math.max(1, form.tribIssqn)) as 1 | 2 | 3 | 4,
@@ -385,8 +406,8 @@ export default function NfeConfigScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.lead}>
-        Cadastre até 2 CNPJs emitentes. Cada um tem dados fiscais e certificado A1 próprios. Na hora de emitir a
-        NFS-e você escolhe qual CNPJ usar.
+        Cadastre até 2 CNPJs emitentes. Um pode ser Simples Nacional e o outro Regime Normal — cada um com
+        dados fiscais e certificado A1 próprios. Na emissão da NFS-e você escolhe qual CNPJ usar.
       </Text>
 
       <Card style={styles.card}>
@@ -394,6 +415,7 @@ export default function NfeConfigScreen() {
         <View style={styles.tabs}>
           {emitentes.map((e) => {
             const on = e.id === selectedId;
+            const regime = Number(e.regime_tributario ?? 1);
             return (
               <Pressable
                 key={e.id}
@@ -407,6 +429,23 @@ export default function NfeConfigScreen() {
                 <Text style={[styles.tabSub, on && styles.tabTxtOn]} numberOfLines={1}>
                   {emitenteLabel(e).split(' · ')[1] || e.documento}
                 </Text>
+                <View
+                  style={[
+                    styles.regimeBadge,
+                    isRegimeSimples(regime) ? styles.regimeBadgeSimples : styles.regimeBadgeNormal,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.regimeBadgeTxt,
+                      isRegimeSimples(regime)
+                        ? styles.regimeBadgeTxtSimples
+                        : styles.regimeBadgeTxtNormal,
+                    ]}
+                  >
+                    {regimeCurto(regime)}
+                  </Text>
+                </View>
               </Pressable>
             );
           })}
@@ -582,11 +621,33 @@ export default function NfeConfigScreen() {
 
           <Card style={styles.card}>
             <Text style={styles.h}>4. Regime tributário</Text>
+            <Text style={styles.sub}>
+              Defina se este CNPJ é Simples Nacional ou Regime Normal. O optante do Simples na NFS-e é
+              alinhado automaticamente.
+            </Text>
             <NfseEnumField
-              label="Situação no Simples Nacional"
+              label="Regime do emitente (CRT)"
+              hint="Use Simples em um CNPJ e Regime Normal no outro, se for o caso."
+              value={form.regimeTributario}
+              options={REGIME_TRIBUTARIO_OPCOES}
+              onChange={(v) => {
+                const regime = v as RegimeTributario;
+                patch({
+                  regimeTributario: regime,
+                  opSimpNac: opSimpNacParaRegime(regime, form.opSimpNac),
+                });
+              }}
+            />
+            <NfseEnumField
+              label="Situação no Simples Nacional (NFS-e)"
               value={form.opSimpNac}
               options={OP_SIMP_NAC_OPCOES}
-              onChange={(v) => patch({ opSimpNac: v })}
+              onChange={(v) => {
+                const next: Partial<FormState> = { opSimpNac: v };
+                if (v === 1 && form.regimeTributario !== 3) next.regimeTributario = 3;
+                if (v !== 1 && form.regimeTributario === 3) next.regimeTributario = 1;
+                patch(next);
+              }}
             />
             <NfseEnumField
               label="Regime especial"
@@ -667,6 +728,18 @@ const styles = StyleSheet.create({
   tabTxt: { fontSize: 14, fontWeight: '700', color: colors.petroleum },
   tabTxtOn: { color: colors.petroleum },
   tabSub: { fontSize: 11, color: colors.gray600, marginTop: 2 },
+  regimeBadge: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  regimeBadgeSimples: { backgroundColor: colors.successSoft },
+  regimeBadgeNormal: { backgroundColor: colors.infoSoft },
+  regimeBadgeTxt: { fontSize: 10, fontWeight: '800' },
+  regimeBadgeTxtSimples: { color: colors.success },
+  regimeBadgeTxtNormal: { color: colors.petroleum },
   tabActions: { gap: spacing.sm, marginTop: spacing.sm },
   checkRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start', marginBottom: spacing.sm },
   checkLabel: { fontSize: 13, color: colors.gray800, lineHeight: 18 },
