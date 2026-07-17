@@ -29,7 +29,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Linking,
   Platform,
   Pressable,
   RefreshControl,
@@ -50,6 +49,30 @@ function baixarXmlNoNavegador(xml: string, nomeArquivo: string) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+/** Abre HTML renderizado (evita Storage servir .html como texto puro). */
+function abrirHtmlRenderizado(html: string): boolean {
+  if (Platform.OS !== 'web' || typeof window === 'undefined' || typeof document === 'undefined') {
+    return false;
+  }
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const w = window.open(url, '_blank', 'noopener,noreferrer');
+  if (w) {
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return true;
+  }
+  const w2 = window.open('', '_blank', 'noopener,noreferrer');
+  if (w2) {
+    w2.document.open();
+    w2.document.write(html);
+    w2.document.close();
+    URL.revokeObjectURL(url);
+    return true;
+  }
+  URL.revokeObjectURL(url);
+  return false;
 }
 
 export default function NotasFiscaisIndexScreen() {
@@ -108,48 +131,32 @@ export default function NotasFiscaisIndexScreen() {
   const imprimirDanfe = async (item: NotaFiscalListRow) => {
     setPrintBusyId(item.id);
     try {
-      let url = item.danfe_url?.trim() || '';
-      if (!url && item.status === 'autorizada') {
-        const base = nfeApiBaseUrl();
-        const { data: session } = await supabase.auth.getSession();
-        const token = session.session?.access_token;
-        if (base && token) {
-          const res = await fetch(`${base}/api/nfe/artefatos`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ notaFiscalId: item.id }),
-          });
-          const body = (await res.json().catch(() => ({}))) as { danfe_url?: string };
-          if (body.danfe_url) {
-            url = body.danfe_url;
-            await load();
-          }
+      let htmlApi: string | null = null;
+      const base = nfeApiBaseUrl();
+      const { data: session } = await supabase.auth.getSession();
+      const token = session.session?.access_token;
+      if (item.status === 'autorizada' && base && token) {
+        const res = await fetch(`${base}/api/nfe/artefatos`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ notaFiscalId: item.id }),
+        });
+        const body = (await res.json().catch(() => ({}))) as {
+          danfe_url?: string;
+          html?: string;
+        };
+        if (typeof body.html === 'string' && body.html.includes('<html')) {
+          htmlApi = body.html;
         }
+        if (body.danfe_url) await load();
       }
 
-      if (url) {
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          window.open(url, '_blank', 'noopener,noreferrer');
-          return;
-        }
-        const ok = await Linking.canOpenURL(url);
-        if (ok) await Linking.openURL(url);
-        else Toast.show({ type: 'error', text1: 'Não foi possível abrir o DANFE.' });
-        return;
-      }
+      const html = htmlApi || buildDanfseHtmlFromNota(item);
+      if (abrirHtmlRenderizado(html)) return;
 
-      const html = buildDanfseHtmlFromNota(item);
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const w = window.open('', '_blank', 'noopener,noreferrer');
-        if (w) {
-          w.document.write(html);
-          w.document.close();
-          return;
-        }
-      }
       const { uri } = await Print.printToFileAsync({ html });
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, {

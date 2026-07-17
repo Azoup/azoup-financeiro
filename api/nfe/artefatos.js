@@ -79,6 +79,7 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       success: true,
       danfe_url: artefatos.danfe_url,
+      html: artefatos.html,
       xml_autorizado: Boolean(artefatos.xml_autorizado || nota.xml_autorizado),
       message: 'DANFSe gerada.',
     });

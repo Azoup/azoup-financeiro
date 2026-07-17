@@ -46,8 +46,8 @@ function humanizeNfseRejection(message, ibge) {
   if (/X160/i.test(raw)) {
     return [
       'X160 — XML rejeitado pelo schema ABRASF TipLan de Americana (estrutura inválida).',
-      'Faça redeploy da versão que usa a tag Tomador e o grupo IBSCBS (conforme XSD municipal).',
-      'Se persistir, confira ItemListaServico (ex.: 01.07), CNAE e códigos IBS/CBS.',
+      'No cancelamento, CodigoVerificacao não entra em IdentificacaoNfse (só Numero/CNPJ/IM/Municipio).',
+      'Faça redeploy e tente cancelar de novo.',
     ].join(' ');
   }
 

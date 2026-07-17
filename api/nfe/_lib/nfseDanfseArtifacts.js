@@ -44,11 +44,12 @@ function buildDanfseHtml({
   competencia,
   dataEmissao,
 }) {
-  const titulo = 'DANFSe — Documento Auxiliar da NFS-e';
+  const titulo = 'DANFSe - Documento Auxiliar da NFS-e';
   return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8"/>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
 <title>${escapeHtml(titulo)}</title>
 <style>
   body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:24px;font-size:13px}
@@ -61,44 +62,45 @@ function buildDanfseHtml({
   .val{font-size:20px;font-weight:700;margin-top:8px}
   table{width:100%;border-collapse:collapse;margin-top:8px}
   td,th{border:1px solid #ccc;padding:6px;text-align:left;vertical-align:top}
-  @media print{body{margin:12px}}
+  @media print{body{margin:12px} .noprint{display:none}}
+  button{margin-top:16px;padding:10px 16px;font-size:14px;cursor:pointer}
 </style>
 </head>
 <body>
   <h1>${escapeHtml(titulo)}</h1>
-  <div class="muted">Prefeitura Municipal de Americana/SP · NFS-e eletrônica</div>
+  <div class="muted">Prefeitura Municipal de Americana/SP - NFS-e eletronica</div>
   <div class="box">
     <div class="row">
       <div class="col">
         <strong>NFS-e</strong><br/>
-        Série ${escapeHtml(serie)} / Nº ${escapeHtml(numero)}<br/>
-        Competência: ${escapeHtml(competencia || '—')}<br/>
-        Emissão: ${escapeHtml(dataEmissao || '—')}
+        Serie ${escapeHtml(serie)} / No ${escapeHtml(numero)}<br/>
+        Competencia: ${escapeHtml(competencia || '-')}<br/>
+        Emissao: ${escapeHtml(dataEmissao || '-')}
       </div>
       <div class="col">
-        <strong>Código de verificação</strong><br/>
-        ${escapeHtml(codigoVerificacao || '—')}<br/>
-        <span class="muted">Chave/protocolo: ${escapeHtml(chaveAcesso || '—')}</span>
+        <strong>Codigo de verificacao</strong><br/>
+        ${escapeHtml(codigoVerificacao || '-')}<br/>
+        <span class="muted">Chave/protocolo: ${escapeHtml(chaveAcesso || '-')}</span>
       </div>
     </div>
     <div class="val">R$ ${escapeHtml(moneyBr(valor))}</div>
   </div>
   <h2>Prestador</h2>
-  <div>${escapeHtml(prestadorNome || '—')}<br/>
-  CNPJ ${escapeHtml(prestadorDoc || '—')} · IM ${escapeHtml(prestadorIm || '—')}</div>
+  <div>${escapeHtml(prestadorNome || '-')}<br/>
+  CNPJ ${escapeHtml(prestadorDoc || '-')} - IM ${escapeHtml(prestadorIm || '-')}</div>
   <h2>Tomador</h2>
-  <div>${escapeHtml(tomadorNome || '—')}<br/>
-  CPF/CNPJ ${escapeHtml(tomadorDoc || '—')}</div>
-  <h2>Serviço</h2>
+  <div>${escapeHtml(tomadorNome || '-')}<br/>
+  CPF/CNPJ ${escapeHtml(tomadorDoc || '-')}</div>
+  <h2>Servico</h2>
   <table>
-    <tr><th>Item lista</th><td>${escapeHtml(itemLista || '—')}</td></tr>
-    <tr><th>Discriminação</th><td>${escapeHtml(discriminacao || 'Prestação de serviços')}</td></tr>
+    <tr><th>Item lista</th><td>${escapeHtml(itemLista || '-')}</td></tr>
+    <tr><th>Discriminacao</th><td>${escapeHtml(discriminacao || 'Prestacao de servicos')}</td></tr>
   </table>
   <p class="muted" style="margin-top:20px">
-    A autenticidade pode ser conferida em nfse.americana.sp.gov.br › Verifique a Autenticidade,
-    informando CNPJ do prestador, número da NFS-e e código de verificação.
+    Autenticidade: nfse.americana.sp.gov.br &gt; Verifique a Autenticidade
+    (CNPJ do prestador, numero da NFS-e e codigo de verificacao).
   </p>
-  <script>window.onload=function(){try{window.print()}catch(e){}}</script>
+  <p class="noprint"><button type="button" onclick="window.print()">Imprimir / Salvar PDF</button></p>
 </body>
 </html>`;
 }
@@ -135,11 +137,18 @@ async function salvarArtefatosNfseAbrasf({
   const html = buildDanfseHtml(meta);
   danfePath = `${userId}/${fileKey}.html`;
   try {
+    // Upsert: remove anterior se existir (alguns buckets falham no upsert com contentType).
+    try {
+      await admin.storage.from('nota_fiscal_danfe').remove([danfePath]);
+    } catch {
+      /* ignore */
+    }
     const { error } = await admin.storage
       .from('nota_fiscal_danfe')
-      .upload(danfePath, Buffer.from(html, 'utf8'), {
+      .upload(danfePath, Buffer.from(`\uFEFF${html}`, 'utf8'), {
         contentType: 'text/html; charset=utf-8',
         upsert: true,
+        cacheControl: '60',
       });
     if (!error) {
       const { data: pub } = admin.storage.from('nota_fiscal_danfe').getPublicUrl(danfePath);
@@ -158,6 +167,7 @@ async function salvarArtefatosNfseAbrasf({
     danfe_url: danfeUrl,
     danfe_storage_path: danfePath,
     xml_storage_path: xmlPath,
+    html,
   };
 }
 

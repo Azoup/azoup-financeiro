@@ -528,24 +528,26 @@ async function cancelarNfseAbrasfAmericana({
   }
   const cnpj = onlyDigits(perfil.documento);
   const im = onlyDigits(config.inscricao_municipal);
-  const numero = onlyDigits(nota.protocolo_autorizacao) || onlyDigits(nota.chave_acesso);
-  const codVerif = String(nota.codigo_verificacao || nota.chave_acesso || '').trim();
-  if (!numero && !codVerif) {
-    throw new Error('Nota sem número/código de verificação para cancelar no ABRASF.');
+  // TipLan tcIdentificacaoNfse: Numero, CpfCnpj, InscricaoMunicipal?, CodigoMunicipio — SEM CodigoVerificacao.
+  const numeroNfse =
+    onlyDigits(nota.protocolo_autorizacao) ||
+    onlyDigits(nota.numero) ||
+    onlyDigits(nota.chave_acesso);
+  if (!numeroNfse) {
+    throw new Error('Nota sem número da NFS-e para cancelar no ABRASF.');
   }
 
   const { privateKeyPem, certificatePem } = loadPfx(certPath, senha);
-  const idPed = `cancel${Date.now()}`;
+  const idPed = `Cancel_${numeroNfse}_${Date.now()}`;
   let ped =
     `<CancelarNfseEnvio xmlns="${NS_ABRASF}">` +
     `<Pedido>` +
     `<InfPedidoCancelamento Id="${idPed}">` +
     `<IdentificacaoNfse>` +
-    `<Numero>${escapeXml(numero || '0')}</Numero>` +
+    `<Numero>${escapeXml(numeroNfse)}</Numero>` +
     `<CpfCnpj><Cnpj>${cnpj}</Cnpj></CpfCnpj>` +
-    `<InscricaoMunicipal>${im}</InscricaoMunicipal>` +
+    (im ? `<InscricaoMunicipal>${im}</InscricaoMunicipal>` : '') +
     `<CodigoMunicipio>3501608</CodigoMunicipio>` +
-    (codVerif ? `<CodigoVerificacao>${escapeXml(codVerif)}</CodigoVerificacao>` : '') +
     `</IdentificacaoNfse>` +
     `<CodigoCancelamento>1</CodigoCancelamento>` +
     `</InfPedidoCancelamento>` +
@@ -567,8 +569,12 @@ async function cancelarNfseAbrasfAmericana({
     ],
     digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
   });
+  // TipLan: Signature irmã de InfPedidoCancelamento (dentro de Pedido).
   sig.computeSignature(ped, {
-    location: { reference: "//*[local-name(.)='Pedido']", action: 'append' },
+    location: {
+      reference: "//*[local-name(.)='InfPedidoCancelamento']",
+      action: 'after',
+    },
   });
   ped = sig.getSignedXml();
 
