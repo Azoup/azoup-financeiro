@@ -381,6 +381,12 @@ export default function DashboardScreen() {
           <SectionTitle title="Acesso rápido" />
           <Card style={styles.quickCard}>
             <QuickLink
+              label="Assinantes Azoup"
+              sub="MRR, planos e clientes do SaaS"
+              icon="planet-outline"
+              onPress={() => router.push('/(app)/azoup')}
+            />
+            <QuickLink
               label="Clientes"
               sub="Lista, filtros e cadastro"
               icon="people-outline"

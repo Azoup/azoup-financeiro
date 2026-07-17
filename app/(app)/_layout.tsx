@@ -64,6 +64,21 @@ export default function AppLayout() {
         }}
       />
       <Tabs.Screen
+        name="azoup"
+        options={{
+          title: 'Azoup',
+          headerShown: false,
+          tabBarLabel: 'Azoup',
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons
+              name={focused ? 'planet' : 'planet-outline'}
+              color={color}
+              size={size}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="clients"
         options={{
           title: 'Clientes',

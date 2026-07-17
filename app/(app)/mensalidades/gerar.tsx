@@ -687,7 +687,7 @@ export default function GerarMensalidadeScreen() {
               >
                 <Ionicons
                   name="chevron-back"
-                  size={16}
+                  size={14}
                   color={pagina === 1 ? colors.gray400 : colors.petroleum}
                 />
                 <Text style={[styles.paginaBtnTxt, pagina === 1 && styles.paginaBtnTxtDisabled]}>
@@ -712,7 +712,7 @@ export default function GerarMensalidadeScreen() {
                 </Text>
                 <Ionicons
                   name="chevron-forward"
-                  size={16}
+                  size={14}
                   color={pagina === totalPaginas ? colors.gray400 : colors.petroleum}
                 />
               </Pressable>
