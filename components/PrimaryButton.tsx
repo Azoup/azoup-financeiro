@@ -1,6 +1,7 @@
-import { colors, radius, shadows, spacing } from '@/theme/colors';
+import { useTheme } from '@/context/ThemeContext';
+import { radius, shadows, spacing } from '@/theme/colors';
 import { fonts } from '@/theme/typography';
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -12,7 +13,7 @@ import {
 
 type Props = Omit<PressableProps, 'style'> & {
   title: string;
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'brand';
   size?: 'default' | 'compact';
   loading?: boolean;
   style?: ViewStyle;
@@ -27,9 +28,50 @@ export function PrimaryButton({
   style,
   ...rest
 }: Props) {
-  const isPrimary = variant === 'primary';
-  const isDanger = variant === 'danger';
+  const { theme } = useTheme();
   const compact = size === 'compact';
+  const isFilled = variant === 'primary' || variant === 'brand' || variant === 'danger';
+
+  const styles = useMemo(() => {
+    const actionBg = variant === 'brand' ? theme.brandPrimary : theme.cadastroAction;
+    return StyleSheet.create({
+      base: {
+        paddingVertical: spacing.sm + 2,
+        paddingHorizontal: spacing.lg,
+        borderRadius: radius.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 44,
+      },
+      baseCompact: {
+        minHeight: 36,
+        paddingVertical: 8,
+        paddingHorizontal: spacing.md,
+      },
+      primary: {
+        backgroundColor: actionBg,
+        ...shadows.sm,
+      },
+      secondary: {
+        backgroundColor: theme.surface,
+        borderWidth: 1,
+        borderColor: theme.borderStrong,
+      },
+      ghost: { backgroundColor: 'transparent' },
+      danger: { backgroundColor: theme.error },
+      disabled: { opacity: 0.5 },
+      pressed: { transform: [{ scale: 0.985 }], opacity: 0.92 },
+      text: {
+        fontFamily: fonts.semibold,
+        fontSize: 15,
+        letterSpacing: 0.1,
+      },
+      textCompact: { fontSize: 13 },
+      textOnPrimary: { color: theme.textOnPrimary },
+      textSecondary: { color: theme.text },
+      textGhost: { color: theme.cadastroAction },
+    });
+  }, [theme, variant]);
 
   return (
     <Pressable
@@ -37,10 +79,10 @@ export function PrimaryButton({
       style={({ pressed }) => [
         styles.base,
         compact && styles.baseCompact,
-        isPrimary && styles.primary,
+        (variant === 'primary' || variant === 'brand') && styles.primary,
         variant === 'secondary' && styles.secondary,
         variant === 'ghost' && styles.ghost,
-        isDanger && styles.danger,
+        variant === 'danger' && styles.danger,
         (disabled || loading) && styles.disabled,
         pressed && !disabled && !loading && styles.pressed,
         style,
@@ -49,16 +91,15 @@ export function PrimaryButton({
       {...rest}
     >
       {loading ? (
-        <ActivityIndicator color={isPrimary || isDanger ? colors.white : colors.petroleum} />
+        <ActivityIndicator color={isFilled ? theme.textOnPrimary : theme.text} />
       ) : (
         <Text
           style={[
             styles.text,
             compact && styles.textCompact,
-            isPrimary && styles.textOnPrimary,
+            isFilled && styles.textOnPrimary,
             variant === 'secondary' && styles.textSecondary,
             variant === 'ghost' && styles.textGhost,
-            isDanger && styles.textOnPrimary,
           ]}
         >
           {title}
@@ -67,59 +108,3 @@ export function PrimaryButton({
     </Pressable>
   );
 }
-
-const styles = StyleSheet.create({
-  base: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 52,
-  },
-  baseCompact: {
-    minHeight: 44,
-    paddingVertical: 10,
-    paddingHorizontal: spacing.md,
-  },
-  primary: {
-    backgroundColor: colors.orange,
-    ...shadows.sm,
-  },
-  secondary: {
-    backgroundColor: colors.white,
-    borderWidth: 1.5,
-    borderColor: colors.gray200,
-  },
-  ghost: {
-    backgroundColor: 'transparent',
-  },
-  danger: {
-    backgroundColor: colors.danger,
-  },
-  disabled: {
-    opacity: 0.5,
-  },
-  pressed: {
-    transform: [{ scale: 0.985 }],
-    opacity: 0.92,
-  },
-  text: {
-    fontFamily: fonts.semibold,
-    fontSize: 16,
-    letterSpacing: 0.15,
-  },
-  textCompact: {
-    fontFamily: fonts.semibold,
-    fontSize: 14,
-  },
-  textOnPrimary: {
-    color: colors.white,
-  },
-  textSecondary: {
-    color: colors.petroleum,
-  },
-  textGhost: {
-    color: colors.orange,
-  },
-});

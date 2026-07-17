@@ -1,17 +1,11 @@
-import { colors } from '@/theme/colors';
+import { useThemedStackOptions } from '@/hooks/useThemedStackOptions';
 import { CONSULTA, headerBackDismissToConsulta } from '@/utils/navigationConsulta';
 import { Stack } from 'expo-router';
 
 export default function ConfiguracoesLayout() {
+  const themed = useThemedStackOptions();
   return (
-    <Stack
-      screenOptions={{
-        headerStyle: { backgroundColor: colors.petroleum },
-        headerTintColor: colors.white,
-        headerTitleStyle: { fontWeight: '700' },
-        ...headerBackDismissToConsulta(CONSULTA.configuracoes),
-      }}
-    >
+    <Stack screenOptions={{ ...themed, ...headerBackDismissToConsulta(CONSULTA.configuracoes) }}>
       <Stack.Screen name="index" options={{ title: 'Configurações' }} />
       <Stack.Screen name="perfil-cobranca" options={{ title: 'Dados do beneficiário' }} />
       <Stack.Screen name="nfe" options={{ title: 'Configurar NFS-e' }} />

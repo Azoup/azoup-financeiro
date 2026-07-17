@@ -1,21 +1,10 @@
+import { useThemedStackOptions } from '@/hooks/useThemedStackOptions';
 import { Stack } from 'expo-router';
-import { colors } from '@/theme/colors';
-import { fonts } from '@/theme/typography';
 
 export default function AzoupLayout() {
+  const themed = useThemedStackOptions();
   return (
-    <Stack
-      screenOptions={{
-        headerStyle: { backgroundColor: colors.petroleum },
-        headerTintColor: colors.white,
-        headerTitleStyle: {
-          fontFamily: fonts.bold,
-          fontSize: 17,
-          letterSpacing: -0.2,
-        },
-        headerShadowVisible: false,
-      }}
-    >
+    <Stack screenOptions={themed}>
       <Stack.Screen name="index" options={{ title: 'Azoup - Web' }} />
     </Stack>
   );

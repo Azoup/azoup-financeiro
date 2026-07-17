@@ -88,7 +88,7 @@ export default function LoginScreen() {
             onFocus={() => setFocusField('pass')}
             onBlur={() => setFocusField(null)}
           />
-          <PrimaryButton title="Entrar" onPress={onSubmit} loading={loading} style={styles.btn} />
+          <PrimaryButton title="Entrar" variant="brand" onPress={onSubmit} loading={loading} style={styles.btn} />
           <Pressable onPress={() => router.push('/(auth)/register')}>
             <Text style={styles.link}>Não tem conta? Cadastre-se</Text>
           </Pressable>

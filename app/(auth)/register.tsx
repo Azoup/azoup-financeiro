@@ -75,7 +75,7 @@ export default function RegisterScreen() {
             value={password}
             onChangeText={setPassword}
           />
-          <PrimaryButton title="Cadastrar" onPress={onSubmit} loading={loading} />
+          <PrimaryButton title="Cadastrar" variant="brand" onPress={onSubmit} loading={loading} />
           <Pressable onPress={() => router.push('/(auth)/login')}>
             <Text style={styles.link}>Já tenho conta</Text>
           </Pressable>

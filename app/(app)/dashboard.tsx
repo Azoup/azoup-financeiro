@@ -1,13 +1,15 @@
-import { Card } from '@/components/Card';
+import { HomeStatCardsGrid, type HomeStatCardItem } from '@/components/ui/HomeStatCardsGrid';
 import { useAuth } from '@/context/AuthContext';
+import { useTheme } from '@/context/ThemeContext';
 import { fetchDashboardOverview, type DashboardOverview } from '@/services/dashboardService';
-import { colors, radius, spacing } from '@/theme/colors';
+import { getHomeDashboardLayoutStyles } from '@/styles/homeDashboardLayoutStyles';
 import { fonts } from '@/theme/typography';
 import { formatBRL } from '@/utils/currency';
 import { formatDateTimeBRFromISO } from '@/utils/date';
+import { useResponsiveLayout } from '@/utils/responsiveLayout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -18,78 +20,119 @@ import {
   View,
 } from 'react-native';
 
-function pctBar(recebido: number, total: number): number {
+function pct(part: number, total: number): number {
   if (total <= 0) return 0;
-  return Math.min(100, Math.round((recebido / total) * 100));
+  return Math.min(100, Math.round((part / total) * 100));
 }
 
-function StatTile({
+function ProgressTrack({
   label,
-  value,
-  sub,
-  accent,
-  icon,
+  percent,
+  left,
+  right,
+  color,
+  theme,
 }: {
   label: string;
-  value: string;
-  sub?: string;
-  accent?: string;
-  icon: keyof typeof Ionicons.glyphMap;
+  percent: number;
+  left: string;
+  right: string;
+  color: string;
+  theme: ReturnType<typeof useTheme>['theme'];
 }) {
   return (
-    <View style={styles.statTile}>
-      <View style={[styles.statIconWrap, accent ? { backgroundColor: accent } : null]}>
-        <Ionicons name={icon} size={20} color={colors.petroleum} />
+    <View style={{ gap: 6, marginTop: 8 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: theme.text }}>{label}</Text>
+        <Text style={{ fontFamily: fonts.extrabold, fontSize: 13, color }}>{percent}%</Text>
       </View>
-      <Text style={styles.statTileLabel}>{label}</Text>
-      <Text style={styles.statTileValue} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>
-        {value}
-      </Text>
-      {sub ? <Text style={styles.statTileSub}>{sub}</Text> : null}
+      <View
+        style={{
+          height: 7,
+          borderRadius: 999,
+          backgroundColor: theme.surfaceVariant,
+          overflow: 'hidden',
+        }}
+      >
+        <View style={{ height: '100%', width: `${percent}%`, backgroundColor: color }} />
+      </View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+        <Text style={{ flex: 1, fontSize: 11, color: theme.textMuted }}>{left}</Text>
+        <Text style={{ flex: 1, fontSize: 11, color: theme.textMuted, textAlign: 'right' }}>
+          {right}
+        </Text>
+      </View>
     </View>
   );
 }
 
-function SectionTitle({ title, hint }: { title: string; hint?: string }) {
-  return (
-    <View style={styles.sectionHead}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {hint ? <Text style={styles.sectionHint}>{hint}</Text> : null}
-    </View>
-  );
-}
-
-function QuickLink({
+function Shortcut({
   label,
-  sub,
   icon,
   onPress,
+  theme,
 }: {
   label: string;
-  sub: string;
   icon: keyof typeof Ionicons.glyphMap;
   onPress: () => void;
+  theme: ReturnType<typeof useTheme>['theme'];
 }) {
   return (
     <Pressable
-      style={({ pressed }) => [styles.quickLink, pressed && styles.quickLinkPressed]}
       onPress={onPress}
+      style={({ pressed }) => [
+        {
+          width: '23%',
+          flexGrow: 1,
+          minWidth: 72,
+          maxWidth: 140,
+          alignItems: 'center',
+          gap: 8,
+          paddingVertical: 12,
+          paddingHorizontal: 8,
+          borderRadius: 10,
+          borderWidth: 1,
+          borderColor: theme.border,
+          backgroundColor: theme.surface,
+          opacity: pressed ? 0.85 : 1,
+        },
+      ]}
     >
-      <View style={styles.quickIcon}>
-        <Ionicons name={icon} size={22} color={colors.orange} />
+      <View
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 8,
+          backgroundColor: theme.mode === 'light' ? 'rgba(255,139,23,0.1)' : 'rgba(255,139,23,0.15)',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Ionicons name={icon} size={18} color={theme.primary} />
       </View>
-      <View style={styles.quickBody}>
-        <Text style={styles.quickLabel}>{label}</Text>
-        <Text style={styles.quickSub}>{sub}</Text>
-      </View>
-      <Ionicons name="chevron-forward" size={18} color={colors.gray400} />
+      <Text
+        style={{
+          fontFamily: fonts.semibold,
+          fontSize: 11,
+          textAlign: 'center',
+          color: theme.text,
+          lineHeight: 14,
+        }}
+        numberOfLines={2}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
 
 export default function DashboardScreen() {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const router = useRouter();
+  const { isPhone, isMobile } = useResponsiveLayout();
+  const layout = useMemo(() => getHomeDashboardLayoutStyles(), []);
+
   const [data, setData] = useState<DashboardOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -128,607 +171,338 @@ export default function DashboardScreen() {
 
   const d = data;
 
+  const kpiCards: HomeStatCardItem[] = useMemo(() => {
+    if (!d) return [];
+    return [
+      {
+        id: 'receber',
+        icon: 'wallet-outline',
+        title: 'Total a receber',
+        value: formatBRL(d.totalReceberConsolidado),
+        change: `${d.mensalidades.abertas + d.vendas.vendasAbertas} em aberto`,
+        changeType: 'neutral',
+      },
+      {
+        id: 'recorrencia',
+        icon: 'repeat-outline',
+        title: 'Recorrência',
+        value: formatBRL(d.clientes.somaMensalidadeAtivos),
+        change: `${d.clientes.ativos} ativos`,
+        changeType: 'positive',
+      },
+      {
+        id: 'ticket',
+        icon: 'trending-up-outline',
+        title: 'Ticket médio',
+        value: formatBRL(d.clientes.ticketMedio),
+        change: 'por cliente ativo',
+      },
+      {
+        id: 'taxa',
+        icon: 'checkmark-done-outline',
+        title: 'Taxa vendas',
+        value: `${d.vendas.taxaRecebimentoPct}%`,
+        change: formatBRL(d.vendas.totalRecebido),
+        changeType: d.vendas.taxaRecebimentoPct >= 70 ? 'positive' : 'negative',
+      },
+      {
+        id: 'atrasadas',
+        icon: 'alert-circle-outline',
+        title: 'Mensal. atrasadas',
+        value: String(d.mensalidades.atrasadas),
+        change: d.mensalidades.proximosVencimentos7d
+          ? `${d.mensalidades.proximosVencimentos7d} vencem em 7d`
+          : 'sem vencimento próximo',
+        changeType: d.mensalidades.atrasadas > 0 ? 'negative' : 'neutral',
+      },
+      {
+        id: 'docs',
+        icon: 'document-text-outline',
+        title: 'Documentos',
+        value: String(d.contasReceber.totalDocumentos),
+        change: formatBRL(d.contasReceber.valorTotalDocumentos),
+      },
+      {
+        id: 'vendas',
+        icon: 'cart-outline',
+        title: 'Vendido',
+        value: formatBRL(d.vendas.totalVendido),
+        change: `${d.vendas.parcelasAtrasadas} parc. atrasadas`,
+        changeType: d.vendas.parcelasAtrasadas > 0 ? 'negative' : 'neutral',
+      },
+      {
+        id: 'cancelados',
+        icon: 'people-outline',
+        title: 'Clientes',
+        value: String(d.clientes.ativos),
+        change: `${d.clientes.cancelados} cancelados`,
+      },
+    ];
+  }, [d]);
+
+  const mensRecebidoPct = d
+    ? pct(d.mensalidades.valorRecebido, d.mensalidades.valorPendente + d.mensalidades.valorRecebido)
+    : 0;
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        screen: { flex: 1, backgroundColor: theme.background },
+        title: {
+          fontFamily: fonts.extrabold,
+          fontSize: isPhone ? 20 : 22,
+          letterSpacing: -0.4,
+          color: theme.text,
+        },
+        subtitle: {
+          fontFamily: fonts.regular,
+          fontSize: 12,
+          color: theme.textMuted,
+          marginTop: 2,
+        },
+        updated: {
+          marginTop: 8,
+          fontFamily: fonts.medium,
+          fontSize: 11,
+          color: theme.textMuted,
+        },
+        sectionTitle: {
+          fontFamily: fonts.bold,
+          fontSize: 15,
+          color: theme.text,
+          marginTop: 16,
+          marginBottom: 4,
+        },
+        alertRow: {
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          gap: 10,
+          paddingVertical: 10,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.border,
+        },
+        alertTxt: {
+          flex: 1,
+          fontFamily: fonts.regular,
+          fontSize: 13,
+          lineHeight: 18,
+          color: theme.text,
+        },
+        segRow: { gap: 4, marginBottom: 10 },
+        segLabelRow: {
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          gap: 8,
+        },
+        segNome: { flex: 1, fontFamily: fonts.semibold, fontSize: 12, color: theme.text },
+        segQtd: { fontFamily: fonts.medium, fontSize: 11, color: theme.textMuted },
+        segBarBg: {
+          height: 5,
+          borderRadius: 999,
+          backgroundColor: theme.surfaceVariant,
+          overflow: 'hidden',
+        },
+        loadingBox: { paddingVertical: 48, alignItems: 'center', gap: 12 },
+        errorTxt: { fontFamily: fonts.regular, fontSize: 14, color: theme.textMuted },
+      }),
+    [theme, isPhone],
+  );
+
+  const padStyle = isPhone
+    ? layout.mainAreaHomePhone
+    : isMobile
+      ? layout.mainAreaHomeMobile
+      : layout.mainAreaHome;
+
   return (
     <ScrollView
       style={styles.screen}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[layout.homeScrollContent, padStyle]}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.orange} />
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
       }
     >
-      <View style={styles.hero}>
-        <Text style={styles.brandEyebrow}>AZOUP · FINANCEIRO</Text>
-        <Text style={styles.greeting}>Painel analítico</Text>
-        <Text style={styles.lead}>
-          Visão consolidada de clientes, mensalidades, vendas e contas a receber.
+      <View>
+        <Text style={styles.title}>Visão geral</Text>
+        <Text style={styles.subtitle}>
+          Receita recorrente, cobranças e recebimentos consolidados.
         </Text>
         {d ? (
           <Text style={styles.updated}>
-            Atualizado: {formatDateTimeBRFromISO(d.geradoEm) || 'agora'}
+            Atualizado {formatDateTimeBRFromISO(d.geradoEm) || 'agora'}
           </Text>
         ) : null}
       </View>
 
       {loading && !d ? (
         <View style={styles.loadingBox}>
-          <ActivityIndicator size="large" color={colors.orange} />
-          <Text style={styles.loadingTxt}>Carregando indicadores…</Text>
+          <ActivityIndicator size="large" color={theme.primary} />
         </View>
       ) : null}
 
       {d ? (
         <>
-          <Card style={styles.highlightCard}>
-            <View style={styles.highlightRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.highlightLabel}>Total a receber (consolidado)</Text>
-                <Text style={styles.highlightValue}>{formatBRL(d.totalReceberConsolidado)}</Text>
-                <Text style={styles.highlightSub}>
-                  Mensalidades pendentes {formatBRL(d.mensalidades.valorPendente)} · Vendas pendentes{' '}
-                  {formatBRL(d.vendas.totalPendente)}
-                </Text>
-              </View>
-              <View style={styles.highlightBadge}>
-                <Ionicons name="wallet-outline" size={28} color={colors.orange} />
-              </View>
+          <HomeStatCardsGrid
+            cards={kpiCards}
+            theme={theme}
+            isMobile={isMobile}
+            isPhone={isPhone}
+            style={{ marginTop: 12 }}
+          />
+
+          <View style={[layout.homeBottomRow, isMobile && layout.homeBottomRowMobile]}>
+            <View
+              style={[
+                layout.homeSurfacePanel,
+                isMobile && layout.homeSurfacePanelMobile,
+                { backgroundColor: theme.surface, borderColor: theme.border },
+              ]}
+            >
+              <Text style={[layout.homeSectionTitle, { color: theme.text }]}>Atenção</Text>
+              {d.alertas.map((a, i) => (
+                <View key={`${a.nivel}-${i}`} style={styles.alertRow}>
+                  <Ionicons
+                    name={
+                      a.nivel === 'danger'
+                        ? 'alert-circle'
+                        : a.nivel === 'warning'
+                          ? 'warning'
+                          : 'information-circle'
+                    }
+                    size={16}
+                    color={
+                      a.nivel === 'danger'
+                        ? theme.error
+                        : a.nivel === 'warning'
+                          ? theme.warning
+                          : theme.textMuted
+                    }
+                  />
+                  <Text style={styles.alertTxt}>{a.texto}</Text>
+                </View>
+              ))}
             </View>
-          </Card>
 
-          <SectionTitle title="Alertas" hint="Itens que merecem atenção" />
-          <Card style={styles.alertCard}>
-            {d.alertas.map((a, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.alertRow,
-                  i < d.alertas.length - 1 && styles.alertRowBorder,
-                  a.nivel === 'danger' && styles.alertDanger,
-                  a.nivel === 'warning' && styles.alertWarning,
-                ]}
-              >
-                <Ionicons
-                  name={
-                    a.nivel === 'danger'
-                      ? 'alert-circle'
-                      : a.nivel === 'warning'
-                        ? 'warning'
-                        : 'information-circle'
-                  }
-                  size={18}
-                  color={
-                    a.nivel === 'danger'
-                      ? colors.danger
-                      : a.nivel === 'warning'
-                        ? colors.orangeDark
-                        : colors.petroleum
-                  }
-                />
-                <Text style={styles.alertText}>{a.texto}</Text>
-              </View>
-            ))}
-          </Card>
-
-          <SectionTitle title="Clientes" hint="Cadastro e recorrência (ativos)" />
-          <View style={styles.statGrid}>
-            <Card style={styles.statCardWide}>
-              <StatTile
-                icon="people-outline"
-                label="Ativos"
-                value={String(d.clientes.ativos)}
-                sub={`${d.clientes.cancelados} cancelados · ${d.clientes.total} no cadastro`}
-                accent="rgba(232, 106, 36, 0.12)"
+            <View
+              style={[
+                layout.homeSurfacePanel,
+                isMobile && layout.homeSurfacePanelMobile,
+                { backgroundColor: theme.surface, borderColor: theme.border },
+              ]}
+            >
+              <Text style={[layout.homeSectionTitle, { color: theme.text }]}>Recebimentos</Text>
+              <ProgressTrack
+                label="Mensalidades"
+                percent={mensRecebidoPct}
+                left={`Recebido ${formatBRL(d.mensalidades.valorRecebido)}`}
+                right={`Pendente ${formatBRL(d.mensalidades.valorPendente)}`}
+                color={theme.success}
+                theme={theme}
               />
-            </Card>
-            <Card style={styles.statCardHalf}>
-              <StatTile
-                icon="cash-outline"
-                label="Recorrência mensal"
-                value={formatBRL(d.clientes.somaMensalidadeAtivos)}
-                sub="Soma das mensalidades dos ativos"
+              <ProgressTrack
+                label="Vendas"
+                percent={d.vendas.taxaRecebimentoPct}
+                left={`Recebido ${formatBRL(d.vendas.totalRecebido)}`}
+                right={`Vendido ${formatBRL(d.vendas.totalVendido)}`}
+                color={theme.primary}
+                theme={theme}
               />
-            </Card>
-            <Card style={styles.statCardHalf}>
-              <StatTile
-                icon="stats-chart-outline"
-                label="Ticket médio"
-                value={formatBRL(d.clientes.ticketMedio)}
-                sub="Por cliente ativo"
-              />
-            </Card>
+            </View>
           </View>
 
           {d.clientes.porSegmento.length > 0 ? (
-            <Card style={styles.segCard}>
-              <Text style={styles.segTitle}>Clientes ativos por segmento</Text>
+            <View
+              style={[
+                layout.homeListCard,
+                { backgroundColor: theme.surface, borderColor: theme.border },
+              ]}
+            >
+              <Text style={[layout.homeSectionTitle, { color: theme.text, marginBottom: 10 }]}>
+                Clientes por segmento
+              </Text>
               {d.clientes.porSegmento.map((s) => {
-                const pct = d.clientes.ativos
-                  ? Math.round((s.qtd / d.clientes.ativos) * 100)
-                  : 0;
+                const p = pct(s.qtd, d.clientes.ativos);
                 return (
                   <View key={s.codigo} style={styles.segRow}>
                     <View style={styles.segLabelRow}>
-                      <Text style={styles.segNome}>{s.nome}</Text>
+                      <Text style={styles.segNome} numberOfLines={1}>
+                        {s.nome}
+                      </Text>
                       <Text style={styles.segQtd}>
-                        {s.qtd} ({pct}%)
+                        {s.qtd} · {p}%
                       </Text>
                     </View>
                     <View style={styles.segBarBg}>
-                      <View style={[styles.segBarFill, { width: `${pct}%` }]} />
+                      <View
+                        style={{
+                          height: '100%',
+                          width: `${Math.max(p, 2)}%`,
+                          backgroundColor: theme.primary,
+                        }}
+                      />
                     </View>
                   </View>
                 );
               })}
-            </Card>
+            </View>
           ) : null}
 
-          <SectionTitle title="Mensalidades geradas" hint="Cobranças emitidas pelo módulo Mensalidades" />
-          <View style={styles.statGrid}>
-            <Card style={styles.statCardHalf}>
-              <StatTile
-                icon="time-outline"
-                label="Pendente"
-                value={formatBRL(d.mensalidades.valorPendente)}
-                sub={`${d.mensalidades.abertas} em aberto`}
-              />
-            </Card>
-            <Card style={styles.statCardHalf}>
-              <StatTile
-                icon="checkmark-circle-outline"
-                label="Recebido"
-                value={formatBRL(d.mensalidades.valorRecebido)}
-                sub={`${d.mensalidades.quitadas} quitadas`}
-              />
-            </Card>
-            <Card style={styles.statCardThird}>
-              <StatTile
-                icon="alert-circle-outline"
-                label="Atrasadas"
-                value={String(d.mensalidades.atrasadas)}
-                accent="rgba(198, 40, 40, 0.1)"
-              />
-            </Card>
-            <Card style={styles.statCardThird}>
-              <StatTile
-                icon="calendar-outline"
-                label="Vence em 7 dias"
-                value={String(d.mensalidades.proximosVencimentos7d)}
-              />
-            </Card>
-            <Card style={styles.statCardThird}>
-              <StatTile
-                icon="documents-outline"
-                label="Total geradas"
-                value={String(d.mensalidades.totalGeradas)}
-              />
-            </Card>
-          </View>
-
-          <SectionTitle title="Vendas" hint="Parcelas e recebimentos" />
-          <Card style={styles.progressCard}>
-            <View style={styles.progressHead}>
-              <Text style={styles.progressLabel}>Recebimento sobre o vendido</Text>
-              <Text style={styles.progressPct}>{d.vendas.taxaRecebimentoPct}%</Text>
-            </View>
-            <View style={styles.progressBg}>
-              <View
-                style={[
-                  styles.progressFill,
-                  { width: `${pctBar(d.vendas.totalRecebido, d.vendas.totalVendido)}%` },
-                ]}
-              />
-            </View>
-            <Text style={styles.progressSub}>
-              Recebido {formatBRL(d.vendas.totalRecebido)} de {formatBRL(d.vendas.totalVendido)} vendidos
-            </Text>
-          </Card>
-          <View style={styles.statGrid}>
-            <Card style={styles.statCardHalf}>
-              <StatTile icon="cart-outline" label="Total vendido" value={formatBRL(d.vendas.totalVendido)} />
-            </Card>
-            <Card style={styles.statCardHalf}>
-              <StatTile
-                icon="hourglass-outline"
-                label="Pendente"
-                value={formatBRL(d.vendas.totalPendente)}
-                sub={`${d.vendas.vendasAbertas} vendas abertas`}
-              />
-            </Card>
-            <Card style={styles.statCardThird}>
-              <StatTile
-                icon="warning-outline"
-                label="Parc. atrasadas"
-                value={String(d.vendas.parcelasAtrasadas)}
-              />
-            </Card>
-            <Card style={styles.statCardThird}>
-              <StatTile icon="layers-outline" label="Vendas" value={String(d.vendas.totalVendas)} />
-            </Card>
-            <Card style={styles.statCardThird}>
-              <StatTile
-                icon="close-circle-outline"
-                label="Canceladas"
-                value={String(d.vendas.canceladas)}
-              />
-            </Card>
-          </View>
-
-          <SectionTitle title="Contas a receber" hint="Documentos (carnês) gerados" />
-          <View style={styles.statGrid}>
-            <Card style={styles.statCardWide}>
-              <StatTile
-                icon="document-text-outline"
-                label="Documentos emitidos"
-                value={String(d.contasReceber.totalDocumentos)}
-                sub={`Valor nominal ${formatBRL(d.contasReceber.valorTotalDocumentos)}`}
-              />
-            </Card>
-            <Card style={styles.statCardHalf}>
-              <StatTile
-                icon="receipt-outline"
-                label="Por vendas"
-                value={String(d.contasReceber.origemVenda)}
-              />
-            </Card>
-            <Card style={styles.statCardHalf}>
-              <StatTile
-                icon="repeat-outline"
-                label="Por mensalidades"
-                value={String(d.contasReceber.origemMensalidade)}
-              />
-            </Card>
-          </View>
-
-          <SectionTitle title="Acesso rápido" />
-          <Card style={styles.quickCard}>
-            <QuickLink
-              label="Azoup - Web"
-              sub="MRR, planos e clientes do SaaS"
+          <Text style={styles.sectionTitle}>Acesso rápido</Text>
+          <Text style={styles.subtitle}>Atalhos do dia a dia</Text>
+          <View style={layout.shortcutsGrid}>
+            <Shortcut
+              label="Azoup Web"
               icon="planet-outline"
+              theme={theme}
               onPress={() => router.push('/(app)/azoup')}
             />
-            <QuickLink
+            <Shortcut
               label="Clientes"
-              sub="Lista, filtros e cadastro"
               icon="people-outline"
+              theme={theme}
               onPress={() => router.push('/(app)/clients')}
             />
-            <QuickLink
-              label="Gerar mensalidade"
-              sub="Lote por segmento e vencimento"
+            <Shortcut
+              label="Gerar mensal."
               icon="add-circle-outline"
+              theme={theme}
               onPress={() => router.push('/(app)/mensalidades/gerar')}
             />
-            <QuickLink
-              label="Histórico de mensalidades"
-              sub="Registrar pagamentos"
+            <Shortcut
+              label="Mensalidades"
               icon="calendar-outline"
+              theme={theme}
               onPress={() => router.push('/(app)/mensalidades')}
             />
-            <QuickLink
+            <Shortcut
               label="Vendas"
-              sub="Nova venda e parcelas"
               icon="cart-outline"
+              theme={theme}
               onPress={() => router.push('/(app)/vendas')}
             />
-            <QuickLink
-              label="Contas a receber"
-              sub="Boletos e PDFs"
+            <Shortcut
+              label="A receber"
               icon="cash-outline"
+              theme={theme}
               onPress={() => router.push('/(app)/contas-receber')}
             />
-            <QuickLink
-              label="Configurações"
-              sub="Segmentos e beneficiário"
+            <Shortcut
+              label="NFS-e"
+              icon="receipt-outline"
+              theme={theme}
+              onPress={() => router.push('/(app)/notas-fiscais')}
+            />
+            <Shortcut
+              label="Config"
               icon="settings-outline"
+              theme={theme}
               onPress={() => router.push('/(app)/configuracoes')}
             />
-          </Card>
+          </View>
         </>
       ) : !loading ? (
-        <Card>
-          <Text style={styles.errorTxt}>Não foi possível carregar o painel. Puxe para atualizar.</Text>
-        </Card>
+        <Text style={styles.errorTxt}>Não foi possível carregar o painel. Puxe para atualizar.</Text>
       ) : null}
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.gray50,
-  },
-  content: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xl * 2,
-  },
-  hero: {
-    marginBottom: spacing.lg,
-  },
-  brandEyebrow: {
-    fontFamily: fonts.bold,
-    fontSize: 11,
-    letterSpacing: 2.2,
-    color: colors.orange,
-    marginBottom: spacing.sm,
-  },
-  greeting: {
-    fontFamily: fonts.extrabold,
-    fontSize: 28,
-    letterSpacing: -0.5,
-    color: colors.petroleum,
-  },
-  lead: {
-    marginTop: spacing.sm,
-    fontFamily: fonts.regular,
-    fontSize: 15,
-    color: colors.gray600,
-    lineHeight: 22,
-  },
-  updated: {
-    marginTop: spacing.sm,
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    color: colors.gray400,
-  },
-  loadingBox: {
-    paddingVertical: spacing.xl * 2,
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  loadingTxt: {
-    fontFamily: fonts.regular,
-    color: colors.gray600,
-    fontSize: 14,
-  },
-  highlightCard: {
-    marginBottom: spacing.lg,
-    backgroundColor: colors.petroleum,
-    borderWidth: 0,
-    overflow: 'hidden',
-  },
-  highlightRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  highlightLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.72)',
-  },
-  highlightValue: {
-    marginTop: spacing.xs,
-    fontFamily: fonts.extrabold,
-    fontSize: 30,
-    letterSpacing: -0.6,
-    color: colors.white,
-  },
-  highlightSub: {
-    marginTop: spacing.sm,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.62)',
-    lineHeight: 17,
-  },
-  highlightBadge: {
-    width: 56,
-    height: 56,
-    borderRadius: radius.lg,
-    backgroundColor: colors.orangeSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sectionHead: {
-    marginBottom: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  sectionTitle: {
-    fontFamily: fonts.bold,
-    fontSize: 17,
-    letterSpacing: -0.2,
-    color: colors.petroleum,
-  },
-  sectionHint: {
-    marginTop: 2,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: colors.gray600,
-  },
-  alertCard: {
-    marginBottom: spacing.lg,
-    paddingVertical: spacing.xs,
-  },
-  alertRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
-  },
-  alertRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.gray100,
-  },
-  alertDanger: {
-    backgroundColor: colors.dangerSoft,
-    borderRadius: radius.md,
-  },
-  alertWarning: {
-    backgroundColor: colors.orangeSoft,
-    borderRadius: radius.md,
-  },
-  alertText: {
-    flex: 1,
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    color: colors.gray800,
-    lineHeight: 20,
-  },
-  statGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.md,
-    marginBottom: spacing.md,
-  },
-  statCardWide: {
-    width: '100%',
-  },
-  statCardHalf: {
-    width: '47%',
-    flexGrow: 1,
-    minWidth: 140,
-  },
-  statCardThird: {
-    width: '30%',
-    flexGrow: 1,
-    minWidth: 100,
-  },
-  statTile: {
-    gap: spacing.xs,
-  },
-  statIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.md,
-    backgroundColor: colors.orangeSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.xs,
-  },
-  statTileLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 12,
-    color: colors.gray600,
-  },
-  statTileValue: {
-    fontFamily: fonts.extrabold,
-    fontSize: 20,
-    letterSpacing: -0.3,
-    color: colors.petroleum,
-  },
-  statTileSub: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: colors.gray400,
-    lineHeight: 15,
-  },
-  segCard: {
-    marginBottom: spacing.lg,
-  },
-  segTitle: {
-    fontFamily: fonts.bold,
-    fontSize: 14,
-    color: colors.petroleum,
-    marginBottom: spacing.md,
-  },
-  segRow: {
-    marginBottom: spacing.md,
-  },
-  segLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: spacing.xs,
-  },
-  segNome: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: colors.gray800,
-    flex: 1,
-  },
-  segQtd: {
-    fontSize: 12,
-    color: colors.gray600,
-    fontWeight: '600',
-  },
-  segBarBg: {
-    height: 6,
-    backgroundColor: colors.gray100,
-    borderRadius: radius.full,
-    overflow: 'hidden',
-  },
-  segBarFill: {
-    height: '100%',
-    backgroundColor: colors.orange,
-    borderRadius: radius.full,
-  },
-  progressCard: {
-    marginBottom: spacing.md,
-  },
-  progressHead: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.sm,
-  },
-  progressLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.gray800,
-  },
-  progressPct: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: colors.orange,
-  },
-  progressBg: {
-    height: 10,
-    backgroundColor: colors.gray100,
-    borderRadius: radius.full,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: colors.success,
-    borderRadius: radius.full,
-  },
-  progressSub: {
-    marginTop: spacing.sm,
-    fontSize: 12,
-    color: colors.gray600,
-  },
-  quickCard: {
-    paddingVertical: spacing.xs,
-  },
-  quickLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xs,
-    borderRadius: radius.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.gray100,
-  },
-  quickLinkPressed: {
-    backgroundColor: colors.infoSoft,
-  },
-  quickIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: radius.md,
-    backgroundColor: colors.orangeSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  quickBody: {
-    flex: 1,
-    minWidth: 0,
-  },
-  quickLabel: {
-    fontFamily: fonts.bold,
-    fontSize: 15,
-    color: colors.petroleum,
-  },
-  quickSub: {
-    marginTop: 2,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: colors.gray600,
-  },
-  errorTxt: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    color: colors.gray600,
-  },
-});

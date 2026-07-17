@@ -1,15 +1,18 @@
 import { Card } from '@/components/Card';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
-import { buildAccountExport } from '@/utils/exportReportBuilders';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
-import { colors, radius, spacing } from '@/theme/colors';
+import { useTheme } from '@/context/ThemeContext';
+import { buildAccountExport } from '@/utils/exportReportBuilders';
+import { fonts } from '@/theme/typography';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function AccountScreen() {
   const { user, signOut } = useAuth();
+  const { theme, isDark, toggleTheme } = useTheme();
   const router = useRouter();
 
   const leave = async () => {
@@ -17,87 +20,86 @@ export default function AccountScreen() {
     router.replace('/(auth)/login');
   };
 
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        screen: { flex: 1, backgroundColor: theme.background },
+        content: { padding: 16, gap: 12 },
+        settingsRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          paddingVertical: 4,
+        },
+        settingsBody: { flex: 1, minWidth: 0 },
+        settingsTitle: {
+          fontFamily: fonts.bold,
+          fontSize: 15,
+          color: theme.text,
+        },
+        settingsSub: {
+          marginTop: 3,
+          fontFamily: fonts.regular,
+          fontSize: 12,
+          color: theme.textMuted,
+          lineHeight: 17,
+        },
+        label: {
+          fontFamily: fonts.semibold,
+          fontSize: 12,
+          color: theme.textSecondary,
+          marginBottom: 6,
+        },
+        email: {
+          fontFamily: fonts.semibold,
+          fontSize: 16,
+          color: theme.text,
+          marginBottom: 10,
+        },
+        hint: {
+          fontFamily: fonts.regular,
+          fontSize: 13,
+          color: theme.textMuted,
+          lineHeight: 19,
+          marginBottom: 16,
+        },
+      }),
+    [theme],
+  );
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <ExportReportButtons
-        getReport={() => buildAccountExport(user?.email ?? '—')}
-      />
+      <ExportReportButtons getReport={() => buildAccountExport(user?.email ?? '—')} />
       <Card>
-        <Pressable
-          style={styles.settingsRow}
-          onPress={() => router.push('/(app)/configuracoes')}
-        >
-          <Ionicons name="settings-outline" size={22} color={colors.petroleum} />
+        <Pressable style={styles.settingsRow} onPress={() => router.push('/(app)/configuracoes')}>
+          <Ionicons name="settings-outline" size={20} color={theme.text} />
           <View style={styles.settingsBody}>
             <Text style={styles.settingsTitle}>Configurações</Text>
-            <Text style={styles.settingsSub}>Segmentos de cliente e outras opções.</Text>
+            <Text style={styles.settingsSub}>Segmentos, NFS-e e beneficiário.</Text>
           </View>
-          <Ionicons name="chevron-forward" size={20} color={colors.gray400} />
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
         </Pressable>
       </Card>
 
-      <Card style={styles.cardAccount}>
+      <Card>
+        <Pressable style={styles.settingsRow} onPress={toggleTheme}>
+          <Ionicons name={isDark ? 'sunny-outline' : 'moon-outline'} size={20} color={theme.text} />
+          <View style={styles.settingsBody}>
+            <Text style={styles.settingsTitle}>{isDark ? 'Modo claro' : 'Modo escuro'}</Text>
+            <Text style={styles.settingsSub}>Alterna o tema do sistema (Azoup).</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+        </Pressable>
+      </Card>
+
+      <Card>
         <Text style={styles.label}>E-mail</Text>
         <Text style={styles.email}>{user?.email ?? '—'}</Text>
         <Text style={styles.hint}>
-          Os dados dos clientes ficam protegidos por autenticação e políticas RLS no Supabase.
+          Os dados ficam protegidos por autenticação e políticas RLS no Supabase.
         </Text>
-        <PrimaryButton title="Sair" variant="danger" onPress={leave} style={styles.btn} />
+        <PrimaryButton title="Sair" variant="danger" onPress={leave} />
       </Card>
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.gray50,
-  },
-  content: {
-    padding: spacing.lg,
-  },
-  settingsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  settingsBody: {
-    flex: 1,
-    minWidth: 0,
-  },
-  settingsTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.petroleum,
-  },
-  settingsSub: {
-    marginTop: 4,
-    fontSize: 13,
-    color: colors.gray600,
-    lineHeight: 18,
-  },
-  cardAccount: {
-    marginTop: spacing.md,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.gray600,
-    marginBottom: spacing.sm,
-  },
-  email: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: colors.petroleum,
-    marginBottom: spacing.md,
-  },
-  hint: {
-    fontSize: 14,
-    color: colors.gray600,
-    lineHeight: 21,
-    marginBottom: spacing.lg,
-  },
-  btn: {
-    marginTop: spacing.sm,
-  },
-});

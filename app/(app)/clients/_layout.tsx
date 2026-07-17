@@ -1,19 +1,11 @@
-import { colors } from '@/theme/colors';
+import { useThemedStackOptions } from '@/hooks/useThemedStackOptions';
 import { CONSULTA, headerBackDismissToConsulta } from '@/utils/navigationConsulta';
 import { Stack } from 'expo-router';
 
 export default function ClientsStackLayout() {
+  const themed = useThemedStackOptions();
   return (
-    <Stack
-      screenOptions={{
-        contentStyle: { flex: 1 },
-        headerStyle: { backgroundColor: colors.petroleum },
-        headerTintColor: colors.white,
-        headerTitleStyle: { fontWeight: '700' },
-        headerShadowVisible: false,
-        ...headerBackDismissToConsulta(CONSULTA.clients),
-      }}
-    >
+    <Stack screenOptions={{ ...themed, ...headerBackDismissToConsulta(CONSULTA.clients) }}>
       <Stack.Screen name="index" options={{ title: 'Clientes' }} />
       <Stack.Screen name="new" options={{ title: 'Novo cliente' }} />
       <Stack.Screen name="[id]" options={{ title: 'Detalhes' }} />

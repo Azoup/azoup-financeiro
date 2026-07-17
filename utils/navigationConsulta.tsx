@@ -1,3 +1,4 @@
+import { SidebarMenuButton } from '@/components/navigation/AppSideNav';
 import { colors } from '@/theme/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, type Href } from 'expo-router';
@@ -23,7 +24,7 @@ export function headerBackDismissToConsulta(href: Href) {
   return {
     headerLeft: (props: { canGoBack?: boolean; tintColor?: string }) => {
       if (!props.canGoBack) {
-        return undefined;
+        return <SidebarMenuButton />;
       }
       const tint = props.tintColor ?? colors.white;
       return (
