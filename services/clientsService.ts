@@ -422,22 +422,51 @@ export async function setClienteCancelado(
 export async function deleteCliente(userId: string, clienteId: string): Promise<void> {
   const { data: cur, error: e0 } = await supabase
     .from('clientes')
-    .select('pdf_path')
+    .select('id, pdf_path')
     .eq('id', clienteId)
-    .eq('user_id', userId)
     .maybeSingle();
 
   if (e0) throw new Error(e0.message);
-  const pdfPath = (cur as { pdf_path: string | null } | null)?.pdf_path ?? null;
+  if (!cur) throw new Error('Cliente não encontrado.');
+  const pdfPath = (cur as { pdf_path: string | null }).pdf_path ?? null;
+
+  // Dependências com ON DELETE RESTRICT — remove antes do cliente.
+  // (Clientes são compartilhados: não filtrar por user_id.)
+  const { error: nfErr } = await supabase.from('nota_fiscal').delete().eq('cliente_id', clienteId);
+  if (nfErr) {
+    throw new Error(
+      `Não foi possível remover as NFS-e deste cliente: ${nfErr.message}`,
+    );
+  }
+
+  const { error: vendasErr } = await supabase.from('vendas').delete().eq('cliente_id', clienteId);
+  if (vendasErr) {
+    throw new Error(`Não foi possível remover as vendas deste cliente: ${vendasErr.message}`);
+  }
+
+  const { error: mensErr } = await supabase.from('mensalidades').delete().eq('cliente_id', clienteId);
+  if (mensErr) {
+    throw new Error(
+      `Não foi possível remover as mensalidades deste cliente: ${mensErr.message}`,
+    );
+  }
 
   const { error, count } = await supabase
     .from('clientes')
     .delete({ count: 'exact' })
-    .eq('id', clienteId)
-    .eq('user_id', userId);
+    .eq('id', clienteId);
 
-  if (error) throw new Error(error.message);
-  if (!count) throw new Error('Cliente não encontrado ou sem permissão para excluir.');
+  if (error) {
+    if (/foreign key|violates foreign key|23503/i.test(error.message)) {
+      throw new Error(
+        'Não é possível excluir: ainda há registros vinculados a este cliente (boletos, notas ou vendas). Remova-os antes ou tente novamente.',
+      );
+    }
+    throw new Error(error.message);
+  }
+  if (!count) {
+    throw new Error('Cliente não encontrado ou sem permissão para excluir.');
+  }
 
   if (pdfPath) {
     await removeClientePdf(pdfPath);

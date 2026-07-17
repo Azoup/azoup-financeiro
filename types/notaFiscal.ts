@@ -119,6 +119,12 @@ export type NotaFiscal = {
 
 export type NotaFiscalListRow = NotaFiscal & {
   cliente?: { nome_cliente: string; nome_empresa: string | null } | null;
+  emitente?: {
+    id: string;
+    nome: string;
+    documento: string;
+    razao_social: string;
+  } | null;
 };
 
 export type CancelarNfeResult = {

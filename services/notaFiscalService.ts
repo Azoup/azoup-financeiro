@@ -58,32 +58,73 @@ function wrapNotaFiscalInsertError(msg?: string): Error {
 }
 
 function mapNotaFiscalRow(
-  row: NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null },
+  row: NotaFiscalListRow & {
+    clientes?: { nome_fantasia?: string; nome?: string } | null;
+    nfse_emitente?: {
+      id?: string;
+      nome?: string;
+      documento?: string;
+      razao_social?: string;
+    } | null;
+  },
 ): NotaFiscalListRow {
-  const { clientes, ...rest } = row;
-  return { ...rest, cliente: mapClienteJoinEmbed(clientes) };
+  const { clientes, nfse_emitente, ...rest } = row;
+  const emitente = nfse_emitente?.id
+    ? {
+        id: nfse_emitente.id,
+        nome: nfse_emitente.nome ?? '',
+        documento: nfse_emitente.documento ?? '',
+        razao_social: nfse_emitente.razao_social ?? '',
+      }
+    : null;
+  return { ...rest, cliente: mapClienteJoinEmbed(clientes), emitente };
 }
 
 export async function fetchNotasFiscaisLista(userId: string): Promise<NotaFiscalListRow[]> {
   const withJoin = await supabase
     .from('nota_fiscal')
-    .select('*, clientes(nome_fantasia, nome)')
+    .select('*, clientes(nome_fantasia, nome), nfse_emitente(id, nome, documento, razao_social)')
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
 
   if (withJoin.error) {
+    // Fallback sem join de emitente (migration 037 ainda não rodada)
+    const withCli = await supabase
+      .from('nota_fiscal')
+      .select('*, clientes(nome_fantasia, nome)')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if (!withCli.error && withCli.data) {
+      return (
+        withCli.data as (NotaFiscalListRow & {
+          clientes?: { nome_fantasia?: string; nome?: string } | null;
+        })[]
+      ).map(mapNotaFiscalRow);
+    }
     const plain = await supabase
       .from('nota_fiscal')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
     if (plain.error) throw new Error(plain.error.message);
-    return ((plain.data as NotaFiscalListRow[] | null) ?? []).map((row) => ({ ...row, cliente: null }));
+    return ((plain.data as NotaFiscalListRow[] | null) ?? []).map((row) => ({
+      ...row,
+      cliente: null,
+      emitente: null,
+    }));
   }
 
-  return ((withJoin.data as (NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null })[] | null) ?? []).map(
-    mapNotaFiscalRow,
-  );
+  return (
+    (withJoin.data as (NotaFiscalListRow & {
+      clientes?: { nome_fantasia?: string; nome?: string } | null;
+      nfse_emitente?: {
+        id?: string;
+        nome?: string;
+        documento?: string;
+        razao_social?: string;
+      } | null;
+    })[] | null) ?? []
+  ).map(mapNotaFiscalRow);
 }
 
 export async function fetchUltimaNotaFiscalMensalidade(

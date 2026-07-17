@@ -2,11 +2,17 @@ import { Card } from '@/components/Card';
 import { CancelarNotaFiscalModal } from '@/components/notas-fiscais/CancelarNotaFiscalModal';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
-import { cancelarNotaFiscalSefaz, fetchNotasFiscaisLista, reemitirNotaFiscalSefaz } from '@/services/notaFiscalService';
-import { nfeApiBaseUrl } from '@/services/nfeConfigService';
+import { useDebounce } from '@/hooks/useDebounce';
 import { supabase } from '@/lib/supabase';
+import { nfeApiBaseUrl } from '@/services/nfeConfigService';
+import {
+  cancelarNotaFiscalSefaz,
+  fetchNotasFiscaisLista,
+  reemitirNotaFiscalSefaz,
+} from '@/services/notaFiscalService';
+import { emitenteLabel, ensureEmitentes } from '@/services/nfseEmitenteService';
 import { colors, radius, spacing } from '@/theme/colors';
-import type { NotaFiscalListRow } from '@/types/notaFiscal';
+import type { NfseEmitente, NotaFiscalListRow, NotaFiscalStatus } from '@/types/notaFiscal';
 import { showAppToast } from '@/utils/appToast';
 import { formatBRL } from '@/utils/currency';
 import { buildDanfseHtmlFromNota } from '@/utils/danfseHtml';
@@ -14,29 +20,42 @@ import { formatDateTimeBRFromISO } from '@/utils/date';
 import {
   corNotaFiscalStatus,
   labelAmbienteNfe,
-  labelTipoDocumentoFiscal,
   labelNotaFiscalStatus,
+  labelTipoDocumentoFiscal,
   podeBaixarXmlNfse,
   podeCancelarNotaFiscal,
   podeImprimirDanfe,
   podeReemitirNotaFiscal,
 } from '@/utils/nfeStatus';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import Toast from 'react-native-toast-message';
+
+type StatusFiltro = 'todos' | NotaFiscalStatus;
+
+const STATUS_OPTS: { id: StatusFiltro; label: string }[] = [
+  { id: 'todos', label: 'Todas' },
+  { id: 'autorizada', label: 'Emitidas' },
+  { id: 'rejeitada', label: 'Rejeitadas' },
+  { id: 'cancelada', label: 'Canceladas' },
+  { id: 'processando', label: 'Processando' },
+  { id: 'rascunho', label: 'Rascunho' },
+];
 
 function baixarXmlNoNavegador(xml: string, nomeArquivo: string) {
   const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' });
@@ -51,7 +70,6 @@ function baixarXmlNoNavegador(xml: string, nomeArquivo: string) {
   URL.revokeObjectURL(url);
 }
 
-/** Abre HTML renderizado (evita Storage servir .html como texto puro). */
 function abrirHtmlRenderizado(html: string): boolean {
   if (Platform.OS !== 'web' || typeof window === 'undefined' || typeof document === 'undefined') {
     return false;
@@ -79,6 +97,7 @@ export default function NotasFiscaisIndexScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const [rows, setRows] = useState<NotaFiscalListRow[]>([]);
+  const [emitentes, setEmitentes] = useState<NfseEmitente[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [homologacao] = useState(false);
@@ -87,10 +106,19 @@ export default function NotasFiscaisIndexScreen() {
   const [reemitBusyId, setReemitBusyId] = useState<string | null>(null);
   const [printBusyId, setPrintBusyId] = useState<string | null>(null);
 
+  const [statusFilter, setStatusFilter] = useState<StatusFiltro>('todos');
+  const [emitenteFilter, setEmitenteFilter] = useState<string>('todos');
+  const [clienteSearch, setClienteSearch] = useState('');
+  const debouncedCliente = useDebounce(clienteSearch, 280);
+
   const load = useCallback(async () => {
     if (!user?.id) return;
-    const [list] = await Promise.all([fetchNotasFiscaisLista(user.id)]);
+    const [list, ems] = await Promise.all([
+      fetchNotasFiscaisLista(user.id),
+      ensureEmitentes(user.id).catch(() => [] as NfseEmitente[]),
+    ]);
     setRows(list);
+    setEmitentes(ems);
   }, [user?.id]);
 
   useEffect(() => {
@@ -127,6 +155,55 @@ export default function NotasFiscaisIndexScreen() {
       setRefreshing(false);
     }
   }, [load]);
+
+  const emitenteMap = useMemo(() => {
+    const m = new Map<string, NfseEmitente>();
+    for (const e of emitentes) m.set(e.id, e);
+    return m;
+  }, [emitentes]);
+
+  const filtered = useMemo(() => {
+    const term = debouncedCliente.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (statusFilter !== 'todos' && r.status !== statusFilter) return false;
+      if (emitenteFilter !== 'todos') {
+        const eid = r.emitente_id ?? r.emitente?.id ?? '';
+        if (eid !== emitenteFilter) return false;
+      }
+      if (term) {
+        const nome = r.cliente?.nome_cliente ?? '';
+        const emp = r.cliente?.nome_empresa ?? '';
+        const hay = `${nome} ${emp} ${r.serie}/${r.numero} ${r.codigo_verificacao ?? ''} ${r.chave_acesso ?? ''}`.toLowerCase();
+        if (!hay.includes(term)) return false;
+      }
+      return true;
+    });
+  }, [rows, statusFilter, emitenteFilter, debouncedCliente]);
+
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { todos: rows.length };
+    for (const o of STATUS_OPTS) {
+      if (o.id === 'todos') continue;
+      c[o.id] = rows.filter((r) => r.status === o.id).length;
+    }
+    return c;
+  }, [rows]);
+
+  const temFiltroAtivo =
+    statusFilter !== 'todos' || emitenteFilter !== 'todos' || clienteSearch.trim().length > 0;
+
+  const limparFiltros = () => {
+    setStatusFilter('todos');
+    setEmitenteFilter('todos');
+    setClienteSearch('');
+  };
+
+  const resolveEmitenteLabel = (item: NotaFiscalListRow) => {
+    if (item.emitente) return emitenteLabel(item.emitente);
+    const fromList = item.emitente_id ? emitenteMap.get(item.emitente_id) : null;
+    if (fromList) return emitenteLabel(fromList);
+    return null;
+  };
 
   const imprimirDanfe = async (item: NotaFiscalListRow) => {
     setPrintBusyId(item.id);
@@ -249,6 +326,7 @@ export default function NotasFiscaisIndexScreen() {
   const renderItem = ({ item }: { item: NotaFiscalListRow }) => {
     const st = corNotaFiscalStatus(item.status);
     const cli = item.cliente?.nome_cliente ?? '—';
+    const empLabel = resolveEmitenteLabel(item);
     const podeDanfe = podeImprimirDanfe(item);
     const podeXml = podeBaixarXmlNfse(item);
     const podeCancelar = podeCancelarNotaFiscal(item);
@@ -264,6 +342,11 @@ export default function NotasFiscaisIndexScreen() {
               NFS-e {item.serie}/{item.numero}
             </Text>
             <Text style={styles.cli}>{cli}</Text>
+            {empLabel ? (
+              <Text style={styles.emitente} numberOfLines={1}>
+                Empresa: {empLabel}
+              </Text>
+            ) : null}
             {item.competencia ? <Text style={styles.comp}>Competência: {item.competencia}</Text> : null}
           </View>
           <View style={[styles.badge, { backgroundColor: st.bg }]}>
@@ -332,51 +415,135 @@ export default function NotasFiscaisIndexScreen() {
     );
   };
 
-  const emHomologacao = homologacao;
+  const listHeader = (
+    <View style={styles.topBar}>
+      {homologacao ? (
+        <View style={styles.homologBanner}>
+          <Ionicons name="flask-outline" size={18} color={colors.petroleum} />
+          <Text style={styles.homologTxt}>
+            Ambiente de <Text style={styles.homologStrong}>homologação</Text> — NFS-e de serviço sem valor
+            fiscal.
+          </Text>
+        </View>
+      ) : (
+        <View style={[styles.homologBanner, styles.prodBanner]}>
+          <Ionicons name="shield-checkmark-outline" size={18} color={colors.petroleum} />
+          <Text style={styles.homologTxt}>
+            Ambiente de <Text style={styles.homologStrong}>produção</Text> — NFS-e com valor fiscal.
+          </Text>
+        </View>
+      )}
+
+      <Pressable style={styles.configLink} onPress={() => router.push('/(app)/configuracoes/nfe')}>
+        <Ionicons name="settings-outline" size={16} color={colors.orange} />
+        <Text style={styles.configLinkTxt}>Configurar emissão de NFS-e</Text>
+      </Pressable>
+
+      <Text style={styles.filterTitle}>Status</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chipsRow}
+      >
+        {STATUS_OPTS.map((o) => {
+          const active = statusFilter === o.id;
+          const n = counts[o.id] ?? 0;
+          return (
+            <Pressable
+              key={o.id}
+              onPress={() => setStatusFilter(o.id)}
+              style={[styles.chip, active && styles.chipOn]}
+            >
+              <Text style={[styles.chipTxt, active && styles.chipTxtOn]}>
+                {o.label}
+                {o.id !== 'todos' ? ` (${n})` : ` (${counts.todos})`}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+
+      {emitentes.length > 0 ? (
+        <>
+          <Text style={styles.filterTitle}>Empresa (emitente)</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipsRow}
+          >
+            <Pressable
+              onPress={() => setEmitenteFilter('todos')}
+              style={[styles.chip, emitenteFilter === 'todos' && styles.chipOn]}
+            >
+              <Text style={[styles.chipTxt, emitenteFilter === 'todos' && styles.chipTxtOn]}>
+                Todas
+              </Text>
+            </Pressable>
+            {emitentes.map((e) => {
+              const active = emitenteFilter === e.id;
+              return (
+                <Pressable
+                  key={e.id}
+                  onPress={() => setEmitenteFilter(e.id)}
+                  style={[styles.chip, active && styles.chipOn]}
+                >
+                  <Text style={[styles.chipTxt, active && styles.chipTxtOn]} numberOfLines={1}>
+                    {e.nome?.trim() || e.razao_social?.trim() || 'Emitente'}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </>
+      ) : null}
+
+      <Text style={styles.filterTitle}>Cliente</Text>
+      <View style={styles.searchWrap}>
+        <Ionicons name="search" size={16} color={colors.gray400} />
+        <TextInput
+          style={styles.searchIn}
+          placeholder="Buscar por cliente, nº da nota…"
+          placeholderTextColor={colors.gray400}
+          value={clienteSearch}
+          onChangeText={setClienteSearch}
+        />
+        {clienteSearch ? (
+          <Pressable onPress={() => setClienteSearch('')} hitSlop={8}>
+            <Ionicons name="close-circle" size={16} color={colors.gray400} />
+          </Pressable>
+        ) : null}
+      </View>
+
+      <View style={styles.resultRow}>
+        <Text style={styles.resultTxt}>
+          {filtered.length} de {rows.length} nota{rows.length === 1 ? '' : 's'}
+        </Text>
+        {temFiltroAtivo ? (
+          <Pressable onPress={limparFiltros}>
+            <Text style={styles.clearTxt}>Limpar filtros</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
 
   return (
     <View style={styles.root}>
-      <View style={styles.topBar}>
-        {emHomologacao ? (
-          <View style={styles.homologBanner}>
-            <Ionicons name="flask-outline" size={18} color={colors.petroleum} />
-            <Text style={styles.homologTxt}>
-              Ambiente de <Text style={styles.homologStrong}>homologação</Text> — NFS-e de serviço sem valor fiscal.
-            </Text>
-          </View>
-        ) : (
-          <View style={[styles.homologBanner, styles.prodBanner]}>
-            <Ionicons name="shield-checkmark-outline" size={18} color={colors.petroleum} />
-            <Text style={styles.homologTxt}>
-              Ambiente de <Text style={styles.homologStrong}>produção</Text> — NFS-e com valor fiscal. Notas
-              autorizadas podem ser canceladas abaixo (justificativa mín. 15 caracteres).
-            </Text>
-          </View>
-        )}
-        <Text style={styles.lead}>
-          Notas de serviço emitidas a partir das mensalidades. Use &quot;Cancelar NFS-e&quot; nas autorizadas quando
-          precisar.
-        </Text>
-        <Pressable style={styles.configLink} onPress={() => router.push('/(app)/configuracoes/nfe')}>
-          <Ionicons name="settings-outline" size={16} color={colors.orange} />
-          <Text style={styles.configLinkTxt}>Configurar emissão de NFS-e</Text>
-        </Pressable>
-      </View>
-
       {loading && !rows.length ? (
         <ActivityIndicator color={colors.orange} style={{ marginTop: spacing.xl }} />
       ) : (
         <FlatList
-          data={rows}
+          data={filtered}
           keyExtractor={(r) => r.id}
           renderItem={renderItem}
+          ListHeaderComponent={listHeader}
           contentContainerStyle={styles.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
             <Text style={styles.empty}>
-              Nenhuma NFS-e ainda. Gere com &quot;Gerar mensalidade + NFS-e&quot;, use o botão Emitir NFS-e em
-              Mensalidades/A receber, ou confira se o cliente está marcado como Com NF e se o certificado A1 está em
-              Configurações › NFS-e.
+              {rows.length === 0
+                ? 'Nenhuma NFS-e ainda. Emita a partir de mensalidades, vendas ou Azoup - Web.'
+                : 'Nenhuma nota com os filtros atuais.'}
             </Text>
           }
         />
@@ -395,7 +562,7 @@ export default function NotasFiscaisIndexScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.gray50 },
-  topBar: { padding: spacing.md, paddingBottom: spacing.sm },
+  topBar: { paddingBottom: spacing.sm },
   homologBanner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -413,14 +580,75 @@ const styles = StyleSheet.create({
   },
   homologTxt: { flex: 1, fontSize: 12, color: colors.gray800, lineHeight: 17 },
   homologStrong: { fontWeight: '800', color: colors.petroleum },
-  lead: { fontSize: 13, color: colors.gray600, lineHeight: 18 },
-  configLink: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: spacing.sm },
+  configLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: spacing.md,
+  },
   configLinkTxt: { color: colors.orange, fontWeight: '700', fontSize: 13 },
+  filterTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.gray600,
+    marginBottom: 6,
+    marginTop: 4,
+  },
+  chipsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingBottom: spacing.sm,
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radius.full,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+  },
+  chipOn: {
+    backgroundColor: colors.petroleum,
+    borderColor: colors.petroleum,
+  },
+  chipTxt: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.gray600,
+  },
+  chipTxtOn: { color: colors.white },
+  searchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.white,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.gray100,
+    paddingHorizontal: spacing.sm,
+    minHeight: 40,
+    marginBottom: spacing.sm,
+  },
+  searchIn: {
+    flex: 1,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: colors.petroleum,
+  },
+  resultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  resultTxt: { fontSize: 12, color: colors.gray600, fontWeight: '600' },
+  clearTxt: { fontSize: 12, color: colors.orange, fontWeight: '700' },
   list: { padding: spacing.md, paddingBottom: spacing.xl * 2 },
   card: { marginBottom: spacing.md },
   cardTop: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
   nfNum: { fontSize: 15, fontWeight: '800', color: colors.petroleum },
   cli: { fontSize: 14, fontWeight: '600', color: colors.gray800, marginTop: 2 },
+  emitente: { fontSize: 11, color: colors.gray600, marginTop: 2 },
   comp: { fontSize: 12, color: colors.gray600, marginTop: 2 },
   badge: { paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.sm },
   badgeTxt: { fontSize: 11, fontWeight: '700' },
@@ -432,5 +660,11 @@ const styles = StyleSheet.create({
   date: { fontSize: 11, color: colors.gray400, marginTop: spacing.sm },
   acoes: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md, flexWrap: 'wrap' },
   btnAcao: { flex: 1, minWidth: 140, minHeight: 44 },
-  empty: { textAlign: 'center', color: colors.gray400, marginTop: spacing.xl, lineHeight: 20 },
+  empty: {
+    textAlign: 'center',
+    color: colors.gray400,
+    marginTop: spacing.md,
+    lineHeight: 20,
+    paddingHorizontal: spacing.md,
+  },
 });

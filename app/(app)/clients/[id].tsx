@@ -263,7 +263,7 @@ export default function ClientDetailScreen() {
     if (!user?.id || !id) return;
     const ok = await confirmDestructive(
       'Excluir cliente',
-      'Esta ação não pode ser desfeita. Deseja excluir o cliente e todos os contatos?',
+      'Esta ação não pode ser desfeita. Serão removidos também mensalidades, vendas e NFS-e vinculadas a este cliente. Continuar?',
     );
     if (!ok) return;
     try {
