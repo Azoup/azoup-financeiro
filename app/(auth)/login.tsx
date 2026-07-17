@@ -1,6 +1,7 @@
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
-import { colors, radius, spacing } from '@/theme/colors';
+import { colors, radius, shadows, spacing } from '@/theme/colors';
+import { fonts } from '@/theme/typography';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -21,6 +22,7 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [focusField, setFocusField] = useState<'email' | 'pass' | null>(null);
 
   const onSubmit = async () => {
     if (!email.trim() || !password) {
@@ -43,10 +45,13 @@ export default function LoginScreen() {
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      <View style={styles.bgDecor} pointerEvents="none" />
+      <View style={styles.bgOrb} pointerEvents="none" />
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.hero}>
+          <Text style={styles.brandMark}>AZOUP</Text>
           <Text style={styles.logo}>Sistema Jessica</Text>
-          <Text style={styles.sub}>Gestão de clientes e mensalidades</Text>
+          <Text style={styles.sub}>Gestão financeira, clientes e NFS-e em um só lugar</Text>
         </View>
 
         {!configured ? (
@@ -62,22 +67,26 @@ export default function LoginScreen() {
         <View style={styles.card}>
           <Text style={styles.label}>E-mail</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, focusField === 'email' && styles.inputFocused]}
             autoCapitalize="none"
             keyboardType="email-address"
             placeholder="voce@empresa.com"
             placeholderTextColor={colors.gray400}
             value={email}
             onChangeText={setEmail}
+            onFocus={() => setFocusField('email')}
+            onBlur={() => setFocusField(null)}
           />
           <Text style={styles.label}>Senha</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, focusField === 'pass' && styles.inputFocused]}
             secureTextEntry
             placeholder="••••••••"
             placeholderTextColor={colors.gray400}
             value={password}
             onChangeText={setPassword}
+            onFocus={() => setFocusField('pass')}
+            onBlur={() => setFocusField(null)}
           />
           <PrimaryButton title="Entrar" onPress={onSubmit} loading={loading} style={styles.btn} />
           <Pressable onPress={() => router.push('/(auth)/register')}>
@@ -94,6 +103,19 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.gray50,
   },
+  bgDecor: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.gray50,
+  },
+  bgOrb: {
+    position: 'absolute',
+    top: -80,
+    right: -60,
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    backgroundColor: colors.orangeSoft,
+  },
   scroll: {
     flexGrow: 1,
     padding: spacing.lg,
@@ -102,23 +124,37 @@ const styles = StyleSheet.create({
   hero: {
     marginBottom: spacing.xl,
   },
+  brandMark: {
+    fontFamily: fonts.bold,
+    fontSize: 12,
+    letterSpacing: 3,
+    color: colors.orange,
+    marginBottom: spacing.sm,
+  },
   logo: {
-    fontSize: 28,
-    fontWeight: '800',
+    fontFamily: fonts.extrabold,
+    fontSize: 32,
+    letterSpacing: -0.6,
     color: colors.petroleum,
   },
   sub: {
     marginTop: spacing.sm,
+    fontFamily: fonts.regular,
     fontSize: 15,
+    lineHeight: 22,
     color: colors.gray600,
+    maxWidth: 320,
   },
   banner: {
-    backgroundColor: 'rgba(232, 106, 36, 0.15)',
+    backgroundColor: colors.orangeMuted,
     borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(232, 106, 36, 0.25)',
   },
   bannerText: {
+    fontFamily: fonts.regular,
     color: colors.petroleumDark,
     fontSize: 13,
     lineHeight: 20,
@@ -129,21 +165,27 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.gray100,
+    ...shadows.md,
   },
   label: {
+    fontFamily: fonts.semibold,
     fontSize: 13,
-    fontWeight: '600',
     color: colors.gray600,
     marginBottom: spacing.sm,
   },
   input: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.gray200,
     borderRadius: radius.md,
     padding: spacing.md,
     fontSize: 16,
+    fontFamily: fonts.regular,
     marginBottom: spacing.md,
     color: colors.gray800,
+    backgroundColor: colors.white,
+  },
+  inputFocused: {
+    borderColor: colors.orange,
   },
   btn: {
     marginTop: spacing.sm,
@@ -152,7 +194,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     textAlign: 'center',
     color: colors.orange,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     fontSize: 15,
   },
 });

@@ -1,6 +1,7 @@
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
-import { colors, radius, spacing } from '@/theme/colors';
+import { colors, radius, shadows, spacing } from '@/theme/colors';
+import { fonts } from '@/theme/typography';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -100,19 +101,21 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.gray100,
+    ...shadows.md,
   },
   label: {
+    fontFamily: fonts.semibold,
     fontSize: 13,
-    fontWeight: '600',
     color: colors.gray600,
     marginBottom: spacing.sm,
   },
   input: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.gray200,
     borderRadius: radius.md,
     padding: spacing.md,
     fontSize: 16,
+    fontFamily: fonts.regular,
     marginBottom: spacing.md,
     color: colors.gray800,
   },
@@ -120,7 +123,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     textAlign: 'center',
     color: colors.orange,
-    fontWeight: '600',
+    fontFamily: fonts.semibold,
     fontSize: 15,
   },
 });

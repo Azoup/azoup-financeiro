@@ -2,6 +2,7 @@ import { Card } from '@/components/Card';
 import { useAuth } from '@/context/AuthContext';
 import { fetchDashboardOverview, type DashboardOverview } from '@/services/dashboardService';
 import { colors, radius, spacing } from '@/theme/colors';
+import { fonts } from '@/theme/typography';
 import { formatBRL } from '@/utils/currency';
 import { formatDateTimeBRFromISO } from '@/utils/date';
 import { Ionicons } from '@expo/vector-icons';
@@ -70,7 +71,10 @@ function QuickLink({
   onPress: () => void;
 }) {
   return (
-    <Pressable style={styles.quickLink} onPress={onPress}>
+    <Pressable
+      style={({ pressed }) => [styles.quickLink, pressed && styles.quickLinkPressed]}
+      onPress={onPress}
+    >
       <View style={styles.quickIcon}>
         <Ionicons name={icon} size={22} color={colors.orange} />
       </View>
@@ -133,10 +137,10 @@ export default function DashboardScreen() {
       }
     >
       <View style={styles.hero}>
+        <Text style={styles.brandEyebrow}>AZOUP · FINANCEIRO</Text>
         <Text style={styles.greeting}>Painel analítico</Text>
         <Text style={styles.lead}>
-          Visão consolidada de clientes, mensalidades recorrentes, vendas e contas a receber para apoiar sua
-          cobrança e análise.
+          Visão consolidada de clientes, mensalidades, vendas e contas a receber.
         </Text>
         {d ? (
           <Text style={styles.updated}>
@@ -435,19 +439,29 @@ const styles = StyleSheet.create({
   hero: {
     marginBottom: spacing.lg,
   },
+  brandEyebrow: {
+    fontFamily: fonts.bold,
+    fontSize: 11,
+    letterSpacing: 2.2,
+    color: colors.orange,
+    marginBottom: spacing.sm,
+  },
   greeting: {
-    fontSize: 26,
-    fontWeight: '800',
+    fontFamily: fonts.extrabold,
+    fontSize: 28,
+    letterSpacing: -0.5,
     color: colors.petroleum,
   },
   lead: {
     marginTop: spacing.sm,
+    fontFamily: fonts.regular,
     fontSize: 15,
     color: colors.gray600,
     lineHeight: 22,
   },
   updated: {
     marginTop: spacing.sm,
+    fontFamily: fonts.medium,
     fontSize: 12,
     color: colors.gray400,
   },
@@ -457,6 +471,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   loadingTxt: {
+    fontFamily: fonts.regular,
     color: colors.gray600,
     fontSize: 14,
   },
@@ -464,6 +479,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
     backgroundColor: colors.petroleum,
     borderWidth: 0,
+    overflow: 'hidden',
   },
   highlightRow: {
     flexDirection: 'row',
@@ -471,27 +487,29 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   highlightLabel: {
+    fontFamily: fonts.semibold,
     fontSize: 13,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.75)',
+    color: 'rgba(255,255,255,0.72)',
   },
   highlightValue: {
     marginTop: spacing.xs,
-    fontSize: 28,
-    fontWeight: '800',
+    fontFamily: fonts.extrabold,
+    fontSize: 30,
+    letterSpacing: -0.6,
     color: colors.white,
   },
   highlightSub: {
     marginTop: spacing.sm,
+    fontFamily: fonts.regular,
     fontSize: 12,
-    color: 'rgba(255,255,255,0.65)',
+    color: 'rgba(255,255,255,0.62)',
     lineHeight: 17,
   },
   highlightBadge: {
-    width: 52,
-    height: 52,
+    width: 56,
+    height: 56,
     borderRadius: radius.lg,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: colors.orangeSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -500,12 +518,14 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   sectionTitle: {
+    fontFamily: fonts.bold,
     fontSize: 17,
-    fontWeight: '800',
+    letterSpacing: -0.2,
     color: colors.petroleum,
   },
   sectionHint: {
     marginTop: 2,
+    fontFamily: fonts.regular,
     fontSize: 12,
     color: colors.gray600,
   },
@@ -518,22 +538,23 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: spacing.sm,
     paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xs,
+    paddingHorizontal: spacing.sm,
   },
   alertRowBorder: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.gray100,
   },
   alertDanger: {
-    backgroundColor: 'rgba(198, 40, 40, 0.06)',
+    backgroundColor: colors.dangerSoft,
     borderRadius: radius.md,
   },
   alertWarning: {
-    backgroundColor: 'rgba(232, 106, 36, 0.08)',
+    backgroundColor: colors.orangeSoft,
     borderRadius: radius.md,
   },
   alertText: {
     flex: 1,
+    fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.gray800,
     lineHeight: 20,
@@ -561,25 +582,27 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   statIconWrap: {
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
     borderRadius: radius.md,
-    backgroundColor: colors.gray50,
+    backgroundColor: colors.orangeSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.xs,
   },
   statTileLabel: {
+    fontFamily: fonts.semibold,
     fontSize: 12,
-    fontWeight: '600',
     color: colors.gray600,
   },
   statTileValue: {
+    fontFamily: fonts.extrabold,
     fontSize: 20,
-    fontWeight: '800',
+    letterSpacing: -0.3,
     color: colors.petroleum,
   },
   statTileSub: {
+    fontFamily: fonts.regular,
     fontSize: 11,
     color: colors.gray400,
     lineHeight: 15,
@@ -588,8 +611,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   segTitle: {
+    fontFamily: fonts.bold,
     fontSize: 14,
-    fontWeight: '700',
     color: colors.petroleum,
     marginBottom: spacing.md,
   },
@@ -602,8 +625,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   segNome: {
+    fontFamily: fonts.semibold,
     fontSize: 13,
-    fontWeight: '600',
     color: colors.gray800,
     flex: 1,
   },
@@ -666,14 +689,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.gray100,
   },
+  quickLinkPressed: {
+    backgroundColor: colors.infoSoft,
+  },
   quickIcon: {
-    width: 40,
-    height: 40,
+    width: 42,
+    height: 42,
     borderRadius: radius.md,
-    backgroundColor: 'rgba(232, 106, 36, 0.12)',
+    backgroundColor: colors.orangeSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -682,18 +710,19 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   quickLabel: {
+    fontFamily: fonts.bold,
     fontSize: 15,
-    fontWeight: '700',
     color: colors.petroleum,
   },
   quickSub: {
     marginTop: 2,
+    fontFamily: fonts.regular,
     fontSize: 12,
     color: colors.gray600,
   },
   errorTxt: {
+    fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.gray600,
-    textAlign: 'center',
   },
 });

@@ -1,9 +1,17 @@
-/**
- * POST /api/nfe/artefatos — regenera DANFSe/XML de nota já autorizada (ABRASF).
- */
 const { getAdmin, getUserFromBearer } = require('./_lib/supabaseAdmin');
-const { salvarArtefatosNfseAbrasf } = require('./_lib/nfseDanfseArtifacts');
+const { salvarArtefatosNfseAbrasf, formatEndereco } = require('./_lib/nfseDanfseArtifacts');
 const { itemListaServico } = require('./_lib/nfseAbrasfAmericana');
+const { resolveEmitenteContexto, onlyDigits } = require('./_lib/nfseEmitenteResolve');
+
+function joinEndereco(row) {
+  if (!row) return '—';
+  return formatEndereco({
+    logradouro: row.logradouro,
+    numero: row.numero,
+    bairro: row.bairro,
+    cep: row.cep,
+  });
+}
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -31,14 +39,21 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ success: false, message: 'Só notas autorizadas geram DANFSe/XML.' });
     }
 
-    const [{ data: perfil }, { data: cliente }, { data: config }, { data: itens }] = await Promise.all([
-      admin.from('perfil_cobranca').select('*').eq('user_id', user.id).maybeSingle(),
+    const [{ data: cliente }, { data: itens }, emitCtx] = await Promise.all([
       admin.from('clientes').select('*').eq('id', nota.cliente_id).maybeSingle(),
-      admin.from('nfe_config').select('*').eq('user_id', user.id).maybeSingle(),
       admin.from('nota_fiscal_item').select('*').eq('nota_fiscal_id', notaFiscalId),
+      resolveEmitenteContexto(admin, user.id, nota),
     ]);
 
-    const onlyDigits = (s) => String(s ?? '').replace(/\D/g, '');
+    const { perfil, config, emitente } = emitCtx;
+    const prest = emitente || perfil || {};
+    const itemLista = itemListaServico(config?.codigo_tributacao_nacional || '010701');
+
+    // Número da NFS-e TipLan (protocolo) tem prioridade sobre o RPS (nota.numero)
+    const numeroNfse =
+      onlyDigits(nota.protocolo_autorizacao) ||
+      String(nota.numero ?? '');
+
     const artefatos = await salvarArtefatosNfseAbrasf({
       admin,
       userId: nota.user_id,
@@ -49,21 +64,39 @@ module.exports = async function handler(req, res) {
         `${nota.serie}-${nota.numero}`,
       xmlRaw: nota.xml_autorizado,
       meta: {
-        prestadorNome: perfil?.razao_social || perfil?.nome_fantasia || 'Prestador',
-        prestadorDoc: onlyDigits(perfil?.documento),
-        prestadorIm: onlyDigits(config?.inscricao_municipal),
-        tomadorNome: cliente?.nome_fantasia || cliente?.nome || 'Tomador',
+        prestadorNome: prest.razao_social || 'Prestador',
+        prestadorFantasia: prest.nome || prest.razao_social || '',
+        prestadorDoc: onlyDigits(prest.documento),
+        prestadorIm: onlyDigits(config?.inscricao_municipal || prest.inscricao_municipal),
+        prestadorIe: prest.inscricao_estadual || config?.inscricao_estadual || '',
+        prestadorTel: prest.telefone_suporte || '',
+        prestadorEmail: '',
+        prestadorEndereco: joinEndereco(prest),
+        prestadorMunicipio: (prest.cidade || 'AMERICANA').toUpperCase(),
+        prestadorUf: (prest.uf || 'SP').toUpperCase(),
+        tomadorNome: cliente?.nome || cliente?.nome_fantasia || 'Tomador',
         tomadorDoc: onlyDigits(cliente?.cnpj) || onlyDigits(cliente?.documento),
-        numero: String(nota.numero),
+        tomadorIm: '',
+        tomadorIe: cliente?.inscricao_estadual || '',
+        tomadorTel: cliente?.celular || '',
+        tomadorEmail: cliente?.email || '',
+        tomadorEndereco: joinEndereco(cliente),
+        tomadorMunicipio: (cliente?.cidade || '').toUpperCase(),
+        tomadorUf: (cliente?.estado || cliente?.uf || '').toUpperCase(),
+        numero: numeroNfse,
         serie: String(nota.serie || '1'),
+        rpsNumero: String(nota.numero ?? ''),
+        rpsSerie: String(nota.serie || '1'),
+        rpsDataEmissao: nota.data_emissao,
         codigoVerificacao: nota.codigo_verificacao,
         chaveAcesso: nota.chave_acesso,
         discriminacao:
           itens?.[0]?.descricao || config?.descricao_servico_padrao || 'Prestação de serviços',
         valor: nota.valor_total,
-        itemLista: itemListaServico(config?.codigo_tributacao_nacional || '010701'),
+        itemLista,
         competencia: nota.competencia || '',
-        dataEmissao: String(nota.data_emissao || '').slice(0, 10),
+        dataEmissao: nota.data_emissao || String(nota.data_emissao || '').slice(0, 10),
+        documentoCobranca: String(nota.numero ?? numeroNfse),
       },
     });
 

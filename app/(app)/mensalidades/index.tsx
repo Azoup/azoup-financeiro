@@ -198,16 +198,20 @@ export default function HistoricoMensalidadesGeradasScreen() {
     }
   };
 
-  const emitirNfMensalidade = async (m: MensalidadeGerada) => {
+  const emitirNfMensalidade = async (m: MensalidadeGerada, emitenteId?: string) => {
     if (!user?.id) return;
     setNfBusyId(m.id);
     try {
-      const res = await gerarNotaFiscalParaMensalidade(user.id, {
-        id: m.id,
-        cliente_id: m.cliente_id,
-        valor: m.valor,
-        competencia: m.competencia,
-      });
+      const res = await gerarNotaFiscalParaMensalidade(
+        user.id,
+        {
+          id: m.id,
+          cliente_id: m.cliente_id,
+          valor: m.valor,
+          competencia: m.competencia,
+        },
+        { emitenteId: emitenteId || undefined },
+      );
       if (res.success) {
         showAppSuccess(res.message ?? 'NFS-e emitida com sucesso.', 'Veja em Notas fiscais.');
         router.push('/(app)/notas-fiscais');
@@ -227,20 +231,20 @@ export default function HistoricoMensalidadesGeradasScreen() {
     }
   };
 
-  const emitirNfPosPagamento = async () => {
+  const emitirNfPosPagamento = async (emitenteId?: string) => {
     if (!nfPosPagamento) return;
     setNfEmitindoPosPagamento(true);
     try {
-      await emitirNfMensalidade(nfPosPagamento);
+      await emitirNfMensalidade(nfPosPagamento, emitenteId);
     } finally {
       setNfEmitindoPosPagamento(false);
       setNfPosPagamento(null);
     }
   };
 
-  const executarNfConfirmada = async () => {
+  const executarNfConfirmada = async (emitenteId?: string) => {
     if (!nfConfirmMensalidade) return;
-    await emitirNfMensalidade(nfConfirmMensalidade);
+    await emitirNfMensalidade(nfConfirmMensalidade, emitenteId);
     setNfConfirmMensalidade(null);
   };
 
@@ -456,7 +460,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
         visible={nfPosPagamento != null}
         loading={nfEmitindoPosPagamento}
         onClose={() => setNfPosPagamento(null)}
-        onEmitir={() => void emitirNfPosPagamento()}
+        onEmitir={(emitenteId) => void emitirNfPosPagamento(emitenteId)}
         onDepois={() => setNfPosPagamento(null)}
       />
 
@@ -474,7 +478,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
         botaoSecundario="Cancelar"
         loading={nfBusyId === nfConfirmMensalidade?.id}
         onClose={() => !nfBusyId && setNfConfirmMensalidade(null)}
-        onEmitir={() => void executarNfConfirmada()}
+        onEmitir={(emitenteId) => void executarNfConfirmada(emitenteId)}
         onDepois={() => !nfBusyId && setNfConfirmMensalidade(null)}
       />
     </View>

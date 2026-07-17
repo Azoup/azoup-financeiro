@@ -1,6 +1,7 @@
+import { colors, radius, shadows, spacing } from '@/theme/colors';
+import { fonts } from '@/theme/typography';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import Toast, { type BaseToastProps } from 'react-native-toast-message';
-import { colors, radius, spacing } from '@/theme/colors';
 
 const VISIBILITY_MS = 14000;
 
@@ -27,7 +28,7 @@ function WideToast({ text1, text2, style, borderLeftColor }: BaseToastProps & { 
 export const appToastConfig = {
   success: (props: BaseToastProps) => <WideToast {...props} borderLeftColor={colors.success} />,
   error: (props: BaseToastProps) => <WideToast {...props} borderLeftColor={colors.danger} />,
-  info: (props: BaseToastProps) => <WideToast {...props} borderLeftColor={colors.petroleum} />,
+  info: (props: BaseToastProps) => <WideToast {...props} borderLeftColor={colors.orange} />,
 };
 
 export function showAppToast(
@@ -60,26 +61,23 @@ export function showAppInfo(message: string, subtitle?: string): void {
 
 const toastStyles = StyleSheet.create({
   card: {
-    width: Platform.OS === 'web' ? 'min(560px, 92vw)' : '92%',
+    width: Platform.OS === 'web' ? ('min(560px, 92vw)' as unknown as number) : '92%',
     alignSelf: 'center',
     backgroundColor: colors.white,
-    borderRadius: radius.md,
-    borderLeftWidth: 5,
+    borderRadius: radius.lg,
+    borderLeftWidth: 4,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    ...shadows.md,
   },
   title: {
+    fontFamily: fonts.bold,
     fontSize: 14,
-    fontWeight: '700',
     color: colors.gray800,
     lineHeight: 20,
   },
   body: {
+    fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.gray600,
     lineHeight: 19,

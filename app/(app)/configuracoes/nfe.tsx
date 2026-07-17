@@ -5,20 +5,25 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
 import {
   definirChaveCertificado,
-  ensureNfeConfig,
-  fetchCertificadoAtivo,
   fetchCertificadoChaveConfigurada,
   pickCertificadoFile,
-  uploadCertificadoA1,
-  upsertNfeConfig,
   verificarConvenioMunicipioIbge,
 } from '@/services/nfeConfigService';
-import { fetchPerfilCobranca, upsertPerfilCobranca } from '@/services/perfilCobrancaService';
+import {
+  MAX_NFSE_EMITENTES,
+  createEmitente,
+  deleteEmitente,
+  emitenteLabel,
+  ensureEmitentes,
+  fetchCertificadoAtivoEmitente,
+  setEmitentePadrao,
+  updateEmitente,
+  uploadCertificadoA1Emitente,
+} from '@/services/nfseEmitenteService';
 import { colors, radius, spacing } from '@/theme/colors';
-import type { PerfilCobrancaInput } from '@/types/contasReceber';
-import type { NfeConfig } from '@/types/notaFiscal';
+import type { NfseEmitente } from '@/types/notaFiscal';
 import { showAppToast } from '@/utils/appToast';
-import { avaliarProntidaoNfe } from '@/utils/nfeProntidao';
+import { avaliarProntidaoEmitente } from '@/utils/nfeProntidao';
 import {
   OP_SIMP_NAC_OPCOES,
   REG_ESP_TRIB_OPCOES,
@@ -38,29 +43,65 @@ import {
 } from 'react-native';
 import Toast from 'react-native-toast-message';
 
-function emptyEmitente(): PerfilCobrancaInput {
+type FormState = {
+  nome: string;
+  razao_social: string;
+  documento: string;
+  logradouro: string;
+  numero: string;
+  complemento: string;
+  bairro: string;
+  cidade: string;
+  uf: string;
+  cep: string;
+  serie: string;
+  proximo_numero: string;
+  ibge: string;
+  inscricao_municipal: string;
+  codTribNac: string;
+  codTribMun: string;
+  codNbs: string;
+  descricao: string;
+  opSimpNac: number;
+  regEspTrib: number;
+  tribIssqn: number;
+  tpRetIssqn: number;
+};
+
+function formFromEmitente(e: NfseEmitente): FormState {
   return {
-    razao_social: '',
-    documento: '',
-    logradouro: '',
-    numero: '',
-    complemento: '',
-    bairro: '',
-    cidade: '',
-    uf: '',
-    cep: '',
-    cooperativa_nome: null,
-    codigo_beneficiario_agencia: null,
-    telefone_suporte: null,
-    instrucoes_cobranca: '',
-    local_pagamento: 'PAGÁVEL PREFERENCIALMENTE NOS CANAIS DO SEU BANCO',
-    mensagem_padrao_pagador: null,
+    nome: e.nome || 'Emitente',
+    razao_social: e.razao_social,
+    documento: e.documento,
+    logradouro: e.logradouro,
+    numero: e.numero,
+    complemento: e.complemento,
+    bairro: e.bairro,
+    cidade: e.cidade,
+    uf: e.uf,
+    cep: e.cep,
+    serie: e.serie,
+    proximo_numero: String(e.proximo_numero),
+    ibge: e.codigo_ibge_emitente,
+    inscricao_municipal: e.inscricao_municipal ?? '',
+    codTribNac: e.codigo_tributacao_nacional ?? '010701',
+    codTribMun:
+      e.codigo_tributacao_municipal?.trim() ||
+      (e.codigo_ibge_emitente === '3501608' ? '001' : ''),
+    codNbs: e.codigo_nbs ?? '115013000',
+    descricao: e.descricao_servico_padrao,
+    opSimpNac: Number(e.op_simp_nac ?? 3),
+    regEspTrib: Number(e.reg_esp_trib ?? 0),
+    tribIssqn: Number(e.trib_issqn ?? 1),
+    tpRetIssqn: Number(e.tp_ret_issqn ?? 1),
   };
 }
 
 export default function NfeConfigScreen() {
   const { user } = useAuth();
-  const [config, setConfig] = useState<NfeConfig | null>(null);
+  const [emitentes, setEmitentes] = useState<NfseEmitente[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [form, setForm] = useState<FormState | null>(null);
   const [certOk, setCertOk] = useState(false);
   const [certFileName, setCertFileName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,21 +111,8 @@ export default function NfeConfigScreen() {
     uri: string;
     name: string;
     mimeType?: string;
+    webFile?: File;
   } | null>(null);
-
-  const [emitente, setEmitente] = useState<PerfilCobrancaInput>(emptyEmitente());
-  const [serie, setSerie] = useState('1');
-  const [proximoNumero, setProximoNumero] = useState('1');
-  const [ibge, setIbge] = useState('');
-  const [inscricaoMunicipal, setInscricaoMunicipal] = useState('');
-  const [codTribNac, setCodTribNac] = useState('010701');
-  const [codTribMun, setCodTribMun] = useState('001');
-  const [codNbs, setCodNbs] = useState('115013000');
-  const [descricao, setDescricao] = useState('Serviço de mensalidade');
-  const [opSimpNac, setOpSimpNac] = useState(3);
-  const [regEspTrib, setRegEspTrib] = useState(0);
-  const [tribIssqn, setTribIssqn] = useState(1);
-  const [tpRetIssqn, setTpRetIssqn] = useState(1);
   const [chaveConfigurada, setChaveConfigurada] = useState(false);
   const [chaveSetup, setChaveSetup] = useState('');
   const [busyChave, setBusyChave] = useState(false);
@@ -92,53 +120,35 @@ export default function NfeConfigScreen() {
   const [convenioMsg, setConvenioMsg] = useState<string | null>(null);
   const [busyConvenio, setBusyConvenio] = useState(false);
 
+  const selected = useMemo(
+    () => emitentes.find((e) => e.id === selectedId) ?? null,
+    [emitentes, selectedId],
+  );
+
   const load = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
     try {
-      const [c, perfil, cert, chaveOk] = await Promise.all([
-        ensureNfeConfig(user.id),
-        fetchPerfilCobranca(user.id),
-        fetchCertificadoAtivo(user.id),
+      const [list, chaveOk] = await Promise.all([
+        ensureEmitentes(user.id),
         fetchCertificadoChaveConfigurada().catch(() => false),
       ]);
-      setConfig(c);
-      setSerie(c.serie);
-      setProximoNumero(String(c.proximo_numero));
-      setIbge(c.codigo_ibge_emitente);
-      setInscricaoMunicipal(c.inscricao_municipal ?? '');
-      setCodTribNac(c.codigo_tributacao_nacional ?? '010701');
-      setCodTribMun(
-        c.codigo_tributacao_municipal?.trim() ||
-          (c.codigo_ibge_emitente === '3501608' ? '001' : c.codigo_ibge_emitente === '3550308' ? '' : ''),
-      );
-      setCodNbs(c.codigo_nbs ?? '115013000');
-      setDescricao(c.descricao_servico_padrao);
-      setOpSimpNac(Number(c.op_simp_nac ?? 3));
-      setRegEspTrib(Number(c.reg_esp_trib ?? 0));
-      setTribIssqn(Number(c.trib_issqn ?? 1));
-      setTpRetIssqn(Number(c.tp_ret_issqn ?? 1));
-      setCertOk(Boolean(cert));
+      setEmitentes(list);
       setChaveConfigurada(chaveOk);
-      if (perfil) {
-        setEmitente({
-          razao_social: perfil.razao_social,
-          documento: perfil.documento,
-          logradouro: perfil.logradouro,
-          numero: perfil.numero,
-          complemento: perfil.complemento,
-          bairro: perfil.bairro,
-          cidade: perfil.cidade,
-          uf: perfil.uf,
-          cep: perfil.cep,
-          cooperativa_nome: perfil.cooperativa_nome,
-          codigo_beneficiario_agencia: perfil.codigo_beneficiario_agencia,
-          telefone_suporte: perfil.telefone_suporte,
-          instrucoes_cobranca: perfil.instrucoes_cobranca,
-          local_pagamento: perfil.local_pagamento,
-          mensagem_padrao_pagador: perfil.mensagem_padrao_pagador,
-        });
-      }
+      setSelectedId((prev) => {
+        const pick = list.find((e) => e.id === prev) ?? list.find((e) => e.padrao) ?? list[0] ?? null;
+        if (pick) {
+          setForm(formFromEmitente(pick));
+          void fetchCertificadoAtivoEmitente(user.id, pick.id).then((cert) => setCertOk(Boolean(cert)));
+        } else {
+          setForm(null);
+          setCertOk(false);
+        }
+        return pick?.id ?? null;
+      });
+      setPendingCertFile(null);
+      setSenhaCert('');
+      setCertFileName(null);
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
@@ -148,56 +158,66 @@ export default function NfeConfigScreen() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load inicial
+  }, [user?.id]);
+
+  const selectEmitente = async (id: string) => {
+    if (!user?.id) return;
+    const e = emitentes.find((x) => x.id === id);
+    if (!e) return;
+    setSelectedId(id);
+    setForm(formFromEmitente(e));
+    setPendingCertFile(null);
+    setSenhaCert('');
+    setCertFileName(null);
+    setConvenioOk(null);
+    setConvenioMsg(null);
+    const cert = await fetchCertificadoAtivoEmitente(user.id, id);
+    setCertOk(Boolean(cert));
+  };
 
   const prontidao = useMemo(
     () =>
-      avaliarProntidaoNfe(
-        {
-          razao_social: emitente.razao_social,
-          documento: emitente.documento,
-          logradouro: emitente.logradouro,
-          cidade: emitente.cidade,
-          uf: emitente.uf,
-          cep: emitente.cep,
-        },
-        {
-          codigo_ibge_emitente: ibge,
-          codigo_tributacao_nacional: codTribNac,
-          codigo_nbs: codNbs,
-          descricao_servico_padrao: descricao,
-        },
+      avaliarProntidaoEmitente(
+        form
+          ? {
+              razao_social: form.razao_social,
+              documento: form.documento,
+              logradouro: form.logradouro,
+              cidade: form.cidade,
+              uf: form.uf,
+              cep: form.cep,
+              codigo_ibge_emitente: form.ibge,
+              codigo_tributacao_nacional: form.codTribNac,
+              codigo_nbs: form.codNbs,
+              descricao_servico_padrao: form.descricao,
+            }
+          : null,
         certOk || Boolean(pendingCertFile),
       ),
-    [emitente, ibge, codTribNac, codNbs, descricao, certOk, pendingCertFile],
+    [form, certOk, pendingCertFile],
   );
 
-  const patchEmitente = (p: Partial<PerfilCobrancaInput>) => setEmitente((v) => ({ ...v, ...p }));
+  const patch = (p: Partial<FormState>) => setForm((v) => (v ? { ...v, ...p } : v));
 
   const verificarIbge = async () => {
-    if (!ibge.trim()) {
+    if (!form?.ibge.trim()) {
       showAppToast('error', 'Informe o código IBGE antes de verificar.');
       return;
     }
     setBusyConvenio(true);
     setConvenioMsg(null);
     try {
-      const res = await verificarConvenioMunicipioIbge(ibge);
+      const res = await verificarConvenioMunicipioIbge(form.ibge);
       setConvenioOk(res.ok);
       setConvenioMsg(
         res.ok
           ? `Município ${res.ibge} habilitado no emissor nacional (produção).`
           : res.message ?? 'Município não habilitado no Sistema Nacional NFS-e.',
       );
-      if (res.ok) {
-        showAppToast('success', 'Município habilitado para NFS-e nacional.', `IBGE ${res.ibge}`);
-      } else {
-        showAppToast('error', 'Município não habilitado no emissor nacional.', 'Veja os detalhes na seção Município.');
-      }
     } catch (e) {
       setConvenioOk(false);
       setConvenioMsg((e as Error).message);
-      showAppToast('error', (e as Error).message);
     } finally {
       setBusyConvenio(false);
     }
@@ -209,7 +229,7 @@ export default function NfeConfigScreen() {
       if (!file) return;
       setPendingCertFile(file);
       setCertFileName(file.name);
-      showAppToast('success', 'Certificado selecionado', `${file.name} — informe a senha e clique em Salvar tudo.`);
+      showAppToast('success', 'Certificado selecionado', `${file.name} — informe a senha e Salvar.`);
     } catch (e) {
       showAppToast('error', (e as Error).message);
     }
@@ -221,11 +241,7 @@ export default function NfeConfigScreen() {
       await definirChaveCertificado(chaveSetup);
       setChaveConfigurada(true);
       setChaveSetup('');
-      Toast.show({
-        type: 'success',
-        text1: 'Chave de segurança definida.',
-        text2: 'Agora selecione o .pfx, informe a senha e clique em Salvar tudo.',
-      });
+      Toast.show({ type: 'success', text1: 'Chave de segurança definida.' });
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
@@ -233,99 +249,128 @@ export default function NfeConfigScreen() {
     }
   };
 
-  const salvarTudo = async () => {
+  const adicionarEmitente = async () => {
     if (!user?.id) return;
-    if (!emitente.razao_social.trim() || !emitente.documento.trim()) {
+    if (emitentes.length >= MAX_NFSE_EMITENTES) {
+      Toast.show({ type: 'error', text1: 'Máximo de 2 CNPJs.' });
+      return;
+    }
+    setBusy(true);
+    try {
+      const placeholder = `9${String(Date.now()).slice(-13)}`;
+      const created = await createEmitente(user.id, {
+        nome: `Emitente ${emitentes.length + 1}`,
+        documento: placeholder,
+        razao_social: 'Preencher razão social',
+        padrao: false,
+      });
+      Toast.show({
+        type: 'info',
+        text1: '2º emitente criado',
+        text2: 'Substitua o CNPJ placeholder pelos dados reais, envie o A1 e salve.',
+      });
+      const list = await ensureEmitentes(user.id);
+      setEmitentes(list);
+      setSelectedId(created.id);
+      setForm(formFromEmitente(created));
+      setCertOk(false);
+      setPendingCertFile(null);
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const salvarTudo = async () => {
+    if (!user?.id || !form || !selectedId) return;
+    if (!form.razao_social.trim() || !form.documento.trim()) {
       Toast.show({ type: 'error', text1: 'Preencha razão social e CNPJ/CPF do emitente.' });
       return;
     }
-    if (!ibge.trim()) {
+    if (!form.ibge.trim()) {
       Toast.show({ type: 'error', text1: 'Informe o código IBGE do município.' });
       return;
     }
     if (pendingCertFile && !senhaCert.trim()) {
-      Toast.show({
-        type: 'error',
-        text1: 'Informe a senha do certificado A1.',
-        text2: 'Ela é obrigatória junto com o arquivo .pfx / .p12.',
-      });
+      Toast.show({ type: 'error', text1: 'Informe a senha do certificado A1.' });
       return;
     }
     if (pendingCertFile && !chaveConfigurada) {
-      Toast.show({
-        type: 'error',
-        text1: 'Defina a chave de segurança do certificado antes.',
-        text2: 'Use a seção logo abaixo do prestador (mín. 16 caracteres).',
-      });
+      Toast.show({ type: 'error', text1: 'Defina a chave de segurança do certificado antes.' });
       return;
     }
 
     setBusy(true);
     try {
-      await upsertPerfilCobranca(user.id, {
-        ...emitente,
-        instrucoes_cobranca:
-          emitente.instrucoes_cobranca?.trim() ||
-          'Documento fiscal emitido conforme legislação vigente.',
-        cooperativa_nome: emitente.cooperativa_nome?.trim() || null,
-        codigo_beneficiario_agencia: emitente.codigo_beneficiario_agencia?.trim() || null,
-        telefone_suporte: emitente.telefone_suporte?.trim() || null,
-        mensagem_padrao_pagador: emitente.mensagem_padrao_pagador?.trim() || null,
-      });
-
-      await upsertNfeConfig(user.id, {
-        serie,
-        proximo_numero: Math.max(1, parseInt(proximoNumero, 10) || 1),
-        inscricao_estadual: '',
-        regime_tributario: 1,
-        codigo_ibge_emitente: ibge,
-        inscricao_municipal: inscricaoMunicipal,
-        codigo_tributacao_nacional: codTribNac,
-        codigo_tributacao_municipal: codTribMun,
-        codigo_nbs: codNbs,
-        ncm_servico: '00000000',
-        cfop_padrao: '5933',
-        cst_icms: '102',
-        csosn: '102',
-        descricao_servico_padrao: descricao,
-        natureza_operacao: 'Prestação de serviço',
-        op_simp_nac: Math.min(4, Math.max(1, opSimpNac)) as 1 | 2 | 3 | 4,
-        reg_esp_trib: regEspTrib,
-        trib_issqn: Math.min(4, Math.max(1, tribIssqn)) as 1 | 2 | 3 | 4,
-        tp_ret_issqn: Math.min(3, Math.max(1, tpRetIssqn)) as 1 | 2 | 3,
+      await updateEmitente(user.id, selectedId, {
+        nome: form.nome,
+        razao_social: form.razao_social,
+        documento: form.documento,
+        logradouro: form.logradouro,
+        numero: form.numero,
+        complemento: form.complemento,
+        bairro: form.bairro,
+        cidade: form.cidade,
+        uf: form.uf,
+        cep: form.cep,
+        serie: form.serie,
+        proximo_numero: Math.max(1, parseInt(form.proximo_numero, 10) || 1),
+        codigo_ibge_emitente: form.ibge,
+        inscricao_municipal: form.inscricao_municipal,
+        codigo_tributacao_nacional: form.codTribNac,
+        codigo_tributacao_municipal: form.codTribMun,
+        codigo_nbs: form.codNbs,
+        descricao_servico_padrao: form.descricao,
+        op_simp_nac: Math.min(4, Math.max(1, form.opSimpNac)) as 1 | 2 | 3 | 4,
+        reg_esp_trib: form.regEspTrib,
+        trib_issqn: Math.min(4, Math.max(1, form.tribIssqn)) as 1 | 2 | 3 | 4,
+        tp_ret_issqn: Math.min(3, Math.max(1, form.tpRetIssqn)) as 1 | 2 | 3,
       });
 
       if (pendingCertFile) {
-        try {
-          await uploadCertificadoA1(user.id, pendingCertFile, senhaCert);
-          setPendingCertFile(null);
-          setSenhaCert('');
-          setCertOk(true);
-          Toast.show({
-            type: 'success',
-            text1: 'Configuração e certificado salvos.',
-            text2: prontidao.pronto ? 'Pronto para emitir em produção.' : undefined,
-          });
-        } catch (certErr) {
-          Toast.show({
-            type: 'error',
-            text1: 'Certificado não foi salvo.',
-            text2: (certErr as Error).message,
-          });
-        }
-      } else {
-        Toast.show({
-          type: 'success',
-          text1: 'Configuração de NFS-e salva.',
-          text2: certOk ? 'Pronto para emitir em produção.' : 'Envie o certificado A1 quando for emitir.',
-        });
+        await uploadCertificadoA1Emitente(user.id, selectedId, pendingCertFile, senhaCert);
+        setPendingCertFile(null);
+        setSenhaCert('');
+        setCertOk(true);
       }
 
-      await load();
+      Toast.show({
+        type: 'success',
+        text1: 'Emitente salvo.',
+        text2: prontidao.pronto ? 'Pronto para emitir com este CNPJ.' : undefined,
+      });
+      const list = await ensureEmitentes(user.id);
+      setEmitentes(list);
+      const cur = list.find((e) => e.id === selectedId);
+      if (cur) setForm(formFromEmitente(cur));
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setBusy(false);
+    }
+  };
+
+  const tornarPadrao = async () => {
+    if (!user?.id || !selectedId) return;
+    try {
+      await setEmitentePadrao(user.id, selectedId);
+      Toast.show({ type: 'success', text1: 'Emitente definido como padrão.' });
+      await load();
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    }
+  };
+
+  const excluir = async () => {
+    if (!user?.id || !selectedId) return;
+    try {
+      await deleteEmitente(user.id, selectedId);
+      Toast.show({ type: 'success', text1: 'Emitente removido.' });
+      setSelectedId(null);
+      await load();
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
     }
   };
 
@@ -340,300 +385,260 @@ export default function NfeConfigScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.lead}>
-        Configure a emissão de NFS-e (nota fiscal de serviço) para mensalidades: prestador, certificado A1 e
-        parâmetros do serviço. Ambiente: produção (NFS-e com valor fiscal).
+        Cadastre até 2 CNPJs emitentes. Cada um tem dados fiscais e certificado A1 próprios. Na hora de emitir a
+        NFS-e você escolhe qual CNPJ usar.
       </Text>
 
-      <Card style={[styles.card, prontidao.pronto ? styles.cardOk : styles.cardWarn]}>
-        <Text style={styles.h}>Prontidão para emitir</Text>
-        {prontidao.itens.map((item) => (
-          <View key={item.id} style={styles.checkRow}>
-            <Ionicons
-              name={item.ok ? 'checkmark-circle' : 'ellipse-outline'}
-              size={20}
-              color={item.ok ? colors.success : colors.gray400}
-            />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.checkLabel, item.ok && styles.checkLabelOk]}>{item.label}</Text>
-              {!item.ok && item.hint ? <Text style={styles.checkHint}>{item.hint}</Text> : null}
-            </View>
-          </View>
-        ))}
-        <Text style={styles.prontoResumo}>
-          {prontidao.pronto
-            ? 'Tudo configurado. Pode gerar mensalidade + NFS-e em produção.'
-            : 'Complete os itens pendentes e clique em Salvar tudo.'}
-        </Text>
-      </Card>
-
       <Card style={styles.card}>
-        <Text style={styles.h}>1. Prestador do serviço</Text>
-        <Text style={styles.sub}>Dados da empresa que presta o serviço na NFS-e.</Text>
-        <FormTextInput
-          label="Razão social"
-          value={emitente.razao_social}
-          onChangeText={(t) => patchEmitente({ razao_social: t })}
-        />
-        <FormTextInput
-          label="CNPJ ou CPF"
-          value={emitente.documento}
-          onChangeText={(t) => patchEmitente({ documento: t })}
-        />
-        <FormTextInput label="Logradouro" value={emitente.logradouro} onChangeText={(t) => patchEmitente({ logradouro: t })} />
-        <View style={styles.row2}>
-          <View style={{ flex: 1 }}>
-            <FormTextInput label="Número" value={emitente.numero} onChangeText={(t) => patchEmitente({ numero: t })} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <FormTextInput label="Bairro" value={emitente.bairro} onChangeText={(t) => patchEmitente({ bairro: t })} />
-          </View>
+        <Text style={styles.h}>Emitentes (CNPJs)</Text>
+        <View style={styles.tabs}>
+          {emitentes.map((e) => {
+            const on = e.id === selectedId;
+            return (
+              <Pressable
+                key={e.id}
+                style={[styles.tab, on && styles.tabOn]}
+                onPress={() => void selectEmitente(e.id)}
+              >
+                <Text style={[styles.tabTxt, on && styles.tabTxtOn]} numberOfLines={2}>
+                  {e.nome}
+                  {e.padrao ? ' ★' : ''}
+                </Text>
+                <Text style={[styles.tabSub, on && styles.tabTxtOn]} numberOfLines={1}>
+                  {emitenteLabel(e).split(' · ')[1] || e.documento}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
-        <View style={styles.row2}>
-          <View style={{ flex: 2 }}>
-            <FormTextInput label="Cidade" value={emitente.cidade} onChangeText={(t) => patchEmitente({ cidade: t })} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <FormTextInput
-              label="UF"
-              value={emitente.uf}
-              onChangeText={(t) => patchEmitente({ uf: t })}
-              maxLength={2}
-              autoCapitalize="characters"
-            />
-          </View>
+        <View style={styles.tabActions}>
+          {emitentes.length < MAX_NFSE_EMITENTES ? (
+            <PrimaryButton title="Adicionar 2º CNPJ" variant="secondary" onPress={() => void adicionarEmitente()} />
+          ) : null}
+          {selected && !selected.padrao ? (
+            <PrimaryButton title="Definir como padrão" variant="ghost" onPress={() => void tornarPadrao()} />
+          ) : null}
+          {selected && !selected.padrao && emitentes.length > 1 ? (
+            <PrimaryButton title="Excluir este CNPJ" variant="danger" onPress={() => void excluir()} />
+          ) : null}
         </View>
-        <FormTextInput label="CEP" value={emitente.cep} onChangeText={(t) => patchEmitente({ cep: t })} />
       </Card>
 
-      {!chaveConfigurada ? (
-        <Card style={[styles.card, styles.cardWarn]}>
-          <Text style={styles.h}>Chave de segurança do certificado</Text>
+      {!form || !selectedId ? (
+        <Card style={styles.card}>
           <Text style={styles.sub}>
-            Antes de enviar o .pfx, invente uma senha longa (mín. 16 caracteres) para criptografar a senha do
-            certificado no banco. Guarde essa chave — use a mesma em CERT_ENCRYPTION_KEY na Vercel ao emitir NFS-e.
-            {'\n\n'}
-            Se ainda não rodou: execute no Supabase SQL Editor o arquivo{' '}
-            <Text style={styles.mono}>033_certificado_sem_rpc.sql</Text>.
+            Nenhum emitente encontrado. Rode a migration{' '}
+            <Text style={styles.mono}>037_nfse_emitente.sql</Text> no Supabase e recarregue.
           </Text>
-          <FormTextInput
-            label="Chave de segurança (definir uma vez)"
-            value={chaveSetup}
-            onChangeText={setChaveSetup}
-            secureTextEntry
-            placeholder="Ex.: MinhaEmpresa2026ChaveSecreta!"
-          />
-          <PrimaryButton
-            title="Definir chave"
-            onPress={() => void salvarChaveCertificado()}
-            loading={busyChave}
-            disabled={chaveSetup.trim().length < 16}
-          />
+          <PrimaryButton title="Recarregar" onPress={() => void load()} />
         </Card>
-      ) : null}
+      ) : (
+        <>
+          <Card style={[styles.card, prontidao.pronto ? styles.cardOk : styles.cardWarn]}>
+            <Text style={styles.h}>Prontidão — {form.nome}</Text>
+            {prontidao.itens.map((item) => (
+              <View key={item.id} style={styles.checkRow}>
+                <Ionicons
+                  name={item.ok ? 'checkmark-circle' : 'ellipse-outline'}
+                  size={20}
+                  color={item.ok ? colors.success : colors.gray400}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.checkLabel, item.ok && styles.checkLabelOk]}>{item.label}</Text>
+                  {!item.ok && item.hint ? <Text style={styles.checkHint}>{item.hint}</Text> : null}
+                </View>
+              </View>
+            ))}
+          </Card>
 
-      <Card style={styles.card}>
-        <Text style={styles.h}>2. Certificado digital A1</Text>
-        <Text style={styles.sub}>
-          {certOk
-            ? 'Certificado A1 já está salvo no servidor. Você pode trocar o arquivo abaixo se precisar.'
-            : 'Envie o arquivo .pfx ou .p12 do certificado A1 da empresa.'}
-        </Text>
-        {certOk && !pendingCertFile ? (
-          <View style={styles.certStatusOk}>
-            <Ionicons name="shield-checkmark" size={22} color={colors.success} />
-            <Text style={styles.certStatusOkTxt}>Certificado ativo no servidor</Text>
-          </View>
-        ) : null}
-        {pendingCertFile ? (
-          <View style={styles.certStatusPending}>
-            <Ionicons name="document-attach" size={22} color={colors.petroleum} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.certStatusPendingTitle}>Arquivo selecionado</Text>
-              <Text style={styles.certStatusPendingName} numberOfLines={2}>
-                {certFileName ?? pendingCertFile.name}
-              </Text>
-              <Text style={styles.certStatusPendingHint}>Informe a senha abaixo e clique em Salvar tudo.</Text>
+          <Card style={styles.card}>
+            <Text style={styles.h}>1. Prestador</Text>
+            <FormTextInput label="Nome / rótulo" value={form.nome} onChangeText={(t) => patch({ nome: t })} />
+            <FormTextInput
+              label="Razão social"
+              value={form.razao_social}
+              onChangeText={(t) => patch({ razao_social: t })}
+            />
+            <FormTextInput
+              label="CNPJ ou CPF"
+              value={form.documento}
+              onChangeText={(t) => patch({ documento: t })}
+            />
+            <FormTextInput
+              label="Logradouro"
+              value={form.logradouro}
+              onChangeText={(t) => patch({ logradouro: t })}
+            />
+            <View style={styles.row2}>
+              <View style={{ flex: 1 }}>
+                <FormTextInput label="Número" value={form.numero} onChangeText={(t) => patch({ numero: t })} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <FormTextInput label="Bairro" value={form.bairro} onChangeText={(t) => patch({ bairro: t })} />
+              </View>
             </View>
-            <Pressable
-              accessibilityLabel="Remover arquivo selecionado"
-              onPress={() => {
-                setPendingCertFile(null);
-                setCertFileName(null);
-              }}
-              hitSlop={8}
-            >
-              <Ionicons name="close-circle" size={22} color={colors.gray400} />
+            <View style={styles.row2}>
+              <View style={{ flex: 2 }}>
+                <FormTextInput label="Cidade" value={form.cidade} onChangeText={(t) => patch({ cidade: t })} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <FormTextInput
+                  label="UF"
+                  value={form.uf}
+                  onChangeText={(t) => patch({ uf: t })}
+                  maxLength={2}
+                  autoCapitalize="characters"
+                />
+              </View>
+            </View>
+            <FormTextInput label="CEP" value={form.cep} onChangeText={(t) => patch({ cep: t })} />
+          </Card>
+
+          {!chaveConfigurada ? (
+            <Card style={[styles.card, styles.cardWarn]}>
+              <Text style={styles.h}>Chave de segurança do certificado</Text>
+              <Text style={styles.sub}>
+                Defina uma chave longa (mín. 16 caracteres) uma vez. Rode também{' '}
+                <Text style={styles.mono}>033_certificado_sem_rpc.sql</Text> se ainda não rodou.
+              </Text>
+              <FormTextInput
+                label="Chave de segurança"
+                value={chaveSetup}
+                onChangeText={setChaveSetup}
+                secureTextEntry
+              />
+              <PrimaryButton
+                title="Definir chave"
+                onPress={() => void salvarChaveCertificado()}
+                loading={busyChave}
+                disabled={chaveSetup.trim().length < 16}
+              />
+            </Card>
+          ) : null}
+
+          <Card style={styles.card}>
+            <Text style={styles.h}>2. Certificado A1 deste CNPJ</Text>
+            <Text style={styles.sub}>Cada emitente precisa do próprio .pfx.</Text>
+            {certOk && !pendingCertFile ? (
+              <View style={styles.certStatusOk}>
+                <Ionicons name="shield-checkmark" size={22} color={colors.success} />
+                <Text style={styles.certStatusOkTxt}>Certificado ativo neste emitente</Text>
+              </View>
+            ) : null}
+            {pendingCertFile ? (
+              <View style={styles.certStatusPending}>
+                <Ionicons name="document-attach" size={22} color={colors.petroleum} />
+                <Text style={{ flex: 1 }}>{certFileName ?? pendingCertFile.name}</Text>
+              </View>
+            ) : null}
+            <Pressable style={styles.fileBtn} onPress={() => void escolherCertificado()}>
+              <Ionicons name="folder-open-outline" size={22} color={colors.petroleum} />
+              <Text style={styles.fileBtnTxt}>Selecionar .pfx / .p12</Text>
             </Pressable>
-          </View>
-        ) : null}
-        <Pressable style={styles.fileBtn} onPress={() => void escolherCertificado()}>
-          <Ionicons name="folder-open-outline" size={22} color={colors.petroleum} />
-          <Text style={styles.fileBtnTxt}>
-            {pendingCertFile || certOk ? 'Trocar arquivo .pfx / .p12' : 'Selecionar certificado .pfx / .p12'}
-          </Text>
-        </Pressable>
-        <FormTextInput
-          label="Senha do certificado"
-          value={senhaCert}
-          onChangeText={setSenhaCert}
-          secureTextEntry
-          placeholder="Obrigatória ao enviar novo certificado"
-        />
-        <Text style={styles.certHint}>
-          {chaveConfigurada
-            ? 'Selecione o .pfx, informe a senha do certificado e clique em Salvar tudo.'
-            : 'Defina a chave de segurança acima antes de enviar o certificado.'}
-        </Text>
-      </Card>
+            <FormTextInput
+              label="Senha do certificado"
+              value={senhaCert}
+              onChangeText={setSenhaCert}
+              secureTextEntry
+            />
+          </Card>
 
-      <Card style={styles.card}>
-        <Text style={styles.h}>3. Município e numeração (produção)</Text>
-        <View style={styles.homologBadge}>
-          <Text style={styles.homologBadgeTxt}>Ambiente: produção — NFS-e com valor fiscal</Text>
-        </View>
-        <FormTextInput label="Série do RPS" value={serie} onChangeText={setSerie} />
-        <FormTextInput
-          label="Próximo número do RPS"
-          value={proximoNumero}
-          onChangeText={setProximoNumero}
-          keyboardType="number-pad"
-        />
-        <FormTextInput
-          label="Código IBGE do município"
-          value={ibge}
-          onChangeText={(t) => {
-            setIbge(t);
-            setConvenioOk(null);
-            setConvenioMsg(null);
-          }}
-          keyboardType="number-pad"
-          placeholder="7 dígitos — ex.: 3501608"
-        />
-        <Text style={styles.fieldHint}>
-          Código da cidade do prestador (IBGE, 7 dígitos).
-          {'\n'}
-          • Americana = 3501608 → WebService ABRASF TipLan (nfse.americana.sp.gov.br)
-          {'\n'}
-          • São Paulo capital = 3550308 → Paulistana (somente com CCM da capital)
-          {'\n'}
-          Azoup está em Americana: use 3501608, IM 69842. No ABRASF, o cTribMun antigo 001 é convertido para
-          o subitem 01.07.
-        </Text>
-        <PrimaryButton
-          title={busyConvenio ? 'Verificando município…' : 'Verificar adesão do município'}
-          variant="secondary"
-          onPress={() => void verificarIbge()}
-          loading={busyConvenio}
-          disabled={!ibge.trim() || !certOk}
-        />
-        {!certOk ? (
-          <Text style={styles.fieldHint}>Envie o certificado A1 antes de verificar o município na SEFIN.</Text>
-        ) : null}
-        {convenioMsg ? (
-          <View style={[styles.convenioBox, convenioOk ? styles.convenioOk : styles.convenioWarn]}>
-            <Text style={styles.convenioTxt}>{convenioMsg}</Text>
-          </View>
-        ) : null}
-        <FormTextInput
-          label="Inscrição municipal (IM / CCM)"
-          value={inscricaoMunicipal}
-          onChangeText={setInscricaoMunicipal}
-          placeholder="Americana: IM da prefeitura — ex.: 69842"
-        />
-        <Text style={styles.fieldHint}>
-          Em Americana informe a inscrição municipal do cadastro (ex.: 69842). CCM de São Paulo capital só se o
-          IBGE for 3550308.
-        </Text>
-      </Card>
+          <Card style={styles.card}>
+            <Text style={styles.h}>3. Município e numeração</Text>
+            <FormTextInput label="Série do RPS" value={form.serie} onChangeText={(t) => patch({ serie: t })} />
+            <FormTextInput
+              label="Próximo número do RPS"
+              value={form.proximo_numero}
+              onChangeText={(t) => patch({ proximo_numero: t })}
+              keyboardType="number-pad"
+            />
+            <FormTextInput
+              label="Código IBGE"
+              value={form.ibge}
+              onChangeText={(t) => {
+                patch({ ibge: t });
+                setConvenioOk(null);
+              }}
+              keyboardType="number-pad"
+            />
+            <PrimaryButton
+              title="Verificar adesão do município"
+              variant="secondary"
+              onPress={() => void verificarIbge()}
+              loading={busyConvenio}
+              disabled={!form.ibge.trim()}
+            />
+            {convenioMsg ? (
+              <View style={[styles.convenioBox, convenioOk ? styles.convenioOk : styles.convenioWarn]}>
+                <Text style={styles.convenioTxt}>{convenioMsg}</Text>
+              </View>
+            ) : null}
+            <FormTextInput
+              label="Inscrição municipal"
+              value={form.inscricao_municipal}
+              onChangeText={(t) => patch({ inscricao_municipal: t })}
+            />
+          </Card>
 
-      <Card style={styles.card}>
-        <Text style={styles.h}>4. Regime tributário (prestador)</Text>
-        <Text style={styles.sub}>
-          Deve ser igual ao cadastro da empresa no portal da prefeitura. Erro L327 indica divergência aqui.
-        </Text>
-        <NfseEnumField
-          label="Situação no Simples Nacional (opSimpNac)"
-          hint="Confira em nfse.americana.sp.gov.br › perfil da empresa. ME/EPP costuma ser opção 3."
-          value={opSimpNac}
-          options={OP_SIMP_NAC_OPCOES}
-          onChange={setOpSimpNac}
-        />
-        <NfseEnumField
-          label="Regime especial de tributação (regEspTrib)"
-          value={regEspTrib}
-          options={REG_ESP_TRIB_OPCOES}
-          onChange={setRegEspTrib}
-        />
-        <NfseEnumField
-          label="Tributação do ISSQN (tribISSQN)"
-          value={tribIssqn}
-          options={TRIB_ISSQN_OPCOES}
-          onChange={setTribIssqn}
-        />
-        <NfseEnumField
-          label="Retenção do ISSQN (tpRetISSQN)"
-          value={tpRetIssqn}
-          options={TP_RET_ISSQN_OPCOES}
-          onChange={setTpRetIssqn}
-        />
-      </Card>
+          <Card style={styles.card}>
+            <Text style={styles.h}>4. Regime tributário</Text>
+            <NfseEnumField
+              label="Situação no Simples Nacional"
+              value={form.opSimpNac}
+              options={OP_SIMP_NAC_OPCOES}
+              onChange={(v) => patch({ opSimpNac: v })}
+            />
+            <NfseEnumField
+              label="Regime especial"
+              value={form.regEspTrib}
+              options={REG_ESP_TRIB_OPCOES}
+              onChange={(v) => patch({ regEspTrib: v })}
+            />
+            <NfseEnumField
+              label="Tributação ISSQN"
+              value={form.tribIssqn}
+              options={TRIB_ISSQN_OPCOES}
+              onChange={(v) => patch({ tribIssqn: v })}
+            />
+            <NfseEnumField
+              label="Retenção ISSQN"
+              value={form.tpRetIssqn}
+              options={TP_RET_ISSQN_OPCOES}
+              onChange={(v) => patch({ tpRetIssqn: v })}
+            />
+          </Card>
 
-      <Card style={styles.card}>
-        <Text style={styles.h}>5. Serviço na NFS-e (mensalidade)</Text>
-        <Text style={styles.sub}>
-          NFS-e de serviço não usa NCM nem CFOP (esses campos são de NF-e de produto). Informe o código do serviço
-          conforme a Lista LC 116 e o NBS indicados pelo seu contador.
-        </Text>
-        <FormTextInput
-          label="Código do serviço (LC 116 / cTribNac)"
-          value={codTribNac}
-          onChangeText={setCodTribNac}
-          keyboardType="number-pad"
-          placeholder="6 dígitos — ex.: 010701"
-        />
-        <Text style={styles.fieldHint}>
-          Código nacional do serviço na Lei Complementar 116. Ex.: 010701 = desenvolvimento de programas sob
-          encomenda; 171901 = contabilidade. Confirme com seu contador.
-        </Text>
-        <FormTextInput
-          label="Código de tributação municipal (cTribMun)"
-          value={codTribMun}
-          onChangeText={setCodTribMun}
-          keyboardType="number-pad"
-          placeholder="Americana: até 3 dígitos — ex.: 001"
-          maxLength={5}
-        />
-        <Text style={styles.fieldHint}>
-          Americana: cTribMun até 3 dígitos (ex.: 001). São Paulo capital: código de serviço municipal 4–5 dígitos.
-          Confirme com a contabilidade/prefeitura.
-        </Text>
-        <FormTextInput
-          label="Código NBS (nomenclatura do serviço)"
-          value={codNbs}
-          onChangeText={setCodNbs}
-          keyboardType="number-pad"
-          placeholder="9 dígitos — ex.: 115013000"
-        />
-        <Text style={styles.fieldHint}>
-          Nomenclatura Brasileira de Serviços (NBS), vinculada ao tipo de serviço. Também deve ser validada com a
-          contabilidade.
-        </Text>
-        <FormTextInput
-          label="Descrição do serviço (texto na nota)"
-          value={descricao}
-          onChangeText={setDescricao}
-          placeholder="Ex.: Mensalidade de assessoria contábil — competência"
-        />
-        <Text style={styles.fieldHint}>
-          Texto que aparece na NFS-e descrevendo o que foi prestado. A competência da mensalidade é acrescentada
-          automaticamente na emissão.
-        </Text>
-      </Card>
+          <Card style={styles.card}>
+            <Text style={styles.h}>5. Serviço</Text>
+            <FormTextInput
+              label="Código LC 116 (cTribNac)"
+              value={form.codTribNac}
+              onChangeText={(t) => patch({ codTribNac: t })}
+              keyboardType="number-pad"
+            />
+            <FormTextInput
+              label="Código municipal (cTribMun)"
+              value={form.codTribMun}
+              onChangeText={(t) => patch({ codTribMun: t })}
+              keyboardType="number-pad"
+              maxLength={5}
+            />
+            <FormTextInput
+              label="NBS"
+              value={form.codNbs}
+              onChangeText={(t) => patch({ codNbs: t })}
+              keyboardType="number-pad"
+            />
+            <FormTextInput
+              label="Descrição do serviço"
+              value={form.descricao}
+              onChangeText={(t) => patch({ descricao: t })}
+            />
+          </Card>
 
-      <PrimaryButton title="Salvar tudo" onPress={() => void salvarTudo()} loading={busy} />
-      {config ? (
-        <Text style={styles.footer}>Última atualização fiscal: {new Date(config.updated_at).toLocaleString('pt-BR')}</Text>
-      ) : null}
+          <PrimaryButton title="Salvar este emitente" onPress={() => void salvarTudo()} loading={busy} />
+        </>
+      )}
     </ScrollView>
   );
 }
@@ -648,16 +653,25 @@ const styles = StyleSheet.create({
   cardWarn: { borderColor: colors.orange, borderWidth: 1 },
   h: { fontSize: 16, fontWeight: '800', color: colors.petroleum, marginBottom: spacing.xs },
   sub: { fontSize: 12, color: colors.gray600, marginBottom: spacing.md, lineHeight: 17 },
+  tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.sm },
+  tab: {
+    flexGrow: 1,
+    minWidth: '45%',
+    borderWidth: 1,
+    borderColor: colors.gray200,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    backgroundColor: colors.white,
+  },
+  tabOn: { borderColor: colors.orange, backgroundColor: 'rgba(232, 106, 36, 0.08)' },
+  tabTxt: { fontSize: 14, fontWeight: '700', color: colors.petroleum },
+  tabTxtOn: { color: colors.petroleum },
+  tabSub: { fontSize: 11, color: colors.gray600, marginTop: 2 },
+  tabActions: { gap: spacing.sm, marginTop: spacing.sm },
   checkRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start', marginBottom: spacing.sm },
   checkLabel: { fontSize: 13, color: colors.gray800, lineHeight: 18 },
   checkLabelOk: { color: colors.gray600 },
   checkHint: { fontSize: 11, color: colors.gray600, marginTop: 2 },
-  prontoResumo: {
-    marginTop: spacing.sm,
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.petroleum,
-  },
   row2: { flexDirection: 'row', gap: spacing.sm },
   fileBtn: {
     flexDirection: 'row',
@@ -685,44 +699,14 @@ const styles = StyleSheet.create({
   certStatusOkTxt: { fontSize: 14, fontWeight: '700', color: colors.success, flex: 1 },
   certStatusPending: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: spacing.sm,
     backgroundColor: '#e3f2fd',
     borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: '#90caf9',
   },
-  certStatusPendingTitle: { fontSize: 12, fontWeight: '800', color: colors.petroleum, marginBottom: 2 },
-  certStatusPendingName: { fontSize: 14, fontWeight: '700', color: colors.gray800 },
-  certStatusPendingHint: { fontSize: 11, color: colors.gray600, marginTop: 4, lineHeight: 15 },
-  certHint: { fontSize: 11, color: colors.gray600, lineHeight: 16, marginTop: -spacing.sm },
   mono: { fontFamily: Platform.OS === 'web' ? 'monospace' : undefined, fontSize: 11 },
-  ambiente: {
-    fontSize: 12,
-    color: colors.petroleum,
-    fontWeight: '600',
-    marginTop: -spacing.sm,
-    marginBottom: spacing.md,
-  },
-  homologBadge: {
-    backgroundColor: '#fff8e1',
-    borderRadius: radius.sm,
-    padding: spacing.sm,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: '#ffe082',
-  },
-  homologBadgeTxt: { fontSize: 12, color: colors.gray800, fontWeight: '600' },
-  fieldHint: {
-    fontSize: 11,
-    color: colors.gray600,
-    lineHeight: 16,
-    marginTop: -spacing.sm,
-    marginBottom: spacing.md,
-  },
-  boldHint: { fontWeight: '700', color: colors.gray800 },
   convenioBox: {
     borderRadius: radius.md,
     padding: spacing.md,
@@ -732,5 +716,4 @@ const styles = StyleSheet.create({
   convenioOk: { backgroundColor: '#e8f5e9', borderColor: '#a5d6a7' },
   convenioWarn: { backgroundColor: '#fff3e0', borderColor: '#ffcc80' },
   convenioTxt: { fontSize: 12, color: colors.gray800, lineHeight: 17 },
-  footer: { fontSize: 11, color: colors.gray400, marginTop: spacing.sm, textAlign: 'center' },
 });

@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { fetchNfeProntidao } from '@/utils/nfeProntidao';
 import { buildConfiguracoesExport } from '@/utils/exportReportBuilders';
 import { colors, radius, spacing } from '@/theme/colors';
+import { fonts } from '@/theme/typography';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -120,6 +121,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl * 2,
   },
   lead: {
+    fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.gray600,
     lineHeight: 21,
@@ -131,37 +133,40 @@ const styles = StyleSheet.create({
     backgroundColor: colors.petroleum,
     borderRadius: radius.lg,
     alignItems: 'flex-start',
+    borderWidth: 0,
   },
   nfeHeroIcon: {
     width: 48,
     height: 48,
     borderRadius: radius.md,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: colors.orangeSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.sm,
   },
   nfeHeroTitle: {
+    fontFamily: fonts.extrabold,
     fontSize: 18,
-    fontWeight: '800',
+    letterSpacing: -0.2,
     color: colors.white,
     marginBottom: spacing.xs,
   },
   nfeHeroSub: {
+    fontFamily: fonts.regular,
     fontSize: 13,
     color: 'rgba(255,255,255,0.88)',
     lineHeight: 19,
     marginBottom: spacing.sm,
   },
   nfeHeroOk: {
+    fontFamily: fonts.bold,
     fontSize: 12,
-    fontWeight: '700',
     color: '#a5d6a7',
     marginBottom: spacing.sm,
   },
   nfeHeroPending: {
+    fontFamily: fonts.bold,
     fontSize: 12,
-    fontWeight: '700',
     color: colors.orangeLight,
     marginBottom: spacing.sm,
   },
@@ -173,6 +178,7 @@ const styles = StyleSheet.create({
     padding: 0,
     overflow: 'hidden',
     borderRadius: radius.lg,
+    marginBottom: spacing.sm,
   },
   row: {
     flexDirection: 'row',
@@ -184,7 +190,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: radius.md,
-    backgroundColor: 'rgba(232, 106, 36, 0.12)',
+    backgroundColor: colors.orangeSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -193,12 +199,13 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   rowTitle: {
+    fontFamily: fonts.bold,
     fontSize: 16,
-    fontWeight: '700',
     color: colors.petroleum,
   },
   rowSub: {
     marginTop: 4,
+    fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.gray600,
     lineHeight: 18,

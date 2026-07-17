@@ -1,14 +1,18 @@
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { useAuth } from '@/context/AuthContext';
+import { emitenteLabel, ensureEmitentes } from '@/services/nfseEmitenteService';
 import { colors, radius, spacing } from '@/theme/colors';
+import type { NfseEmitente } from '@/types/notaFiscal';
 import { Ionicons } from '@expo/vector-icons';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 type Props = {
   visible: boolean;
   loading?: boolean;
   onClose: () => void;
   onSomenteMensalidade: () => void;
-  onMensalidadeComNf: () => void;
+  onMensalidadeComNf: (emitenteId: string) => void;
 };
 
 export function EnviarMensalidadeModal({
@@ -18,6 +22,35 @@ export function EnviarMensalidadeModal({
   onSomenteMensalidade,
   onMensalidadeComNf,
 }: Props) {
+  const { user } = useAuth();
+  const [emitentes, setEmitentes] = useState<NfseEmitente[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [loadingEmit, setLoadingEmit] = useState(false);
+
+  useEffect(() => {
+    if (!visible || !user?.id) return;
+    let cancelled = false;
+    setLoadingEmit(true);
+    void ensureEmitentes(user.id)
+      .then((list) => {
+        if (cancelled) return;
+        setEmitentes(list);
+        setSelectedId((list.find((e) => e.padrao) ?? list[0])?.id ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEmitentes([]);
+          setSelectedId(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingEmit(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, user?.id]);
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.bg} onPress={onClose}>
@@ -28,17 +61,42 @@ export function EnviarMensalidadeModal({
             NF no cadastro).
           </Text>
 
+          {loadingEmit ? (
+            <ActivityIndicator color={colors.orange} />
+          ) : emitentes.length > 1 ? (
+            <View style={styles.emitBox}>
+              <Text style={styles.emitLabel}>CNPJ da NFS-e (lote)</Text>
+              {emitentes.map((e) => {
+                const selected = e.id === selectedId;
+                return (
+                  <Pressable
+                    key={e.id}
+                    style={[styles.emitOpt, selected && styles.emitOptOn]}
+                    onPress={() => setSelectedId(e.id)}
+                  >
+                    <Ionicons
+                      name={selected ? 'radio-button-on' : 'radio-button-off'}
+                      size={20}
+                      color={selected ? colors.orange : colors.gray400}
+                    />
+                    <Text style={styles.emitOptTxt}>{emitenteLabel(e)}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
+
           <Pressable
             style={[styles.option, styles.optionPrimary]}
-            onPress={onMensalidadeComNf}
-            disabled={loading}
+            onPress={() => onMensalidadeComNf(selectedId || emitentes[0]?.id || '')}
+            disabled={loading || loadingEmit}
           >
             <Ionicons name="document-text" size={22} color={colors.white} />
             <View style={styles.optionBody}>
               <Text style={styles.optionTitleLight}>Gerar mensalidade + NFS-e</Text>
               <Text style={styles.optionSubLight}>
                 Mensalidade, carnê em A receber e nota fiscal de serviço (produção). Cliente precisa estar com
-                &quot;Com NF&quot; no cadastro e certificado A1 configurado.
+                &quot;Com NF&quot; no cadastro e certificado A1 do CNPJ escolhido.
               </Text>
             </View>
           </Pressable>
@@ -73,6 +131,22 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 18, fontWeight: '800', color: colors.petroleum },
   hint: { fontSize: 13, color: colors.gray600, lineHeight: 18 },
+  emitBox: { gap: spacing.sm },
+  emitLabel: { fontSize: 13, fontWeight: '700', color: colors.petroleum },
+  emitOpt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+  },
+  emitOptOn: {
+    borderColor: colors.orange,
+    backgroundColor: 'rgba(232, 106, 36, 0.06)',
+  },
+  emitOptTxt: { flex: 1, fontSize: 13, color: colors.gray800, fontWeight: '600' },
   option: {
     flexDirection: 'row',
     alignItems: 'flex-start',

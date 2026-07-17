@@ -1,8 +1,9 @@
 import { useAuth } from '@/context/AuthContext';
-import { colors, radius, spacing } from '@/theme/colors';
+import { colors, shadows } from '@/theme/colors';
+import { fonts } from '@/theme/typography';
 import { Ionicons } from '@expo/vector-icons';
 import { Redirect, Tabs } from 'expo-router';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 
 export default function AppLayout() {
   const { user, loading } = useAuth();
@@ -24,16 +25,31 @@ export default function AppLayout() {
       screenOptions={{
         tabBarActiveTintColor: colors.orange,
         tabBarInactiveTintColor: colors.gray400,
+        tabBarLabelStyle: {
+          fontFamily: fonts.medium,
+          fontSize: 11,
+          marginTop: 2,
+        },
         tabBarStyle: {
           backgroundColor: colors.white,
           borderTopColor: colors.gray100,
-          height: 60,
-          paddingBottom: 8,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          height: Platform.OS === 'ios' ? 84 : 64,
+          paddingBottom: Platform.OS === 'ios' ? 22 : 10,
           paddingTop: 8,
+          ...shadows.sm,
         },
-        headerStyle: { backgroundColor: colors.petroleum },
+        headerStyle: {
+          backgroundColor: colors.petroleum,
+          ...shadows.sm,
+        },
+        headerShadowVisible: false,
         headerTintColor: colors.white,
-        headerTitleStyle: { fontWeight: '700' },
+        headerTitleStyle: {
+          fontFamily: fonts.bold,
+          fontSize: 17,
+          letterSpacing: -0.2,
+        },
       }}
     >
       <Tabs.Screen
@@ -42,8 +58,8 @@ export default function AppLayout() {
           title: 'Início',
           tabBarLabel: 'Início',
           headerTitle: 'Painel',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home-outline" color={color} size={size} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'home' : 'home-outline'} color={color} size={size} />
           ),
         }}
       />
@@ -52,8 +68,8 @@ export default function AppLayout() {
         options={{
           title: 'Clientes',
           headerShown: false,
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="people-outline" color={color} size={size} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'people' : 'people-outline'} color={color} size={size} />
           ),
         }}
       />
@@ -62,8 +78,8 @@ export default function AppLayout() {
         options={{
           title: 'Mensalidades',
           headerShown: false,
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="receipt-outline" color={color} size={size} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'receipt' : 'receipt-outline'} color={color} size={size} />
           ),
         }}
       />
@@ -72,8 +88,8 @@ export default function AppLayout() {
         options={{
           title: 'Vendas',
           headerShown: false,
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="cart-outline" color={color} size={size} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'cart' : 'cart-outline'} color={color} size={size} />
           ),
         }}
       />
@@ -83,8 +99,8 @@ export default function AppLayout() {
           title: 'A receber',
           headerShown: false,
           tabBarLabel: 'A receber',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="cash-outline" color={color} size={size} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'cash' : 'cash-outline'} color={color} size={size} />
           ),
         }}
       />
@@ -94,8 +110,12 @@ export default function AppLayout() {
           title: 'Notas fiscais',
           headerShown: false,
           tabBarLabel: 'NFS-e',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="document-text-outline" color={color} size={size} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons
+              name={focused ? 'document-text' : 'document-text-outline'}
+              color={color}
+              size={size}
+            />
           ),
         }}
       />
@@ -105,8 +125,12 @@ export default function AppLayout() {
           title: 'Conta',
           tabBarLabel: 'Conta',
           headerTitle: 'Minha conta',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person-circle-outline" color={color} size={size} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons
+              name={focused ? 'person-circle' : 'person-circle-outline'}
+              color={color}
+              size={size}
+            />
           ),
         }}
       />

@@ -255,6 +255,7 @@ export async function uploadCertificadoA1(
   userId: string,
   file: CertificadoFilePick,
   senha: string,
+  emitenteId?: string | null,
 ): Promise<void> {
   if (!senha.trim()) throw new Error('Informe a senha do certificado A1.');
 
@@ -271,16 +272,27 @@ export async function uploadCertificadoA1(
   });
   if (upErr) throw new Error(upErr.message);
 
-  const { error: offErr } = await supabase
+  let offQ = supabase
     .from('empresa_certificado')
     .update({ ativo: false })
     .eq('user_id', userId)
     .eq('ativo', true);
+  if (emitenteId) {
+    offQ = offQ.eq('emitente_id', emitenteId);
+  }
+  const { error: offErr } = await offQ;
   if (offErr) throw new Error(offErr.message);
+
+  const insertRow: Record<string, unknown> = {
+    user_id: userId,
+    storage_path: path,
+    ativo: true,
+  };
+  if (emitenteId) insertRow.emitente_id = emitenteId;
 
   const { data: cert, error: insErr } = await supabase
     .from('empresa_certificado')
-    .insert({ user_id: userId, storage_path: path, ativo: true })
+    .insert(insertRow)
     .select('id')
     .single();
   if (insErr || !cert) {

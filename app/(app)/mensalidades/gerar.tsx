@@ -16,6 +16,7 @@ import {
   fetchUltimoVencimentoMensalidadePorCliente,
 } from '@/services/mensalidadeGeradaService';
 import { sincronizarCarnesMensalidadesFaltantes } from '@/services/boletoParcelaService';
+import { fetchCertificadoAtivoEmitente, ensureEmitentes } from '@/services/nfseEmitenteService';
 import { fetchCertificadoAtivo } from '@/services/nfeConfigService';
 import { fetchSegmentosCliente } from '@/services/segmentoClienteService';
 import { colors, radius, spacing } from '@/theme/colors';
@@ -233,7 +234,7 @@ export default function GerarMensalidadeScreen() {
     }
   };
 
-  const executarEnvio = async (gerarNotaFiscal: boolean) => {
+  const executarEnvio = async (gerarNotaFiscal: boolean, emitenteId?: string) => {
     if (!user?.id) return;
     const ids = targetIds;
     if (!ids.length) {
@@ -258,12 +259,16 @@ export default function GerarMensalidadeScreen() {
         return;
       }
       try {
-        const cert = await fetchCertificadoAtivo(user.id);
+        const emitentes = await ensureEmitentes(user.id);
+        const eid = emitenteId || emitentes.find((e) => e.padrao)?.id || emitentes[0]?.id;
+        const cert = eid
+          ? await fetchCertificadoAtivoEmitente(user.id, eid)
+          : await fetchCertificadoAtivo(user.id);
         if (!cert) {
           Toast.show({
             type: 'error',
             text1: 'Certificado A1 não cadastrado',
-            text2: 'Vá em Configurações › NFS-e e envie o certificado antes de emitir notas.',
+            text2: 'Vá em Configurações › NFS-e e envie o certificado do CNPJ escolhido.',
             visibilityTime: 10000,
           });
           return;
@@ -302,6 +307,7 @@ export default function GerarMensalidadeScreen() {
         dataVencimentoOverride: usarMesmaDataTodos && vencimento ? toISODate(vencimento) : null,
         competencia: competencia.trim() || null,
         gerarNotaFiscal,
+        emitenteId: gerarNotaFiscal ? emitenteId || null : null,
       });
       const extras: string[] = [];
       if (ignorados > 0) extras.push(`${ignorados} sem valor de mensalidade`);
@@ -622,7 +628,7 @@ export default function GerarMensalidadeScreen() {
         loading={busy}
         onClose={() => setEnviarModalOpen(false)}
         onSomenteMensalidade={() => void executarEnvio(false)}
-        onMensalidadeComNf={() => void executarEnvio(true)}
+        onMensalidadeComNf={(emitenteId) => void executarEnvio(true, emitenteId)}
       />
     </View>
   );

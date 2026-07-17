@@ -39,15 +39,58 @@ export type NfeConfigInput = Omit<NfeConfig, 'user_id' | 'created_at' | 'updated
 export type EmpresaCertificado = {
   id: string;
   user_id: string;
+  emitente_id: string | null;
   storage_path: string;
   valido_ate: string | null;
   ativo: boolean;
   created_at: string;
 };
 
+/** Emitente NFS-e (até 2 por usuário): identidade + parâmetros fiscais. */
+export type NfseEmitente = {
+  id: string;
+  user_id: string;
+  nome: string;
+  documento: string;
+  razao_social: string;
+  logradouro: string;
+  numero: string;
+  complemento: string;
+  bairro: string;
+  cidade: string;
+  uf: string;
+  cep: string;
+  serie: string;
+  proximo_numero: number;
+  ambiente: 1 | 2;
+  inscricao_estadual: string;
+  regime_tributario: 1 | 2 | 3;
+  codigo_ibge_emitente: string;
+  inscricao_municipal: string;
+  ncm_servico: string;
+  cfop_padrao: string;
+  cst_icms: string;
+  csosn: string;
+  descricao_servico_padrao: string;
+  natureza_operacao: string;
+  codigo_tributacao_nacional: string;
+  codigo_tributacao_municipal: string;
+  codigo_nbs: string;
+  op_simp_nac: 1 | 2 | 3 | 4;
+  reg_esp_trib: number;
+  trib_issqn: 1 | 2 | 3 | 4;
+  tp_ret_issqn: 1 | 2 | 3;
+  padrao: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NfseEmitenteInput = Omit<NfseEmitente, 'id' | 'user_id' | 'created_at' | 'updated_at'>;
+
 export type NotaFiscal = {
   id: string;
   user_id: string;
+  emitente_id?: string | null;
   mensalidade_id: string | null;
   venda_id: string | null;
   cliente_id: string;

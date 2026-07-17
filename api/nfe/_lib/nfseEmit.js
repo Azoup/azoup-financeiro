@@ -84,6 +84,14 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
       }
       if (result.success) {
         const onlyDigits = (s) => String(s ?? '').replace(/\D/g, '');
+        const { formatEndereco } = require('./nfseDanfseArtifacts');
+        const joinEnd = (row) =>
+          formatEndereco({
+            logradouro: row?.logradouro,
+            numero: row?.numero,
+            bairro: row?.bairro,
+            cep: row?.cep,
+          });
         const artefatos = await salvarArtefatosNfseAbrasf({
           admin,
           userId: nota.user_id,
@@ -95,13 +103,28 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
           xmlRaw: result.xml_autorizado,
           meta: {
             prestadorNome: perfil.razao_social || perfil.nome_fantasia || 'Prestador',
+            prestadorFantasia: perfil.nome_fantasia || perfil.razao_social || '',
             prestadorDoc: onlyDigits(perfil.documento),
             prestadorIm: onlyDigits(config.inscricao_municipal),
+            prestadorIe: config.inscricao_estadual || '',
+            prestadorTel: perfil.telefone_suporte || '',
+            prestadorEndereco: joinEnd(perfil),
+            prestadorMunicipio: (perfil.cidade || 'AMERICANA').toUpperCase(),
+            prestadorUf: (perfil.uf || 'SP').toUpperCase(),
             tomadorNome:
-              cliente.nome_fantasia || cliente.nome_cliente || cliente.nome || 'Tomador',
+              cliente.nome || cliente.nome_fantasia || cliente.nome_cliente || 'Tomador',
             tomadorDoc: onlyDigits(cliente.cnpj) || onlyDigits(cliente.documento),
-            numero: String(nota.numero),
+            tomadorIe: cliente.inscricao_estadual || '',
+            tomadorTel: cliente.celular || '',
+            tomadorEmail: cliente.email || '',
+            tomadorEndereco: joinEnd(cliente),
+            tomadorMunicipio: (cliente.cidade || '').toUpperCase(),
+            tomadorUf: (cliente.estado || cliente.uf || '').toUpperCase(),
+            numero: String(result.protocolo_autorizacao || result.numero || nota.numero),
             serie: String(nota.serie || config.serie || '1'),
+            rpsNumero: String(nota.numero),
+            rpsSerie: String(nota.serie || config.serie || '1'),
+            rpsDataEmissao: nota.data_emissao,
             codigoVerificacao: result.codigo_verificacao,
             chaveAcesso: result.chave_acesso,
             discriminacao:
@@ -109,7 +132,8 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
             valor: nota.valor_total,
             itemLista: itemListaServico(config.codigo_tributacao_nacional),
             competencia: nota.competencia || '',
-            dataEmissao: String(nota.data_emissao || '').slice(0, 10),
+            dataEmissao: nota.data_emissao || String(nota.data_emissao || '').slice(0, 10),
+            documentoCobranca: String(nota.numero),
           },
         });
         result.xml_autorizado = artefatos.xml_autorizado || result.xml_autorizado;

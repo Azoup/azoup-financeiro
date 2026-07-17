@@ -454,7 +454,7 @@ export default function ContasReceberScreen() {
     return `Gerar NFS-e de ${valor} para esta venda (${item.referencia_label})?`;
   };
 
-  const emitirNotaFiscal = async (itemOverride?: ContaReceberListRow) => {
+  const emitirNotaFiscal = async (itemOverride?: ContaReceberListRow, emitenteId?: string) => {
     const item = itemOverride ?? acoesItem;
     if (!user?.id || !item) return;
     if (item.nota_fiscal_id) {
@@ -465,15 +465,20 @@ export default function ContasReceberScreen() {
     setNfBusy(true);
     setNfBusyId(item.id);
     try {
+      const opts = { emitenteId: emitenteId || undefined };
       if (item.origem === 'mensalidade' && item.mensalidade_id) {
         const m = await fetchMensalidadeGeradaById(user.id, item.mensalidade_id);
         if (!m) throw new Error('Mensalidade não encontrada.');
-        const res = await gerarNotaFiscalParaMensalidade(user.id, {
-          id: m.id,
-          cliente_id: m.cliente_id,
-          valor: m.valor,
-          competencia: m.competencia,
-        });
+        const res = await gerarNotaFiscalParaMensalidade(
+          user.id,
+          {
+            id: m.id,
+            cliente_id: m.cliente_id,
+            valor: m.valor,
+            competencia: m.competencia,
+          },
+          opts,
+        );
         if (res.success) {
           Toast.show({ type: 'success', text1: res.message ?? 'NFS-e emitida com sucesso.' });
           router.push('/(app)/notas-fiscais');
@@ -486,7 +491,7 @@ export default function ContasReceberScreen() {
       } else if (item.origem === 'venda' && item.venda_id) {
         const venda = await fetchVendaParaNotaFiscal(user.id, item.venda_id);
         if (!venda) throw new Error('Venda não encontrada.');
-        const res = await gerarNotaFiscalParaVenda(user.id, venda);
+        const res = await gerarNotaFiscalParaVenda(user.id, venda, opts);
         if (res.success) {
           Toast.show({ type: 'success', text1: 'NFS-e emitida com sucesso.' });
           router.push('/(app)/notas-fiscais');
@@ -508,17 +513,21 @@ export default function ContasReceberScreen() {
     }
   };
 
-  const emitirNfPosPagamento = async () => {
+  const emitirNfPosPagamento = async (emitenteId?: string) => {
     if (!user?.id || !nfPosPagamentoMensalidade) return;
     setNfEmitindoPosPagamento(true);
     try {
       const m = nfPosPagamentoMensalidade;
-      const res = await gerarNotaFiscalParaMensalidade(user.id, {
-        id: m.id,
-        cliente_id: m.cliente_id,
-        valor: m.valor,
-        competencia: m.competencia,
-      });
+      const res = await gerarNotaFiscalParaMensalidade(
+        user.id,
+        {
+          id: m.id,
+          cliente_id: m.cliente_id,
+          valor: m.valor,
+          competencia: m.competencia,
+        },
+        { emitenteId: emitenteId || undefined },
+      );
       if (res.success) {
         Toast.show({ type: 'success', text1: res.message ?? 'NFS-e emitida com sucesso.' });
         router.push('/(app)/notas-fiscais');
@@ -832,7 +841,7 @@ export default function ContasReceberScreen() {
         botaoSecundario="Cancelar"
         loading={nfBusy}
         onClose={() => !nfBusy && setNfConfirmItem(null)}
-        onEmitir={() => nfConfirmItem && void emitirNotaFiscal(nfConfirmItem)}
+        onEmitir={(emitenteId) => nfConfirmItem && void emitirNotaFiscal(nfConfirmItem, emitenteId)}
         onDepois={() => !nfBusy && setNfConfirmItem(null)}
       />
 
@@ -840,7 +849,7 @@ export default function ContasReceberScreen() {
         visible={nfPosPagamentoMensalidade != null}
         loading={nfEmitindoPosPagamento}
         onClose={() => setNfPosPagamentoMensalidade(null)}
-        onEmitir={() => void emitirNfPosPagamento()}
+        onEmitir={(emitenteId) => void emitirNfPosPagamento(emitenteId)}
         onDepois={() => setNfPosPagamentoMensalidade(null)}
       />
 

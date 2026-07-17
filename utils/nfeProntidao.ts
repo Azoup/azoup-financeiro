@@ -1,7 +1,8 @@
-import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
-import { fetchCertificadoAtivo, fetchNfeConfig } from '@/services/nfeConfigService';
-import type { PerfilCobranca } from '@/types/contasReceber';
-import type { NfeConfig } from '@/types/notaFiscal';
+import {
+  fetchCertificadoAtivoEmitente,
+  ensureEmitentes,
+} from '@/services/nfseEmitenteService';
+import type { NfseEmitente } from '@/types/notaFiscal';
 
 export type NfeProntidaoItem = {
   id: string;
@@ -20,21 +21,29 @@ function docOk(doc: string | undefined | null): boolean {
   return d.length === 11 || d.length === 14;
 }
 
-export function avaliarProntidaoNfe(
-  perfil: Pick<PerfilCobranca, 'razao_social' | 'documento' | 'logradouro' | 'cidade' | 'uf' | 'cep'> | null,
-  config: Pick<
-    NfeConfig,
-    'codigo_ibge_emitente' | 'codigo_tributacao_nacional' | 'codigo_nbs' | 'descricao_servico_padrao'
+export function avaliarProntidaoEmitente(
+  emitente: Pick<
+    NfseEmitente,
+    | 'razao_social'
+    | 'documento'
+    | 'logradouro'
+    | 'cidade'
+    | 'uf'
+    | 'cep'
+    | 'codigo_ibge_emitente'
+    | 'codigo_tributacao_nacional'
+    | 'codigo_nbs'
+    | 'descricao_servico_padrao'
   > | null,
   temCertificado: boolean,
 ): NfeProntidao {
   const emitenteOk =
-    Boolean(perfil?.razao_social?.trim()) &&
-    docOk(perfil?.documento) &&
-    Boolean(perfil?.logradouro?.trim()) &&
-    Boolean(perfil?.cidade?.trim()) &&
-    Boolean(perfil?.uf?.trim()?.length === 2) &&
-    Boolean(perfil?.cep?.trim());
+    Boolean(emitente?.razao_social?.trim()) &&
+    docOk(emitente?.documento) &&
+    Boolean(emitente?.logradouro?.trim()) &&
+    Boolean(emitente?.cidade?.trim()) &&
+    Boolean(emitente?.uf?.trim()?.length === 2) &&
+    Boolean(emitente?.cep?.trim());
 
   const itens: NfeProntidaoItem[] = [
     {
@@ -52,28 +61,80 @@ export function avaliarProntidaoNfe(
     {
       id: 'ibge',
       label: 'Código IBGE do município do prestador (cidade, 7 dígitos)',
-      ok: Boolean(config?.codigo_ibge_emitente?.trim()?.length >= 6),
-      hint: 'Ex.: Americana = 3501608 (ABRASF TipLan). Cidades com emissor próprio são roteadas automaticamente.',
+      ok: Boolean(emitente?.codigo_ibge_emitente?.trim()?.length && emitente.codigo_ibge_emitente.trim().length >= 6),
+      hint: 'Ex.: Americana = 3501608 (ABRASF TipLan).',
     },
     {
       id: 'servico',
       label: 'Código do serviço (LC 116) e NBS',
       ok:
-        Boolean(config?.codigo_tributacao_nacional?.trim()) &&
-        Boolean(config?.codigo_nbs?.trim()) &&
-        Boolean(config?.descricao_servico_padrao?.trim()),
-      hint: 'NFS-e não usa NCM/CFOP. Preencha LC 116 (6 dígitos) e NBS (9 dígitos) na seção Serviço.',
+        Boolean(emitente?.codigo_tributacao_nacional?.trim()) &&
+        Boolean(emitente?.codigo_nbs?.trim()) &&
+        Boolean(emitente?.descricao_servico_padrao?.trim()),
+      hint: 'Preencha LC 116 (6 dígitos) e NBS (9 dígitos) na seção Serviço.',
     },
   ];
 
   return { pronto: itens.every((i) => i.ok), itens };
 }
 
+/** Pronto se pelo menos um emitente estiver completo + A1. */
 export async function fetchNfeProntidao(userId: string): Promise<NfeProntidao> {
-  const [perfil, config, cert] = await Promise.all([
-    fetchPerfilCobranca(userId),
-    fetchNfeConfig(userId),
-    fetchCertificadoAtivo(userId),
-  ]);
-  return avaliarProntidaoNfe(perfil, config, Boolean(cert));
+  const emitentes = await ensureEmitentes(userId);
+  if (!emitentes.length) {
+    return {
+      pronto: false,
+      itens: [
+        {
+          id: 'emitente',
+          label: 'Cadastre ao menos um emitente (CNPJ) em Configurações › NFS-e',
+          ok: false,
+          hint: 'Rode a migration 037_nfse_emitente.sql se a tela não listar emitentes.',
+        },
+      ],
+    };
+  }
+
+  let melhor: NfeProntidao | null = null;
+  for (const e of emitentes) {
+    const cert = await fetchCertificadoAtivoEmitente(userId, e.id);
+    const p = avaliarProntidaoEmitente(e, Boolean(cert));
+    if (p.pronto) return p;
+    if (!melhor || p.itens.filter((i) => i.ok).length > melhor.itens.filter((i) => i.ok).length) {
+      melhor = p;
+    }
+  }
+  return melhor!;
+}
+
+/** @deprecated use avaliarProntidaoEmitente */
+export function avaliarProntidaoNfe(
+  perfil: {
+    razao_social: string;
+    documento: string;
+    logradouro: string;
+    cidade: string;
+    uf: string;
+    cep: string;
+  } | null,
+  config: {
+    codigo_ibge_emitente: string;
+    codigo_tributacao_nacional: string;
+    codigo_nbs: string;
+    descricao_servico_padrao: string;
+  } | null,
+  temCertificado: boolean,
+): NfeProntidao {
+  return avaliarProntidaoEmitente(
+    perfil && config
+      ? {
+          ...perfil,
+          codigo_ibge_emitente: config.codigo_ibge_emitente,
+          codigo_tributacao_nacional: config.codigo_tributacao_nacional,
+          codigo_nbs: config.codigo_nbs,
+          descricao_servico_padrao: config.descricao_servico_padrao,
+        }
+      : null,
+    temCertificado,
+  );
 }

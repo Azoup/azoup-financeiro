@@ -1,5 +1,6 @@
 const { getAdmin, getUserFromBearer } = require('./_lib/supabaseAdmin');
 const { cancelarNfseSefaz } = require('./_lib/nfseCancel');
+const { resolveEmitenteContexto } = require('./_lib/nfseEmitenteResolve');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -34,21 +35,14 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const [{ data: perfil }, { data: cert }, { data: config }] = await Promise.all([
-      admin.from('perfil_cobranca').select('*').eq('user_id', user.id).maybeSingle(),
-      admin.from('empresa_certificado').select('*').eq('user_id', user.id).eq('ativo', true).maybeSingle(),
-      admin
-        .from('nfe_config')
-        .select('codigo_ibge_emitente, inscricao_municipal')
-        .eq('user_id', user.id)
-        .maybeSingle(),
-    ]);
+    const emitCtx = await resolveEmitenteContexto(admin, user.id, nota);
+    const { perfil, config, cert } = emitCtx;
 
     if (!perfil?.documento) {
       throw new Error('Emitente não configurado.');
     }
     if (!cert) {
-      throw new Error('Certificado A1 não encontrado.');
+      throw new Error('Certificado A1 não encontrado para este emitente.');
     }
 
     const { data: sec } = await admin

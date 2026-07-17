@@ -212,6 +212,8 @@ export async function criarMensalidadesGeradasLote(params: {
   competencia?: string | null;
   /** Gera NF-e (SEFAZ) para clientes com emite_nf após criar mensalidades. */
   gerarNotaFiscal?: boolean;
+  /** CNPJ/emitente da NFS-e (quando há 2 cadastrados). */
+  emitenteId?: string | null;
 }): Promise<{
   criados: number;
   ignorados: number;
@@ -321,6 +323,7 @@ export async function criarMensalidadesGeradasLote(params: {
           valor: m.valor,
           competencia: m.competencia,
         })),
+        { emitenteId: params.emitenteId },
       );
     } catch (e) {
       nfResult = {

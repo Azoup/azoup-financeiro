@@ -1,4 +1,5 @@
-import { colors, radius, spacing } from '@/theme/colors';
+import { colors, radius, shadows, spacing } from '@/theme/colors';
+import { fonts } from '@/theme/typography';
 import React from 'react';
 import {
   ActivityIndicator,
@@ -41,7 +42,7 @@ export function PrimaryButton({
         variant === 'ghost' && styles.ghost,
         isDanger && styles.danger,
         (disabled || loading) && styles.disabled,
-        pressed && styles.pressed,
+        pressed && !disabled && !loading && styles.pressed,
         style,
       ]}
       disabled={disabled || loading}
@@ -80,14 +81,14 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingVertical: 10,
     paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
   },
   primary: {
     backgroundColor: colors.orange,
+    ...shadows.sm,
   },
   secondary: {
-    backgroundColor: colors.gray100,
-    borderWidth: 1,
+    backgroundColor: colors.white,
+    borderWidth: 1.5,
     borderColor: colors.gray200,
   },
   ghost: {
@@ -97,18 +98,20 @@ const styles = StyleSheet.create({
     backgroundColor: colors.danger,
   },
   disabled: {
-    opacity: 0.55,
+    opacity: 0.5,
   },
   pressed: {
-    opacity: 0.88,
+    transform: [{ scale: 0.985 }],
+    opacity: 0.92,
   },
   text: {
+    fontFamily: fonts.semibold,
     fontSize: 16,
-    fontWeight: '600',
+    letterSpacing: 0.15,
   },
   textCompact: {
+    fontFamily: fonts.semibold,
     fontSize: 14,
-    fontWeight: '600',
   },
   textOnPrimary: {
     color: colors.white,

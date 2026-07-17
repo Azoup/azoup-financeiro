@@ -1,6 +1,7 @@
 const { getAdmin, getUserFromBearer } = require('./_lib/supabaseAdmin');
 const { emitirNfseSefaz } = require('./_lib/nfseEmit');
 const { prepareServerlessCryptoEnv } = require('./_lib/serverlessEnv');
+const { resolveEmitenteContexto } = require('./_lib/nfseEmitenteResolve');
 
 prepareServerlessCryptoEnv();
 
@@ -38,24 +39,23 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const [{ data: itens }, { data: pagamentos }, { data: perfil }, { data: cliente }, { data: config }, { data: cert }] =
-      await Promise.all([
-        admin.from('nota_fiscal_item').select('*').eq('nota_fiscal_id', notaFiscalId),
-        admin.from('nota_fiscal_pagamento').select('*').eq('nota_fiscal_id', notaFiscalId),
-        admin.from('perfil_cobranca').select('*').eq('user_id', user.id).maybeSingle(),
-        admin.from('clientes').select('*').eq('id', nota.cliente_id).single(),
-        admin.from('nfe_config').select('*').eq('user_id', user.id).maybeSingle(),
-        admin.from('empresa_certificado').select('*').eq('user_id', user.id).eq('ativo', true).maybeSingle(),
-      ]);
+    const [{ data: itens }, { data: pagamentos }, { data: cliente }, emitCtx] = await Promise.all([
+      admin.from('nota_fiscal_item').select('*').eq('nota_fiscal_id', notaFiscalId),
+      admin.from('nota_fiscal_pagamento').select('*').eq('nota_fiscal_id', notaFiscalId),
+      admin.from('clientes').select('*').eq('id', nota.cliente_id).single(),
+      resolveEmitenteContexto(admin, user.id, nota),
+    ]);
+
+    const { perfil, config, cert } = emitCtx;
 
     if (!perfil?.razao_social) {
-      throw new Error('Preencha o perfil do beneficiário (emitente).');
+      throw new Error('Preencha o emitente (CNPJ) em Configurações › NFS-e.');
     }
     if (!config?.codigo_ibge_emitente) {
       throw new Error('Informe o código IBGE do município do prestador em Configurações › NFS-e.');
     }
     if (!cert) {
-      throw new Error('Cadastre o certificado A1 em Configurações › NFS-e.');
+      throw new Error('Cadastre o certificado A1 do emitente escolhido em Configurações › NFS-e.');
     }
     if (!itens?.length) {
       throw new Error('Nota sem itens fiscais.');
@@ -108,6 +108,7 @@ module.exports = async function handler(req, res) {
         tipo_documento: 'nfse',
         ambiente: 1,
         motivo_rejeicao: null,
+        emitente_id: nota.emitente_id || emitCtx.emitente?.id || null,
       })
       .eq('id', notaFiscalId);
 
@@ -118,22 +119,6 @@ module.exports = async function handler(req, res) {
       (e && typeof e === 'object' && 'message' in e && e.message) ||
       (typeof e === 'string' ? e : '') ||
       'Falha na emissão NFS-e.';
-    if (notaFiscalId) {
-      try {
-        const admin = getAdmin();
-        await admin
-          .from('nota_fiscal')
-          .update({ status: 'rejeitada', motivo_rejeicao: String(msg).slice(0, 2000) })
-          .eq('id', notaFiscalId);
-      } catch {
-        /* ignore secondary failure */
-      }
-    }
-    if (!res.headersSent) {
-      return res.status(500).json({
-        success: false,
-        message: String(msg),
-      });
-    }
+    return res.status(500).json({ success: false, message: String(msg) });
   }
 };
