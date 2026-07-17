@@ -4,6 +4,7 @@ const { withHomologTlsRelaxed } = require('./tlsHomolog');
 const { installMunicipalAxiosRedirect } = require('./municipalAxiosRedirect');
 const { resolveNfseGateway } = require('./nfseGateways');
 const { cancelarNfseAbrasfAmericana } = require('./nfseAbrasfAmericana');
+const { humanizeNfseRejection } = require('./nfseErrors');
 
 async function cancelarNfseSefaz({
   admin,
@@ -19,8 +20,8 @@ async function cancelarNfseSefaz({
   if (xJust.length < 15) {
     throw new Error('A justificativa de cancelamento deve ter no mínimo 15 caracteres.');
   }
-  if (!nota.chave_acesso && !nota.codigo_verificacao && !nota.protocolo_autorizacao) {
-    throw new Error('Nota sem chave/código de verificação para cancelar.');
+  if (!nota.chave_acesso && !nota.codigo_verificacao && !nota.protocolo_autorizacao && !nota.numero) {
+    throw new Error('Nota sem número/chave para cancelar.');
   }
 
   const ambiente = Number(nota.ambiente) === 2 ? 2 : 1;
@@ -31,7 +32,7 @@ async function cancelarNfseSefaz({
     const senha = await decryptCertPassword(admin, senhaEnc);
     const certPath = await downloadCertToTemp(admin, cert.storage_path);
     try {
-      return await withHomologTlsRelaxed(() =>
+      const result = await withHomologTlsRelaxed(() =>
         cancelarNfseAbrasfAmericana({
           certPath,
           senha,
@@ -45,6 +46,10 @@ async function cancelarNfseSefaz({
           ambiente,
         }),
       );
+      if (!result.success && result.message) {
+        result.message = humanizeNfseRejection(result.message, codigoIbgeEmitente);
+      }
+      return result;
     } finally {
       cleanupCert(certPath);
     }

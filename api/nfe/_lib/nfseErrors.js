@@ -46,8 +46,16 @@ function humanizeNfseRejection(message, ibge) {
   if (/X160/i.test(raw)) {
     return [
       'X160 — XML rejeitado pelo schema ABRASF TipLan de Americana (estrutura inválida).',
-      'No cancelamento, CodigoVerificacao não entra em IdentificacaoNfse (só Numero/CNPJ/IM/Municipio).',
-      'Faça redeploy e tente cancelar de novo.',
+      'No cancelamento, IdentificacaoNfse aceita só Numero, CNPJ, IM e CodigoMunicipio (sem CodigoVerificacao).',
+      'Faça redeploy da API e tente cancelar de novo.',
+    ].join(' ');
+  }
+
+  if (/E79|E80|E86|não encontrada|nao encontrada|inexistente/i.test(raw)) {
+    return [
+      raw.split('|')[0]?.trim() || raw,
+      'O número enviado no cancelamento deve ser o da NFS-e (InfNfse/Numero), não o RPS.',
+      'Confira no portal nfse.americana.sp.gov.br o número da nota e se o prazo de cancelamento ainda vale.',
     ].join(' ');
   }
 

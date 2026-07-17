@@ -347,10 +347,9 @@ function parseLoteResult(soapBody) {
   const erros = mensagens.filter((m) => !/^A\d+/i.test(m));
   const alertas = mensagens.filter((m) => /^A\d+/i.test(m));
 
+  // Preferir Numero dentro de InfNfse (número da NFS-e), não o do RPS.
   const numero =
-    inner.match(/<InfNfse[\s\S]*?<Numero>\s*([^<]+)\s*<\/Numero>/i)?.[1]?.trim() ??
-    inner.match(/<ListaNfse[\s\S]*?<Numero>\s*([^<]+)\s*<\/Numero>/i)?.[1]?.trim() ??
-    null;
+    inner.match(/<InfNfse[\s\S]*?<Numero>\s*([^<]+)\s*<\/Numero>/i)?.[1]?.trim() ?? null;
   const codVerif =
     inner.match(/<CodigoVerificacao>\s*([^<]+)\s*<\/CodigoVerificacao>/i)?.[1]?.trim() ?? null;
   const protocolo =
@@ -372,8 +371,9 @@ function parseLoteResult(soapBody) {
       erros: alertas,
       numero,
       codigoVerificacao: codVerif,
-      chaveAcesso: chave || codVerif || numero,
-      protocolo,
+      // Não gravar código de verificação alfanumérico como "chave" numérica.
+      chaveAcesso: chave || numero || codVerif,
+      protocolo: protocolo || numero,
       xml: inner,
     };
   }
@@ -384,8 +384,8 @@ function parseLoteResult(soapBody) {
       erros: alertas,
       numero,
       codigoVerificacao: codVerif,
-      chaveAcesso: chave || codVerif || numero,
-      protocolo,
+      chaveAcesso: chave || numero || codVerif,
+      protocolo: protocolo || numero,
       xml: inner,
     };
   }
@@ -397,8 +397,8 @@ function parseLoteResult(soapBody) {
       erros: alertas,
       numero,
       codigoVerificacao: codVerif,
-      chaveAcesso: chave || codVerif || numero,
-      protocolo,
+      chaveAcesso: chave || numero || codVerif,
+      protocolo: protocolo || numero,
       xml: inner,
     };
   }
@@ -412,6 +412,44 @@ function parseLoteResult(soapBody) {
     protocolo: null,
     xml: inner,
   };
+}
+
+/** TipLan tsNumero: até 15 dígitos (com zeros à esquerda quando vierem do XML). */
+function normalizarNumeroNfse(raw) {
+  const digits = onlyDigits(raw);
+  if (!digits) return null;
+  if (digits.length > 15) return null;
+  // Mantém padding do XML (ex.: 000000000000123); senão envia sem zeros extras.
+  const asStr = String(raw ?? '').trim();
+  if (/^\d{1,15}$/.test(asStr)) return asStr;
+  return digits;
+}
+
+/** Número da NFS-e TipLan (não o RPS). */
+function resolverNumeroNfseCancelamento(nota) {
+  const xml = String(nota.xml_autorizado || '');
+  const fromInf = xml.match(/<InfNfse[\s\S]*?<Numero>\s*([^<]+)\s*<\/Numero>/i)?.[1];
+  const nInf = normalizarNumeroNfse(fromInf);
+  if (nInf) return nInf;
+
+  // CompNfse às vezes vem sem wrapper InfNfse no trecho salvo.
+  const fromComp = xml.match(
+    /<(?:Comp)?Nfse[\s\S]*?<Numero>\s*([^<]+)\s*<\/Numero>/i,
+  )?.[1];
+  const nComp = normalizarNumeroNfse(fromComp);
+  if (nComp) return nComp;
+
+  const prot = String(nota.protocolo_autorizacao || '').trim();
+  // Protocolo TipLan = número da NFS-e (só dígitos, ≤15). Evita NumeroLote/timestamp (~13 dígitos).
+  const nProt = normalizarNumeroNfse(prot);
+  if (nProt && /^\d+$/.test(prot) && prot.length <= 12) return nProt;
+
+  const chave = String(nota.chave_acesso || '').trim();
+  // Só usa chave se for puramente numérica (não CódigoVerificacao alfanumérico).
+  const nChave = normalizarNumeroNfse(chave);
+  if (nChave && /^\d+$/.test(chave)) return nChave;
+
+  return normalizarNumeroNfse(nota.numero);
 }
 
 /**
@@ -504,7 +542,8 @@ async function emitirNfseAbrasfAmericana({
     success: true,
     status: '100',
     chave_acesso: parsed.chaveAcesso,
-    protocolo_autorizacao: parsed.protocolo || parsed.numero,
+    // Número da NFS-e TipLan (InfNfse/Numero) — usado no cancelamento.
+    protocolo_autorizacao: parsed.numero || parsed.protocolo,
     codigo_verificacao: parsed.codigoVerificacao,
     xml_autorizado: parsed.xml,
     danfe_url: null,
@@ -529,16 +568,20 @@ async function cancelarNfseAbrasfAmericana({
   const cnpj = onlyDigits(perfil.documento);
   const im = onlyDigits(config.inscricao_municipal);
   // TipLan tcIdentificacaoNfse: Numero, CpfCnpj, InscricaoMunicipal?, CodigoMunicipio — SEM CodigoVerificacao.
-  const numeroNfse =
-    onlyDigits(nota.protocolo_autorizacao) ||
-    onlyDigits(nota.numero) ||
-    onlyDigits(nota.chave_acesso);
+  const numeroNfse = resolverNumeroNfseCancelamento(nota);
   if (!numeroNfse) {
     throw new Error('Nota sem número da NFS-e para cancelar no ABRASF.');
   }
 
+  console.info('[nfse] cancel ABRASF Americana', {
+    numeroNfse,
+    protocolo: nota.protocolo_autorizacao,
+    rps: nota.numero,
+    codVerif: nota.codigo_verificacao,
+  });
+
   const { privateKeyPem, certificatePem } = loadPfx(certPath, senha);
-  const idPed = `Cancel_${numeroNfse}_${Date.now()}`;
+  const idPed = `Cancel_${numeroNfse}`;
   let ped =
     `<CancelarNfseEnvio xmlns="${NS_ABRASF}">` +
     `<Pedido>` +
@@ -563,13 +606,14 @@ async function cancelarNfseAbrasfAmericana({
   });
   sig.addReference({
     xpath: "//*[local-name(.)='InfPedidoCancelamento']",
+    uri: `#${idPed}`,
     transforms: [
       'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
       C14N_INCLUSIVE,
     ],
     digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
   });
-  // TipLan: Signature irmã de InfPedidoCancelamento (dentro de Pedido).
+  // TipLan/ABRASF: Signature irmã de InfPedidoCancelamento (dentro de Pedido).
   sig.computeSignature(ped, {
     location: {
       reference: "//*[local-name(.)='InfPedidoCancelamento']",
@@ -588,10 +632,11 @@ async function cancelarNfseAbrasfAmericana({
   });
 
   if (httpRes.statusCode >= 400) {
+    const plain = httpRes.body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
     return {
       success: false,
       status: 'ERR',
-      message: `Cancelamento ABRASF HTTP ${httpRes.statusCode}`,
+      message: `Cancelamento ABRASF HTTP ${httpRes.statusCode}: ${plain || 'falha no WebService'}`,
     };
   }
 
@@ -602,13 +647,30 @@ async function cancelarNfseAbrasfAmericana({
     ),
   ].map((m) => `${m[1].trim()}: ${m[2].trim()}`);
 
+  const fault =
+    inner.match(/<faultstring>\s*([^<]+)\s*<\/faultstring>/i)?.[1]?.trim() ||
+    inner.match(/<MensagemRetorno>[\s\S]*?<Mensagem>\s*([^<]+)\s*<\/Mensagem>/i)?.[1]?.trim();
+
   const ok =
     /<Confirmacao[\s>]/i.test(inner) ||
-    /DataHora[\s>]/i.test(inner) ||
-    (!mensagens.length && /CancelarNfseResposta/i.test(inner));
+    (/<DataHora[\s>]/i.test(inner) && /CancelarNfseResposta/i.test(inner));
 
-  if (!ok && mensagens.length) {
-    return { success: false, status: 'ERR', message: mensagens.join(' | ') };
+  // Erros E*/X*/L* impedem; A* são alertas.
+  const erros = mensagens.filter((m) => !/^A\d+/i.test(m));
+
+  if (!ok || erros.length) {
+    const msg =
+      erros.join(' | ') ||
+      mensagens.join(' | ') ||
+      fault ||
+      inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400) ||
+      'Cancelamento rejeitado pela prefeitura (ABRASF).';
+    return {
+      success: false,
+      status: 'ERR',
+      message: msg,
+      numero_enviado: numeroNfse,
+    };
   }
 
   return {
@@ -621,6 +683,7 @@ async function cancelarNfseAbrasfAmericana({
 module.exports = {
   emitirNfseAbrasfAmericana,
   cancelarNfseAbrasfAmericana,
+  resolverNumeroNfseCancelamento,
   itemListaServico,
   codigoCnae,
   codigoTributacaoMunicipioAbrasf,

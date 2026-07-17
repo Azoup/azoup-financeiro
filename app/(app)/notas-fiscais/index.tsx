@@ -215,7 +215,11 @@ export default function NotasFiscaisIndexScreen() {
       setCancelTarget(null);
       await load();
     } catch (e) {
-      Toast.show({ type: 'error', text1: (e as Error).message });
+      Toast.show({
+        type: 'error',
+        text1: 'Cancelamento rejeitado',
+        text2: (e as Error).message,
+      });
     } finally {
       setCancelBusy(false);
     }
