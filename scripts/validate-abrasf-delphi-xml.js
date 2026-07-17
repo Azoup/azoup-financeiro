@@ -36,9 +36,8 @@ const xml = buildEnviarLoteRpsSincronoXml({
 
 const required = [
   'EnviarLoteRpsSincronoEnvio',
-  'LoteRps Id="Lote_1447"',
+  'LoteRps Id="Lote_',
   'versao="2.03"',
-  '<NumeroLote>1447</NumeroLote>',
   '<Cnpj>05320214000169</Cnpj>',
   '<InscricaoMunicipal>69842</InscricaoMunicipal>',
   '<QuantidadeRps>1</QuantidadeRps>',

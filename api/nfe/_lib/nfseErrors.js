@@ -51,6 +51,21 @@ function humanizeNfseRejection(message, ibge) {
     ].join(' ');
   }
 
+  if (/L979|número do lote.*já existe|numero do lote.*ja existe/i.test(raw)) {
+    return [
+      'L979 — Número do lote já usado neste CNPJ.',
+      'Faça redeploy da versão com NumeroLote único e reemitir (não reutilize a mesma tentativa).',
+    ].join(' ');
+  }
+
+  if (/L1268|Chave de acesso da NFS-e enviada já existe/i.test(raw)) {
+    return [
+      'L1268 — Este RPS/chave já existe no Ambiente Nacional (ADN).',
+      'A emissão anterior pode ter sido aceita mesmo com alerta. Confira em nfse.americana.sp.gov.br.',
+      'Para nova tentativa no Azoup, use "Reemitir" (gera novo número de RPS) ou crie uma nota nova.',
+    ].join(' ');
+  }
+
   if (/L906/i.test(raw)) {
     return [
       'L906 — A prefeitura rejeitou a atividade/serviço deste envio para o CNPJ.',

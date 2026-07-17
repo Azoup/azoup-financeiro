@@ -168,7 +168,8 @@ function buildEnviarLoteRpsSincronoXml({
   const isCpf = tomadorDoc.length === 11;
   const serie = String(Number(String(nota.serie || config.serie || '1').replace(/\D/g, '') || '1'));
   const numero = String(Number(nota.numero));
-  const numeroLote = numero;
+  // TipLan: NumeroLote é único por contribuinte e independente do nº do RPS (Delphi usa sequência própria).
+  const numeroLote = String(Date.now()).slice(-12);
   const dh = dateYmd(nota.data_emissao);
   // Delphi usa a data de emissão também em Competencia (não o 1º do mês).
   const competencia = dh;

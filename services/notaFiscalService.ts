@@ -339,9 +339,13 @@ export async function gerarNotaFiscalParaMensalidade(
 }
 
 export async function reemitirNotaFiscalSefaz(notaFiscalId: string): Promise<EmitirNfeResult> {
+  const { data: session } = await supabase.auth.getSession();
+  const userId = session.session?.user?.id;
+  if (!userId) throw new Error('Sessão expirada. Faça login novamente.');
+
   const { data: nota, error } = await supabase
     .from('nota_fiscal')
-    .select('id, status')
+    .select('id, status, user_id, numero')
     .eq('id', notaFiscalId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -352,6 +356,29 @@ export async function reemitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emi
   if (nota.status === 'cancelada') {
     throw new Error('NFS-e cancelada não pode ser reemitida.');
   }
+
+  // RPS já enviado à prefeitura/ADN não pode ser reutilizado (L1268). Gera novo número.
+  const config = await ensureNfeConfig(userId);
+  const novoNumero = Number(config.proximo_numero) || Number(nota.numero) + 1;
+  const { error: upErr } = await supabase
+    .from('nota_fiscal')
+    .update({
+      numero: novoNumero,
+      status: 'rascunho',
+      motivo_rejeicao: null,
+      chave_acesso: null,
+      protocolo_autorizacao: null,
+      codigo_verificacao: null,
+      xml_autorizado: null,
+    })
+    .eq('id', notaFiscalId);
+  if (upErr) throw new Error(upErr.message);
+
+  await supabase
+    .from('nfe_config')
+    .update({ proximo_numero: novoNumero + 1 })
+    .eq('user_id', userId);
+
   return emitirNotaFiscalSefaz(notaFiscalId);
 }
 
