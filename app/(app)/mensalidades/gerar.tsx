@@ -1,14 +1,13 @@
-import { EnviarMensalidadeModal } from '@/components/mensalidades/EnviarMensalidadeModal';
 import { Card } from '@/components/Card';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { buildGerarMensalidadeExport } from '@/utils/exportReportBuilders';
-import { DatePickerField } from '@/components/DatePickerField';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import {
   applyReajusteMensalidadePercentual,
   fetchClientesParaGerarMensalidades,
+  type GerarMensalidadeFiltroNfse,
   type GerarMensalidadeFiltrosClientes,
 } from '@/services/clientsService';
 import {
@@ -29,13 +28,17 @@ import {
   mesAnoAtualBR,
   parseISODate,
   parseMesAnoBR,
-  toISODate,
 } from '@/utils/date';
-import { calcProximoVencimentoMensalidade } from '@/utils/mensalidadeVencimento';
+import { calcProximoVencimentoMensalidade, labelDiaVencimento } from '@/utils/mensalidadeVencimento';
+import {
+  calcValoresParcelasAnuais,
+  normalizeParcelasAnuais,
+  normalizeTipoFaturamento,
+} from '@/utils/faturamentoCliente';
 import { CONSULTA, useHardwareBackToConsulta } from '@/utils/navigationConsulta';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -47,17 +50,14 @@ import {
   View,
 } from 'react-native';
 import Toast from 'react-native-toast-message';
+import { EnviarMensalidadeModal } from '@/components/mensalidades/EnviarMensalidadeModal';
 
 const CLIENTES_POR_PAGINA = 10;
 
+/** IDs efetivos: seleção explícita tem prioridade e não depende do filtro atual. */
 function targetsFromSelection(rows: ClienteListItem[], selected: Set<string>): string[] {
-  const rowIds = rows.map((r) => r.id);
-  const rowSet = new Set(rowIds);
-  if (selected.size > 0) {
-    const picked = [...selected].filter((id) => rowSet.has(id));
-    if (picked.length > 0) return picked;
-  }
-  return rowIds;
+  if (selected.size > 0) return [...selected];
+  return rows.map((r) => r.id);
 }
 
 export default function GerarMensalidadeScreen() {
@@ -66,10 +66,12 @@ export default function GerarMensalidadeScreen() {
   useHardwareBackToConsulta(CONSULTA.mensalidades);
   const { cliente: clienteParam } = useLocalSearchParams<{ cliente?: string | string[] }>();
   const clientePre = Array.isArray(clienteParam) ? clienteParam[0] : clienteParam;
+  const clientePreAplicado = useRef(false);
 
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, 320);
   const [segmento, setSegmento] = useState<string | 'todos'>('todos');
+  const [filtroNfse, setFiltroNfse] = useState<GerarMensalidadeFiltroNfse>('todos');
   const [incluirCancelados, setIncluirCancelados] = useState(false);
   const [mesReajusteStr, setMesReajusteStr] = useState(mesAnoAtualBR);
   const [filtrarPorMesReajuste, setFiltrarPorMesReajuste] = useState(false);
@@ -80,11 +82,11 @@ export default function GerarMensalidadeScreen() {
   const [enviarModalOpen, setEnviarModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  /** Mantém dados dos clientes selecionados mesmo se saírem do filtro. */
+  const [selectedCache, setSelectedCache] = useState<Map<string, ClienteListItem>>(new Map());
   const [percentStr, setPercentStr] = useState('');
   const [competencia, setCompetencia] = useState('');
   const [ultimosVencimento, setUltimosVencimento] = useState<Map<string, string>>(new Map());
-  const [usarMesmaDataTodos, setUsarMesmaDataTodos] = useState(false);
-  const [vencimento, setVencimento] = useState<Date | null>(null);
   const [pagina, setPagina] = useState(1);
   const [valoresTemporarios, setValoresTemporarios] = useState<Record<string, number>>({});
   const [editandoValorId, setEditandoValorId] = useState<string | null>(null);
@@ -107,10 +109,11 @@ export default function GerarMensalidadeScreen() {
       search: debouncedSearch,
       segmentoCodigo: segmento,
       incluirCancelados,
+      nfse: filtroNfse,
       mesReajusteDe: mesReajusteRange?.de ?? null,
       mesReajusteAte: mesReajusteRange?.ate ?? null,
     }),
-    [debouncedSearch, segmento, incluirCancelados, mesReajusteRange],
+    [debouncedSearch, segmento, incluirCancelados, filtroNfse, mesReajusteRange],
   );
 
   const load = useCallback(async () => {
@@ -167,8 +170,9 @@ export default function GerarMensalidadeScreen() {
   }, [user?.id, rows]);
 
   const vencimentoPorCliente = useCallback(
-    (clienteId: string, dataInicio: string | null) =>
+    (clienteId: string, diaVencimento: number | null, dataInicio: string | null) =>
       calcProximoVencimentoMensalidade({
+        diaVencimento,
         dataInicio,
         ultimoVencimento: ultimosVencimento.get(clienteId) ?? null,
       }),
@@ -180,22 +184,64 @@ export default function GerarMensalidadeScreen() {
     [rows, selected],
   );
 
+  const selecionadosForaDoFiltro = useMemo(() => {
+    if (selected.size === 0) return 0;
+    const rowSet = new Set(rows.map((r) => r.id));
+    let n = 0;
+    for (const id of selected) {
+      if (!rowSet.has(id)) n += 1;
+    }
+    return n;
+  }, [rows, selected]);
+
+  const clientesSelecionadosResolvidos = useCallback(
+    (ids: string[]) => {
+      const byId = new Map<string, ClienteListItem>();
+      for (const r of rows) byId.set(r.id, r);
+      for (const [id, r] of selectedCache) byId.set(id, r);
+      return ids.map((id) => byId.get(id)).filter((r): r is ClienteListItem => Boolean(r));
+    },
+    [rows, selectedCache],
+  );
+
   const totalPaginas = Math.max(1, Math.ceil(rows.length / CLIENTES_POR_PAGINA));
   const rowsPagina = useMemo(() => {
     const inicio = (pagina - 1) * CLIENTES_POR_PAGINA;
     return rows.slice(inicio, inicio + CLIENTES_POR_PAGINA);
   }, [pagina, rows]);
   const totalMensalidadesSelecionadas = useMemo(() => {
-    const ids = new Set(targetIds);
-    return rows.reduce(
-      (total, row) =>
-        total +
-        (ids.has(row.id)
-          ? (valoresTemporarios[row.id] ?? Number(row.valor_mensalidade)) || 0
-          : 0),
-      0,
-    );
-  }, [rows, targetIds, valoresTemporarios]);
+    const ids = selected.size > 0 ? [...selected] : targetIds;
+    const resolvidos = (() => {
+      const byId = new Map<string, ClienteListItem>();
+      for (const r of rows) byId.set(r.id, r);
+      for (const [id, r] of selectedCache) byId.set(id, r);
+      return ids.map((id) => byId.get(id)).filter((r): r is ClienteListItem => Boolean(r));
+    })();
+    return resolvidos.reduce((total, row) => {
+      const base = (valoresTemporarios[row.id] ?? Number(row.valor_mensalidade)) || 0;
+      if (normalizeTipoFaturamento(row.tipo_faturamento) === 'anual') {
+        const n = normalizeParcelasAnuais(row.parcelas_anuais) ?? 12;
+        const { totalAnual } = calcValoresParcelasAnuais(base, n);
+        return total + totalAnual;
+      }
+      return total + base;
+    }, 0);
+  }, [rows, selected, selectedCache, targetIds, valoresTemporarios]);
+
+  const qtdCobrancasPrevistas = useMemo(() => {
+    const ids = selected.size > 0 ? [...selected] : targetIds;
+    const byId = new Map<string, ClienteListItem>();
+    for (const r of rows) byId.set(r.id, r);
+    for (const [id, r] of selectedCache) byId.set(id, r);
+    return ids.reduce((acc, id) => {
+      const row = byId.get(id);
+      if (!row) return acc;
+      if (normalizeTipoFaturamento(row.tipo_faturamento) === 'anual') {
+        return acc + (normalizeParcelasAnuais(row.parcelas_anuais) ?? 12);
+      }
+      return acc + 1;
+    }, 0);
+  }, [rows, selected, selectedCache, targetIds]);
 
   useEffect(() => {
     setPagina(1);
@@ -205,39 +251,90 @@ export default function GerarMensalidadeScreen() {
     setPagina((atual) => Math.min(atual, totalPaginas));
   }, [totalPaginas]);
 
+  // Pré-seleção via query ?cliente= só uma vez — não limpa ao mudar filtro.
   useEffect(() => {
-    if (usarMesmaDataTodos) return;
-    if (targetIds.length !== 1) {
-      setVencimento(null);
-      return;
-    }
-    const row = rows.find((r) => r.id === targetIds[0]);
+    if (!clientePre || clientePreAplicado.current) return;
+    const row = rows.find((r) => r.id === clientePre);
     if (!row) return;
-    setVencimento(vencimentoPorCliente(row.id, row.data_inicio ?? null));
-  }, [targetIds, rows, ultimosVencimento, usarMesmaDataTodos, vencimentoPorCliente]);
-
-  useEffect(() => {
-    if (clientePre && rows.some((r) => r.id === clientePre)) {
-      setSelected(new Set([String(clientePre)]));
-    }
+    clientePreAplicado.current = true;
+    setSelected(new Set([String(clientePre)]));
+    setSelectedCache(new Map([[row.id, row]]));
   }, [clientePre, rows]);
 
+  // Atualiza cache se o cliente selecionado voltar na lista com dados novos.
+  useEffect(() => {
+    if (selected.size === 0) return;
+    setSelectedCache((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const r of rows) {
+        if (selected.has(r.id) && next.get(r.id) !== r) {
+          next.set(r.id, r);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [rows, selected]);
+
   const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
-  const toggleRow = (id: string) => {
+  const toggleRow = (row: ClienteListItem) => {
     setSelected((prev) => {
       const n = new Set(prev);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
+      if (n.has(row.id)) n.delete(row.id);
+      else n.add(row.id);
+      return n;
+    });
+    setSelectedCache((prev) => {
+      const n = new Map(prev);
+      if (n.has(row.id)) n.delete(row.id);
+      else n.set(row.id, row);
       return n;
     });
   };
   const toggleTodos = () => {
-    if (allSelected) setSelected(new Set());
-    else setSelected(new Set(rows.map((r) => r.id)));
+    if (allSelected) {
+      // Remove só os da lista filtrada; mantém seleção fora do filtro.
+      setSelected((prev) => {
+        const n = new Set(prev);
+        for (const r of rows) n.delete(r.id);
+        return n;
+      });
+      setSelectedCache((prev) => {
+        const n = new Map(prev);
+        for (const r of rows) n.delete(r.id);
+        return n;
+      });
+    } else {
+      setSelected((prev) => {
+        const n = new Set(prev);
+        for (const r of rows) n.add(r.id);
+        return n;
+      });
+      setSelectedCache((prev) => {
+        const n = new Map(prev);
+        for (const r of rows) n.set(r.id, r);
+        return n;
+      });
+    }
   };
 
   const selecionarTodosLista = () => {
-    setSelected(new Set(rows.map((r) => r.id)));
+    setSelected((prev) => {
+      const n = new Set(prev);
+      for (const r of rows) n.add(r.id);
+      return n;
+    });
+    setSelectedCache((prev) => {
+      const n = new Map(prev);
+      for (const r of rows) n.set(r.id, r);
+      return n;
+    });
+  };
+
+  const limparSelecao = () => {
+    setSelected(new Set());
+    setSelectedCache(new Map());
   };
 
   const abrirEdicaoValor = (row: ClienteListItem) => {
@@ -289,12 +386,8 @@ export default function GerarMensalidadeScreen() {
       Toast.show({ type: 'error', text1: 'Não há clientes na lista para gerar mensalidade.' });
       return;
     }
-    if (usarMesmaDataTodos && !vencimento) {
-      Toast.show({ type: 'error', text1: 'Informe a data de vencimento para aplicar a todos.' });
-      return;
-    }
 
-    const clientesSelecionados = rows.filter((r) => ids.includes(r.id));
+    const clientesSelecionados = clientesSelecionadosResolvidos(ids);
     if (gerarNotaFiscal) {
       const semNf = clientesSelecionados.filter((r) => !r.emite_nf);
       if (semNf.length === clientesSelecionados.length) {
@@ -353,14 +446,14 @@ export default function GerarMensalidadeScreen() {
         userId: user.id,
         clienteIds: ids,
         valoresPorCliente: valoresTemporarios,
-        dataVencimentoOverride: usarMesmaDataTodos && vencimento ? toISODate(vencimento) : null,
+        dataVencimentoOverride: null,
         competencia: competencia.trim() || null,
         gerarNotaFiscal,
         emitenteId: gerarNotaFiscal ? emitenteId || null : null,
       });
       const extras: string[] = [];
       if (ignorados > 0) extras.push(`${ignorados} sem valor de mensalidade`);
-      if (semVencimento > 0) extras.push(`${semVencimento} sem primeiro vencimento no cadastro`);
+      if (semVencimento > 0) extras.push(`${semVencimento} sem dia de vencimento no cadastro`);
       if (gerarNotaFiscal && nf) {
         extras.push(`${nf.emitidas} NFS-e autorizada(s)`);
         if (nf.rejeitadas > 0) extras.push(`${nf.rejeitadas} NF rejeitada(s) — veja em Notas fiscais`);
@@ -422,7 +515,7 @@ export default function GerarMensalidadeScreen() {
           getReport={() =>
             buildGerarMensalidadeExport(rows, {
               competencia: competencia.trim(),
-              vencimento: vencimento ? formatBRDate(vencimento) : '—',
+              vencimento: 'Automático (dia do cadastro)',
               segmento: segmento === 'todos' ? 'Todos' : segmento,
               incluirCancelados,
               mesReajuste:
@@ -538,6 +631,27 @@ export default function GerarMensalidadeScreen() {
               );
             })}
           </ScrollView>
+          <Text style={styles.label}>NFS-e</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+            {(
+              [
+                { value: 'todos', label: 'Todos' },
+                { value: 'com', label: 'Com NFS-e' },
+                { value: 'sem', label: 'Sem NFS-e' },
+              ] as const
+            ).map((opt) => {
+              const on = filtroNfse === opt.value;
+              return (
+                <Pressable
+                  key={opt.value}
+                  style={[styles.chip, on && styles.chipOn]}
+                  onPress={() => setFiltroNfse(opt.value)}
+                >
+                  <Text style={[styles.chipTxt, on && styles.chipTxtOn]}>{opt.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
           <View style={styles.switchRow}>
             <Text style={styles.label}>Incluir cancelados</Text>
             <View style={styles.switchScale}>
@@ -555,10 +669,29 @@ export default function GerarMensalidadeScreen() {
         </Card>
 
         <View style={styles.listHead}>
-          <Text style={styles.h}>Clientes ({rows.length})</Text>
-          <Pressable onPress={toggleTodos} style={styles.linkBtn}>
-            <Text style={styles.linkTxt}>{allSelected ? 'Limpar seleção' : 'Selecionar todos'}</Text>
-          </Pressable>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.h}>Clientes ({rows.length})</Text>
+            {selected.size > 0 ? (
+              <Text style={styles.selHint}>
+                {selected.size} selecionado(s)
+                {selecionadosForaDoFiltro > 0
+                  ? ` · ${selecionadosForaDoFiltro} fora do filtro atual`
+                  : ''}
+              </Text>
+            ) : null}
+          </View>
+          <View style={styles.listHeadActions}>
+            {selected.size > 0 ? (
+              <Pressable onPress={limparSelecao} style={styles.linkBtn}>
+                <Text style={styles.linkTxt}>Limpar seleção</Text>
+              </Pressable>
+            ) : null}
+            <Pressable onPress={toggleTodos} style={styles.linkBtn}>
+              <Text style={styles.linkTxt}>
+                {allSelected ? 'Desmarcar lista' : 'Selecionar todos'}
+              </Text>
+            </Pressable>
+          </View>
         </View>
 
         {fetchError ? <Text style={styles.fetchError}>{fetchError}</Text> : null}
@@ -589,14 +722,18 @@ export default function GerarMensalidadeScreen() {
             const on = selected.has(r.id);
             const valorTemporario = valoresTemporarios[r.id];
             const valorExibido = (valorTemporario ?? Number(r.valor_mensalidade)) || 0;
-            const proxVenc = vencimentoPorCliente(r.id, r.data_inicio ?? null);
+            const proxVenc = vencimentoPorCliente(
+              r.id,
+              r.dia_vencimento ?? null,
+              r.data_inicio ?? null,
+            );
             const proxLabel = proxVenc
               ? formatBRDate(proxVenc)
-              : r.data_inicio
+              : r.dia_vencimento != null || r.data_inicio
                 ? '—'
-                : 'Cadastre 1º vencimento';
+                : 'Cadastre dia de vencimento';
             return (
-              <Pressable key={r.id} style={[styles.rowCard, on && styles.rowCardOn]} onPress={() => toggleRow(r.id)}>
+              <Pressable key={r.id} style={[styles.rowCard, on && styles.rowCardOn]} onPress={() => toggleRow(r)}>
                 <View style={styles.check}>
                   <Ionicons
                     name={on ? 'checkbox' : 'square-outline'}
@@ -610,9 +747,26 @@ export default function GerarMensalidadeScreen() {
                   <Text style={styles.meta} numberOfLines={1}>Seg. {seg}</Text>
                   <Text style={styles.metaReaj} numberOfLines={2}>
                     Reaj. {r.data_reajuste ? formatBRDate(parseISODate(r.data_reajuste)) || r.data_reajuste : '—'}
-                    {' · '}1º venc. {r.data_inicio ? formatBRDate(parseISODate(r.data_inicio)) || r.data_inicio : '—'}
+                    {' · '}Venc. {labelDiaVencimento(r.dia_vencimento)}
                   </Text>
                   <Text style={styles.metaProx} numberOfLines={1}>Próx. {proxLabel}</Text>
+                  {normalizeTipoFaturamento(r.tipo_faturamento) === 'anual' ? (
+                    <Text style={styles.metaAnual} numberOfLines={1}>
+                      Anual · {normalizeParcelasAnuais(r.parcelas_anuais) ?? 12} parcelas
+                      {valorExibido > 0
+                        ? ` · ${formatBRL(
+                            calcValoresParcelasAnuais(
+                              valorExibido,
+                              normalizeParcelasAnuais(r.parcelas_anuais) ?? 12,
+                            ).valores[0] ?? 0,
+                          )}/parc.`
+                        : ''}
+                    </Text>
+                  ) : (
+                    <Text style={styles.metaMensal} numberOfLines={1}>
+                      Faturamento mensal
+                    </Text>
+                  )}
                   <Text style={[styles.metaNf, !r.emite_nf && styles.metaNfOff]} numberOfLines={1}>
                     {r.emite_nf ? 'Com NFS-e' : 'Sem NFS-e'}
                   </Text>
@@ -720,7 +874,9 @@ export default function GerarMensalidadeScreen() {
 
             <View style={styles.totalSelecionado}>
               <Text style={styles.totalSelecionadoLabel}>
-                Total das mensalidades selecionadas ({targetIds.length})
+                Total previsto ({qtdCobrancasPrevistas} cobrança
+                {qtdCobrancasPrevistas === 1 ? '' : 's'} · {targetIds.length} cliente
+                {targetIds.length === 1 ? '' : 's'})
               </Text>
               <Text style={styles.totalSelecionadoValor}>
                 {formatBRL(totalMensalidadesSelecionadas)}
@@ -732,35 +888,13 @@ export default function GerarMensalidadeScreen() {
         <Card style={styles.card} padded={false}>
           <Text style={styles.h}>Dados da mensalidade</Text>
           <Text style={styles.hint}>
-            Vencimento automático: última mensalidade + 30 dias ou 1º vencimento do cadastro.
+            Vencimento automático pelo dia cadastrado em cada cliente (ex.: dia 10). Se já houver
+            mensalidade, avança para o mês seguinte no mesmo dia.
           </Text>
-          {targetIds.length > 1 && !usarMesmaDataTodos ? (
+          {targetIds.length > 1 ? (
             <Text style={styles.autoHint}>
-              {targetIds.length} clientes com vencimento individual.
+              {targetIds.length} clientes — cada um com o próprio dia de vencimento.
             </Text>
-          ) : null}
-          <View style={styles.switchRow}>
-            <Text style={styles.label}>Mesma data para todos</Text>
-            <View style={styles.switchScale}>
-              <Switch
-                value={usarMesmaDataTodos}
-                onValueChange={(v) => {
-                  setUsarMesmaDataTodos(v);
-                  if (!v && targetIds.length === 1) {
-                    const row = rows.find((r) => r.id === targetIds[0]);
-                    if (row) setVencimento(vencimentoPorCliente(row.id, row.data_inicio ?? null));
-                  }
-                }}
-              />
-            </View>
-          </View>
-          {usarMesmaDataTodos || targetIds.length <= 1 ? (
-            <DatePickerField
-              compact
-              label={usarMesmaDataTodos ? 'Vencimento (todos)' : 'Próximo vencimento'}
-              value={vencimento}
-              onChange={setVencimento}
-            />
           ) : null}
           <Text style={styles.label}>Competência (opcional)</Text>
           <TextInput
@@ -889,8 +1023,21 @@ const styles = StyleSheet.create({
   listHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
     marginBottom: spacing.xs,
+  },
+  listHeadActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: spacing.xs,
+  },
+  selHint: {
+    fontSize: 12,
+    color: colors.orangeDark,
+    fontWeight: '600',
+    marginTop: 2,
   },
   linkBtn: { padding: spacing.xs },
   linkTxt: { color: colors.orange, fontWeight: '700', fontSize: 12 },
@@ -934,7 +1081,9 @@ const styles = StyleSheet.create({
   metaReaj: { fontSize: 10, color: colors.gray800, marginTop: 1, lineHeight: 13 },
   metaProx: { fontSize: 10, color: colors.gray600, marginTop: 1 },
   metaNf: { fontSize: 10, fontWeight: '700', color: colors.success, marginTop: 1 },
-  metaNfOff: { color: colors.danger },
+  metaNfOff: { color: colors.orangeDark },
+  metaAnual: { fontSize: 10, fontWeight: '700', color: colors.petroleum, marginTop: 1 },
+  metaMensal: { fontSize: 10, fontWeight: '600', color: colors.gray600, marginTop: 1 },
   cancel: { fontSize: 10, fontWeight: '700', color: colors.danger, marginTop: 2 },
   val: { fontSize: 14, fontWeight: '800', color: colors.orange, marginTop: 4 },
   valorOriginal: { fontSize: 10, color: colors.gray600, marginTop: 1 },

@@ -49,6 +49,38 @@ type StatusFiltro = 'todos' | MensalidadeGeradaStatusVisual;
 
 const MENSALIDADES_POR_PAGINA = 10;
 
+type HistListItem =
+  | { kind: 'single'; key: string; m: MensalidadeGerada }
+  | { kind: 'group'; key: string; loteId: string; parcelas: MensalidadeGerada[] };
+
+function groupHistoricoRows(rows: MensalidadeGerada[]): HistListItem[] {
+  const seenLotes = new Set<string>();
+  const items: HistListItem[] = [];
+  for (const m of rows) {
+    const lote = m.lote_faturamento_id?.trim();
+    if (lote) {
+      if (seenLotes.has(lote)) continue;
+      seenLotes.add(lote);
+      const parcelas = rows
+        .filter((x) => x.lote_faturamento_id === lote)
+        .sort((a, b) => (a.parcela_numero ?? 0) - (b.parcela_numero ?? 0));
+      items.push({ kind: 'group', key: `lote-${lote}`, loteId: lote, parcelas });
+    } else {
+      items.push({ kind: 'single', key: m.id, m });
+    }
+  }
+  return items;
+}
+
+function idsFromHistItems(items: HistListItem[]): string[] {
+  const ids: string[] = [];
+  for (const it of items) {
+    if (it.kind === 'single') ids.push(it.m.id);
+    else for (const p of it.parcelas) ids.push(p.id);
+  }
+  return ids;
+}
+
 const STATUS_OPTS: { id: StatusFiltro; label: string }[] = [
   { id: 'todos', label: 'Todos' },
   { id: 'pendente', label: 'Pendente' },
@@ -116,21 +148,13 @@ export default function HistoricoMensalidadesGeradasScreen() {
   const [nfConfirmMensalidade, setNfConfirmMensalidade] = useState<MensalidadeGerada | null>(null);
   const [nfEmitidas, setNfEmitidas] = useState<Record<string, { numero: number | null }>>({});
   const [pagina, setPagina] = useState(1);
+  const [lotesExpandidos, setLotesExpandidos] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     if (!user?.id) return;
     await sincronizarCarnesMensalidadesFaltantes(user.id).catch(() => undefined);
     const all = await fetchMensalidadesGeradasHistorico(user.id);
     setAllRows(all);
-    const nfMap = await fetchNotasFiscaisPorMensalidadeIds(
-      user.id,
-      all.map((m) => m.id),
-    ).catch(() => new Map());
-    const emitidas: Record<string, { numero: number | null }> = {};
-    for (const [mid, nf] of nfMap) {
-      if (nf.status === 'autorizada') emitidas[mid] = { numero: nf.numero ?? null };
-    }
-    setNfEmitidas(emitidas);
   }, [user?.id]);
 
   useFocusEffect(
@@ -158,20 +182,38 @@ export default function HistoricoMensalidadesGeradasScreen() {
       list = list.filter((m) => m.cliente_id === String(clienteFiltro));
     }
     const term = debouncedSearch.trim().toLowerCase();
-    if (term) {
-      list = list.filter((m) => matchSearch(m, term));
-    }
-    if (statusFilter !== 'todos') {
-      list = list.filter((m) => mensalidadeGeradaStatusVisual(m) === statusFilter);
+    const hasStatus = statusFilter !== 'todos';
+    if (term || hasStatus) {
+      const matchedIds = new Set(
+        list
+          .filter((m) => {
+            if (term && !matchSearch(m, term)) return false;
+            if (hasStatus && mensalidadeGeradaStatusVisual(m) !== statusFilter) return false;
+            return true;
+          })
+          .map((m) => m.id),
+      );
+      const lotesKeep = new Set(
+        list
+          .filter((m) => matchedIds.has(m.id) && m.lote_faturamento_id)
+          .map((m) => m.lote_faturamento_id as string),
+      );
+      list = list.filter(
+        (m) =>
+          matchedIds.has(m.id) ||
+          (m.lote_faturamento_id != null && lotesKeep.has(m.lote_faturamento_id)),
+      );
     }
     return list;
   }, [allRows, clienteFiltro, debouncedSearch, statusFilter]);
 
-  const totalPaginas = Math.max(1, Math.ceil(filteredRows.length / MENSALIDADES_POR_PAGINA));
-  const rowsPagina = useMemo(() => {
+  const historicoItems = useMemo(() => groupHistoricoRows(filteredRows), [filteredRows]);
+
+  const totalPaginas = Math.max(1, Math.ceil(historicoItems.length / MENSALIDADES_POR_PAGINA));
+  const itemsPagina = useMemo(() => {
     const inicio = (pagina - 1) * MENSALIDADES_POR_PAGINA;
-    return filteredRows.slice(inicio, inicio + MENSALIDADES_POR_PAGINA);
-  }, [filteredRows, pagina]);
+    return historicoItems.slice(inicio, inicio + MENSALIDADES_POR_PAGINA);
+  }, [historicoItems, pagina]);
 
   useEffect(() => {
     setPagina(1);
@@ -183,18 +225,31 @@ export default function HistoricoMensalidadesGeradasScreen() {
 
   useEffect(() => {
     let alive = true;
-    const ids = rowsPagina.map((m) => m.id);
-    if (!ids.length) {
+    const ids = idsFromHistItems(itemsPagina);
+    if (!user?.id || !ids.length) {
       setPagamentos({});
+      setNfEmitidas({});
       return;
     }
     (async () => {
       try {
-        const map = await fetchPagamentosMensalidadesPorIds(ids);
-        if (alive) setPagamentos(map);
+        const [paysMap, nfMap] = await Promise.all([
+          fetchPagamentosMensalidadesPorIds(ids),
+          fetchNotasFiscaisPorMensalidadeIds(user.id, ids),
+        ]);
+        if (!alive) return;
+        setPagamentos(paysMap);
+        const emitidas: Record<string, { numero: number | null }> = {};
+        for (const [mid, nf] of nfMap) {
+          if (nf.status === 'autorizada') {
+            emitidas[mid] = { numero: nf.numero ?? null };
+          }
+        }
+        setNfEmitidas(emitidas);
       } catch (e) {
         if (alive) {
           setPagamentos({});
+          setNfEmitidas({});
           showAppError((e as Error).message);
         }
       }
@@ -202,7 +257,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
     return () => {
       alive = false;
     };
-  }, [rowsPagina]);
+  }, [itemsPagina, user?.id]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -242,6 +297,10 @@ export default function HistoricoMensalidadesGeradasScreen() {
         { emitenteId: emitenteId || undefined },
       );
       if (res.success) {
+        setNfEmitidas((prev) => ({
+          ...prev,
+          [m.id]: { numero: null },
+        }));
         showAppSuccess(res.message ?? 'NFS-e emitida com sucesso.', 'Veja em Notas fiscais.');
         router.push('/(app)/notas-fiscais');
       } else if (res.ignorada) {
@@ -299,8 +358,16 @@ export default function HistoricoMensalidadesGeradasScreen() {
     return allRows.length;
   }, [allRows, clienteFiltro]);
 
-  const renderItem = ({ item: m }: { item: MensalidadeGerada }) => {
-    const cli = unwrapCliente(m);
+  const toggleLote = (loteId: string) => {
+    setLotesExpandidos((prev) => {
+      const n = new Set(prev);
+      if (n.has(loteId)) n.delete(loteId);
+      else n.add(loteId);
+      return n;
+    });
+  };
+
+  const renderParcelaBody = (m: MensalidadeGerada, opts?: { compact?: boolean }) => {
     const vis = mensalidadeGeradaStatusVisual(m);
     const st = statusColor(vis);
     const pend = Math.max(0, reaisParaCentavos(m.valor) - reaisParaCentavos(m.valor_pago)) / 100;
@@ -311,49 +378,50 @@ export default function HistoricoMensalidadesGeradasScreen() {
     const nfBusy = nfBusyId === m.id;
     const pays = pagamentos[m.id] ?? [];
     const venc = m.data_vencimento.split('-').reverse().join('/');
+    const parcelaLabel =
+      m.parcela_numero != null && m.parcela_total != null
+        ? `Parcela ${m.parcela_numero}/${m.parcela_total}`
+        : null;
 
     return (
-      <Card style={styles.card} padded={false}>
+      <View style={opts?.compact ? styles.parcelaInner : undefined}>
         <View style={styles.cardHead}>
           <View style={styles.cardTitleCol}>
-            <Text style={styles.cli} numberOfLines={2}>
-              {cli.nome}
-            </Text>
-            {cli.empresa ? (
-              <Text style={styles.emp} numberOfLines={1}>
-                {cli.empresa}
+            {parcelaLabel ? (
+              <Text style={styles.parcelaTitulo} numberOfLines={1}>
+                {parcelaLabel}
               </Text>
             ) : null}
+            <Text style={styles.metaTxt} numberOfLines={1}>
+              Venc. {venc}
+              {m.competencia ? ` · Comp. ${m.competencia}` : ''}
+            </Text>
+            <Text style={styles.metaTxt} numberOfLines={2}>
+              {formatBRL(m.valor)} · pago {formatBRL(m.valor_pago)} · pend. {formatBRL(pend)}
+            </Text>
           </View>
           <View style={[styles.tag, { backgroundColor: st.bg }]}>
             <Text style={[styles.tagTxt, { color: st.fg }]}>{vis}</Text>
           </View>
         </View>
 
-        <View style={styles.compactMeta}>
-          {m.competencia ? <Text style={styles.metaTxt} numberOfLines={1}>Comp. {m.competencia}</Text> : null}
-          <Text style={styles.metaTxt} numberOfLines={1}>Venc. {venc}</Text>
-          <Text style={styles.metaTxt} numberOfLines={2}>
-            {formatBRL(m.valor)} · pago {formatBRL(m.valor_pago)}
-          </Text>
-          <Text style={styles.metaTxt} numberOfLines={1}>Pend. {formatBRL(pend)}</Text>
-        </View>
-
-        <View style={styles.hist}>
-          <Text style={styles.histTitle}>Pagamentos</Text>
-          {!pays.length ? (
-            <Text style={styles.histEmpty}>Nenhum pagamento.</Text>
-          ) : (
-            pays.map((p) => (
-              <View key={p.id} style={styles.histRow}>
-                <Text style={styles.histVal}>{formatBRL(p.valor_pago)}</Text>
-                <Text style={styles.histMeta} numberOfLines={2}>
-                  {p.data_pagamento.split('-').reverse().join('/')} · {p.forma_pagamento}
-                </Text>
-              </View>
-            ))
-          )}
-        </View>
+        {!opts?.compact ? (
+          <View style={styles.hist}>
+            <Text style={styles.histTitle}>Pagamentos</Text>
+            {!pays.length ? (
+              <Text style={styles.histEmpty}>Nenhum pagamento.</Text>
+            ) : (
+              pays.map((p) => (
+                <View key={p.id} style={styles.histRow}>
+                  <Text style={styles.histVal}>{formatBRL(p.valor_pago)}</Text>
+                  <Text style={styles.histMeta} numberOfLines={2}>
+                    {p.data_pagamento.split('-').reverse().join('/')} · {p.forma_pagamento}
+                  </Text>
+                </View>
+              ))
+            )}
+          </View>
+        ) : null}
 
         <View style={styles.btnRow}>
           {showPay ? (
@@ -389,6 +457,76 @@ export default function HistoricoMensalidadesGeradasScreen() {
             style={styles.btnEmitirNf}
           />
         ) : null}
+      </View>
+    );
+  };
+
+  const renderItem = ({ item }: { item: HistListItem }) => {
+    if (item.kind === 'single') {
+      const m = item.m;
+      const cli = unwrapCliente(m);
+      return (
+        <Card style={styles.card} padded={false}>
+          <View style={styles.cardHead}>
+            <View style={styles.cardTitleCol}>
+              <Text style={styles.cli} numberOfLines={2}>
+                {cli.nome}
+              </Text>
+              {cli.empresa ? (
+                <Text style={styles.emp} numberOfLines={1}>
+                  {cli.empresa}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+          {renderParcelaBody(m)}
+        </Card>
+      );
+    }
+
+    const { loteId, parcelas } = item;
+    const first = parcelas[0];
+    const cli = unwrapCliente(first);
+    const totalValor = parcelas.reduce((s, p) => s + Number(p.valor || 0), 0);
+    const totalPago = parcelas.reduce((s, p) => s + Number(p.valor_pago || 0), 0);
+    const pagas = parcelas.filter((p) => mensalidadeGeradaStatusVisual(p) === 'pago').length;
+    const nfOk = parcelas.filter((p) => nfEmitidas[p.id]).length;
+    const expanded = lotesExpandidos.has(loteId);
+    const totalParc = first.parcela_total ?? parcelas.length;
+
+    return (
+      <Card style={[styles.card, styles.cardGrupo]} padded={false}>
+        <Pressable onPress={() => toggleLote(loteId)} style={styles.grupoHead}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cli} numberOfLines={2}>
+              {cli.nome}
+            </Text>
+            {cli.empresa ? (
+              <Text style={styles.emp} numberOfLines={1}>
+                {cli.empresa}
+              </Text>
+            ) : null}
+            <Text style={styles.grupoBadge}>Faturamento anual</Text>
+            <Text style={styles.metaTxt} numberOfLines={2}>
+              {pagas}/{totalParc} parcelas pagas · NFS-e {nfOk}/{totalParc}
+            </Text>
+            <Text style={styles.metaTxt} numberOfLines={1}>
+              Total {formatBRL(totalValor)} · pago {formatBRL(totalPago)}
+            </Text>
+          </View>
+          <Ionicons
+            name={expanded ? 'chevron-up' : 'chevron-down'}
+            size={22}
+            color={colors.petroleum}
+          />
+        </Pressable>
+        {expanded
+          ? parcelas.map((p) => (
+              <View key={p.id} style={styles.parcelaBox}>
+                {renderParcelaBody(p, { compact: true })}
+              </View>
+            ))
+          : null}
       </Card>
     );
   };
@@ -457,14 +595,14 @@ export default function HistoricoMensalidadesGeradasScreen() {
         <Text style={styles.resultCount}>
           {loading
             ? 'Carregando…'
-            : `${filteredRows.length} de ${totalBase} mensalidade(s)`}
+            : `${historicoItems.length} grupo(s)/item(ns) · ${filteredRows.length} mensalidade(s)`}
         </Text>
       </View>
     </>
   );
 
   const listFooter =
-    !loading && filteredRows.length > 0 ? (
+    !loading && historicoItems.length > 0 ? (
       <View style={styles.paginacao}>
         <Pressable
           style={[styles.paginaBtn, pagina === 1 && styles.paginaBtnDisabled]}
@@ -508,11 +646,9 @@ export default function HistoricoMensalidadesGeradasScreen() {
   return (
     <View style={styles.root}>
       <FlatList
-        data={rowsPagina}
-        keyExtractor={(m) => m.id}
+        data={itemsPagina}
+        keyExtractor={(it) => it.key}
         renderItem={renderItem}
-        numColumns={2}
-        columnWrapperStyle={styles.columnWrapper}
         ListHeaderComponent={listHeader}
         ListFooterComponent={listFooter}
         contentContainerStyle={styles.listContent}
@@ -678,10 +814,49 @@ const styles = StyleSheet.create({
     minWidth: 0,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  cardGrupo: {
+    borderWidth: 1,
+    borderColor: colors.infoSoft ?? colors.gray200,
+  },
+  grupoHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  grupoBadge: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    marginBottom: 2,
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.petroleum,
+    backgroundColor: colors.infoSoft ?? '#e3f2fd',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+  },
+  parcelaBox: {
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.gray100,
+  },
+  parcelaInner: {
+    gap: 4,
+  },
+  parcelaTitulo: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.petroleum,
+    marginBottom: 2,
   },
   cardHead: {
-    flexDirection: 'column',
+    flexDirection: 'row',
     alignItems: 'flex-start',
+    justifyContent: 'space-between',
     gap: spacing.xs,
   },
   cardTitleCol: {

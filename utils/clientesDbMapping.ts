@@ -1,6 +1,10 @@
 import type { Cliente, ClienteFormValues, ClienteListItem, SortField } from '@/types/models';
 import { parseBRLMasked } from '@/utils/currency';
 import { toISODate } from '@/utils/date';
+import {
+  normalizeParcelasAnuais,
+  normalizeTipoFaturamento,
+} from '@/utils/faturamentoCliente';
 
 /** Linha bruta de public.clientes (schema legado + colunas adicionadas pelo app). */
 export type ClienteDbRow = {
@@ -13,6 +17,7 @@ export type ClienteDbRow = {
   cnpj?: string | null;
   mensalidade?: number | null;
   data_inicio?: string | null;
+  dia_vencimento?: number | null;
   data_reajuste?: string | null;
   ultimo_reajuste?: string | null;
   data_cancelamento?: string | null;
@@ -33,18 +38,20 @@ export type ClienteDbRow = {
   segmento_cliente_codigo?: string | null;
   valor_mensalidade_anterior?: number | null;
   emite_nf?: boolean | null;
+  tipo_faturamento?: string | null;
+  parcelas_anuais?: number | null;
   inscricao_estadual?: string | null;
   pdf_path?: string | null;
   cancelado?: boolean | null;
 };
 
 export const CLIENTE_LIST_SELECT =
-  'id, user_id, created_at, updated_at, documento, cnpj, nome, nome_fantasia, mensalidade, data_inicio, data_reajuste, ultimo_reajuste, mes_entrada, observacao, cep, logradouro, numero, complemento, bairro, cidade, estado, segmento_cliente_codigo, tipo_cliente, valor_mensalidade_anterior, emite_nf, inscricao_estadual, pdf_path, cancelado, ativo, data_cancelamento, celular, email';
+  'id, user_id, created_at, updated_at, documento, cnpj, nome, nome_fantasia, mensalidade, data_inicio, dia_vencimento, data_reajuste, ultimo_reajuste, mes_entrada, observacao, cep, logradouro, numero, complemento, bairro, cidade, estado, segmento_cliente_codigo, tipo_cliente, valor_mensalidade_anterior, emite_nf, tipo_faturamento, parcelas_anuais, inscricao_estadual, pdf_path, cancelado, ativo, data_cancelamento, celular, email';
 
 export const CLIENTE_DETAIL_SELECT = `${CLIENTE_LIST_SELECT}, contatos_cliente(*)`;
 
 export const CLIENTE_GERAR_MENSALIDADES_SELECT =
-  'id, nome, nome_fantasia, mensalidade, valor_mensalidade_anterior, segmento_cliente_codigo, tipo_cliente, cancelado, ativo, data_cancelamento, data_reajuste, data_inicio';
+  'id, nome, nome_fantasia, mensalidade, valor_mensalidade_anterior, segmento_cliente_codigo, tipo_cliente, cancelado, ativo, data_cancelamento, data_reajuste, data_inicio, dia_vencimento, tipo_faturamento, parcelas_anuais, emite_nf';
 
 /** Join embutido em outras tabelas (mensalidades, vendas, NF). */
 export const CLIENTE_EMBED_SELECT = 'nome_fantasia, nome, cnpj, documento, emite_nf, logradouro, numero, bairro, cidade, estado, cep';
@@ -66,6 +73,15 @@ export function isClienteCancelado(row: Pick<ClienteDbRow, 'cancelado' | 'ativo'
 
 export function mapDbRowToCliente(row: ClienteDbRow): Cliente {
   const segmento = (row.segmento_cliente_codigo ?? 'DIVERSOS').trim() || 'DIVERSOS';
+  let diaVencimento =
+    row.dia_vencimento == null || Number.isNaN(Number(row.dia_vencimento))
+      ? null
+      : Math.min(31, Math.max(1, Math.trunc(Number(row.dia_vencimento))));
+  if (diaVencimento == null && row.data_inicio) {
+    const parts = String(row.data_inicio).slice(0, 10).split('-');
+    const day = parts.length === 3 ? parseInt(parts[2], 10) : NaN;
+    if (Number.isFinite(day) && day >= 1 && day <= 31) diaVencimento = day;
+  }
   return {
     id: String(row.id),
     user_id: row.user_id ?? '',
@@ -80,6 +96,7 @@ export function mapDbRowToCliente(row: ClienteDbRow): Cliente {
     segmento_cliente_codigo: segmento,
     tipo_ramo: null,
     data_inicio: row.data_inicio ?? null,
+    dia_vencimento: diaVencimento,
     data_reajuste: row.data_reajuste ?? null,
     ultimo_reajuste: row.ultimo_reajuste ?? null,
     observacao: row.observacao ?? null,
@@ -93,6 +110,13 @@ export function mapDbRowToCliente(row: ClienteDbRow): Cliente {
     pdf_path: row.pdf_path ?? null,
     cancelado: isClienteCancelado(row),
     emite_nf: Boolean(row.emite_nf),
+    tipo_faturamento: normalizeTipoFaturamento(row.tipo_faturamento),
+    parcelas_anuais:
+      normalizeTipoFaturamento(row.tipo_faturamento) === 'anual'
+        ? normalizeParcelasAnuais(row.parcelas_anuais) ?? 12
+        : row.parcelas_anuais == null
+          ? null
+          : normalizeParcelasAnuais(row.parcelas_anuais),
     inscricao_estadual: row.inscricao_estadual ?? undefined,
     created_at: row.created_at ?? new Date().toISOString(),
     updated_at: row.updated_at ?? undefined,
@@ -129,6 +153,16 @@ export function mapClienteFormToDbRow(
   if (!codigo) throw new Error('Selecione o segmento do cliente.');
 
   const cancelado = values.cancelado;
+  const diaRaw = values.dia_vencimento.trim().replace(/\D/g, '');
+  const diaNum = diaRaw ? parseInt(diaRaw, 10) : NaN;
+  const dia_vencimento =
+    Number.isFinite(diaNum) && diaNum >= 1 && diaNum <= 31 ? diaNum : null;
+
+  const tipo_faturamento = normalizeTipoFaturamento(values.tipo_faturamento);
+  const parcelas_anuais =
+    tipo_faturamento === 'anual'
+      ? normalizeParcelasAnuais(values.parcelas_anuais) ?? 12
+      : null;
 
   return {
     ...(extras?.user_id ? { user_id: extras.user_id } : {}),
@@ -139,7 +173,7 @@ export function mapClienteFormToDbRow(
     mensalidade: valor,
     segmento_cliente_codigo: codigo,
     tipo_cliente: codigo,
-    data_inicio: values.data_inicio ? toISODate(values.data_inicio) : null,
+    dia_vencimento,
     data_reajuste: values.data_reajuste ? toISODate(values.data_reajuste) : null,
     mes_entrada: values.mes_entrada.trim() || null,
     observacao: values.observacao.trim() || null,
@@ -155,6 +189,8 @@ export function mapClienteFormToDbRow(
     ativo: cancelado ? 'N' : 'S',
     data_cancelamento: cancelado ? toISODate(new Date()) : null,
     emite_nf: values.emite_nf,
+    tipo_faturamento,
+    parcelas_anuais,
     pdf_path: extras?.pdf_path ?? null,
     ultimo_reajuste: extras?.ultimo_reajuste ?? null,
     valor_mensalidade_anterior: extras?.valor_mensalidade_anterior ?? null,

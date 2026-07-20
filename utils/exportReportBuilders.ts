@@ -102,6 +102,13 @@ export function buildClientDetailExport(
       { label: 'Empresa', value: data.nome_empresa ?? '—' },
       { label: 'Segmento', value: data.segmento_cliente?.nome ?? data.segmento_cliente_codigo ?? '—' },
       { label: 'NF', value: data.emite_nf ? 'Com NF' : 'Sem NF' },
+      {
+        label: 'Tipo de faturamento',
+        value:
+          data.tipo_faturamento === 'anual'
+            ? `Anual · ${data.parcelas_anuais ?? '—'} parcela(s)`
+            : 'Mensal',
+      },
       { label: 'Cadastro', value: formatDateTimeBRFromISO(data.created_at) || '—' },
     ]),
     kvSection('Endereço', [
@@ -118,7 +125,7 @@ export function buildClientDetailExport(
         value:
           data.valor_mensalidade_anterior != null ? formatBRL(data.valor_mensalidade_anterior) : '—',
       },
-      { label: 'Primeiro vencimento', value: formatBRDate(parseISODate(data.data_inicio)) || '—' },
+      { label: 'Data de vencimento', value: data.dia_vencimento != null ? `Dia ${data.dia_vencimento}` : '—' },
       { label: 'Data reajuste', value: formatBRDate(parseISODate(data.data_reajuste)) || '—' },
     ]),
     kvSection('Observações', [{ label: 'Texto', value: data.observacao?.trim() || '—' }]),
@@ -171,6 +178,17 @@ export function buildClientFormExport(values: ClienteFormValues, title: string):
     { label: 'Empresa', value: values.nome_empresa || '—' },
     { label: 'Segmento', value: values.segmento_cliente_codigo },
     { label: 'Mensalidade', value: values.valor_mensalidade },
+    {
+      label: 'Data de vencimento',
+      value: values.dia_vencimento.trim() ? `Dia ${values.dia_vencimento.trim()}` : '—',
+    },
+    {
+      label: 'Tipo de faturamento',
+      value:
+        values.tipo_faturamento === 'anual'
+          ? `Anual · ${values.parcelas_anuais || '—'} parcela(s)`
+          : 'Mensal',
+    },
     { label: 'Cancelado', value: values.cancelado ? 'Sim' : 'Não' },
     {
       label: 'Justificativa cancelamento',

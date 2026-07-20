@@ -489,10 +489,14 @@ export async function fetchDashboardStats(userId: string): Promise<{
   return { totalClientes, somaMensalidades };
 }
 
+export type GerarMensalidadeFiltroNfse = 'todos' | 'com' | 'sem';
+
 export type GerarMensalidadeFiltrosClientes = {
   search: string;
   segmentoCodigo: string | 'todos';
   incluirCancelados: boolean;
+  /** Filtra por flag emite_nf do cadastro. */
+  nfse: GerarMensalidadeFiltroNfse;
   /**
    * Quando informado, retorna clientes cuja `data_reajuste` cai no mês (inclusive entre de e ate).
    * Ex.: reajuste em junho/2026 → de 2026-06-01, ate 2026-06-30.
@@ -521,6 +525,12 @@ export async function fetchClientesParaGerarMensalidades(
     rows = rows.filter(
       (r) => (r.segmento_cliente_codigo ?? '').trim() === filters.segmentoCodigo.trim(),
     );
+  }
+
+  if (filters.nfse === 'com') {
+    rows = rows.filter((r) => Boolean(r.emite_nf));
+  } else if (filters.nfse === 'sem') {
+    rows = rows.filter((r) => !r.emite_nf);
   }
 
   if (filters.mesReajusteDe && filters.mesReajusteAte) {

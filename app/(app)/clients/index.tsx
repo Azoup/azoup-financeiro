@@ -56,7 +56,7 @@ export default function ClientsListScreen() {
   const debounced = useDebounce(search, 320);
   const [sortField, setSortField] = useState<SortField>('nome_cliente');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
-  const [situacao, setSituacao] = useState<ClienteSituacaoFiltro>('todos');
+  const [situacao, setSituacao] = useState<ClienteSituacaoFiltro>('ativos');
   const [items, setItems] = useState<ClienteListItem[]>([]);
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);

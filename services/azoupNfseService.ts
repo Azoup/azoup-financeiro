@@ -116,7 +116,7 @@ function buildFormFromAzoup(
     valor_mensalidade_anterior: '',
     valor_mensalidade: formatBRL(valorReais),
     segmento_cliente_codigo: 'DIVERSOS',
-    data_inicio: null,
+    dia_vencimento: '',
     data_reajuste: null,
     ultimo_reajuste: null,
     observacao: `${AZOUP_OBS_PREFIX}${payload.id}`,
@@ -136,6 +136,8 @@ function buildFormFromAzoup(
     cancelado: false,
     cancelamento_justificativa: '',
     emite_nf: true,
+    tipo_faturamento: 'mensal',
+    parcelas_anuais: '12',
   };
 }
 

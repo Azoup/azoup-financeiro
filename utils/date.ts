@@ -67,6 +67,17 @@ export function addDaysToISODate(iso: string, days: number): string {
   return toISODate(d);
 }
 
+/** Soma meses a uma data ISO, clampando o dia ao último do mês destino. */
+export function addMonthsToISODate(iso: string, months: number): string {
+  const d = parseISODate(iso);
+  if (!d) return iso;
+  const day = d.getDate();
+  const target = new Date(d.getFullYear(), d.getMonth() + months, 1);
+  const last = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(day, last));
+  return toISODate(target);
+}
+
 export function formatBRDate(d: Date | null): string {
   if (!d) return '';
   return new Intl.DateTimeFormat('pt-BR').format(d);

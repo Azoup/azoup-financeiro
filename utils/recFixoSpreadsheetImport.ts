@@ -151,7 +151,7 @@ function emptyImportForm(): ClienteFormValues {
     valor_mensalidade_anterior: '',
     valor_mensalidade: '',
     segmento_cliente_codigo: 'DIVERSOS',
-    data_inicio: null,
+    dia_vencimento: '',
     data_reajuste: null,
     ultimo_reajuste: null,
     observacao: '',
@@ -169,6 +169,8 @@ function emptyImportForm(): ClienteFormValues {
     cancelado: false,
     cancelamento_justificativa: '',
     emite_nf: false,
+    tipo_faturamento: 'mensal',
+    parcelas_anuais: '12',
   };
 }
 
@@ -220,7 +222,9 @@ function rowToValues(
   values.valor_mensalidade = formatBRL(valorNum);
   values.segmento_cliente_codigo = segmento_cliente_codigo;
   values.mes_entrada = mes_entrada;
-  values.data_inicio = parseDataInclusaoCell(dataRaw);
+  const dataInclusao = parseDataInclusaoCell(dataRaw);
+  values.dia_vencimento =
+    mes_entrada || (dataInclusao ? String(dataInclusao.getDate()) : '');
   values.observacao = buildObservacao(o).slice(0, 8000);
 
   return { kind: 'ok', values };

@@ -10,11 +10,18 @@ import { colors, radius, spacing } from '@/theme/colors';
 import type { Cliente, ClienteFormValues, ContatoClienteInput } from '@/types/models';
 import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate, toISODate } from '@/utils/date';
+import {
+  PARCELAS_ANUAIS_OPCOES,
+  labelTipoFaturamento,
+  normalizeTipoFaturamento,
+  previewFaturamentoAnual,
+  type TipoFaturamento,
+} from '@/utils/faturamentoCliente';
 import { validateClienteForm } from '@/utils/validation';
 import { isCnpjDigitsComplete, isZpfDocumento, CNPJ_INPUT_MASK } from '@/utils/cnpj';
 import { fetchCompanyByCnpj } from '@/services/cnpjLookup';
-import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import MaskInput, { Masks } from 'react-native-mask-input';
 import Toast from 'react-native-toast-message';
 
@@ -29,7 +36,7 @@ export function getEmptyClienteForm(): ClienteFormValues {
     valor_mensalidade_anterior: '',
     valor_mensalidade: '',
     segmento_cliente_codigo: '',
-    data_inicio: null,
+    dia_vencimento: '',
     data_reajuste: null,
     ultimo_reajuste: null,
     observacao: '',
@@ -47,6 +54,8 @@ export function getEmptyClienteForm(): ClienteFormValues {
     cancelado: false,
     cancelamento_justificativa: '',
     emite_nf: false,
+    tipo_faturamento: 'mensal',
+    parcelas_anuais: '12',
   };
 }
 
@@ -63,7 +72,7 @@ export function clienteToFormValues(c: Cliente, contatos: ContatoClienteInput[])
     valor_mensalidade: formatBRL(c.valor_mensalidade),
     segmento_cliente_codigo:
       (c.segmento_cliente_codigo ?? c.segmento_cliente?.codigo ?? '').trim() || 'DIVERSOS',
-    data_inicio: parseISODate(c.data_inicio),
+    dia_vencimento: c.dia_vencimento != null ? String(c.dia_vencimento) : '',
     data_reajuste: parseISODate(c.data_reajuste),
     ultimo_reajuste: parseISODate(c.ultimo_reajuste),
     observacao: c.observacao ?? '',
@@ -81,6 +90,8 @@ export function clienteToFormValues(c: Cliente, contatos: ContatoClienteInput[])
     cancelado: Boolean(c.cancelado),
     cancelamento_justificativa: c.ultima_justificativa_cancelamento?.trim() ?? '',
     emite_nf: Boolean(c.emite_nf),
+    tipo_faturamento: normalizeTipoFaturamento(c.tipo_faturamento),
+    parcelas_anuais: c.parcelas_anuais != null ? String(c.parcelas_anuais) : '12',
   };
 }
 
@@ -129,6 +140,15 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
   const [loading, setLoading] = useState(false);
   const [buscandoCnpj, setBuscandoCnpj] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const previewAnual = useMemo(
+    () =>
+      values.tipo_faturamento === 'anual'
+        ? previewFaturamentoAnual(values.valor_mensalidade, parseInt(values.parcelas_anuais, 10) || 12)
+        : null,
+    [values.tipo_faturamento, values.valor_mensalidade, values.parcelas_anuais],
+  );
+
   useEffect(() => {
     if (initial) setValues(initial);
   }, [initial]);
@@ -174,9 +194,11 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
       setError(msg);
       return;
     }
-    if (values.data_inicio && values.data_reajuste) {
-      if (toISODate(values.data_reajuste) < toISODate(values.data_inicio)) {
-        setError('Data do reajuste não pode ser anterior ao primeiro vencimento.');
+    const diaTxt = values.dia_vencimento.trim().replace(/\D/g, '');
+    if (diaTxt) {
+      const dia = parseInt(diaTxt, 10);
+      if (!Number.isFinite(dia) || dia < 1 || dia > 31) {
+        setError('Data de vencimento: informe o dia do mês entre 1 e 31.');
         return;
       }
     }
@@ -187,6 +209,13 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
     if (values.cancelado && !values.cancelamento_justificativa.trim()) {
       setError('Informe a justificativa do cancelamento.');
       return;
+    }
+    if (values.tipo_faturamento === 'anual') {
+      const n = parseInt(values.parcelas_anuais.replace(/\D/g, ''), 10);
+      if (!(PARCELAS_ANUAIS_OPCOES as readonly number[]).includes(n)) {
+        setError('No faturamento anual, escolha 1, 2, 3, 4, 6 ou 12 parcelas.');
+        return;
+      }
     }
     setError(null);
     setLoading(true);
@@ -410,13 +439,69 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
       </FormSection>
 
       <FormSection title="Mensalidade">
+        <Text style={styles.fieldLabel}>Tipo de faturamento</Text>
+        <View style={styles.fatRow}>
+          {(['mensal', 'anual'] as TipoFaturamento[]).map((tipo) => {
+            const on = values.tipo_faturamento === tipo;
+            return (
+              <Pressable
+                key={tipo}
+                style={[styles.fatChip, on && styles.fatChipOn]}
+                onPress={() =>
+                  setValues((v) => ({
+                    ...v,
+                    tipo_faturamento: tipo,
+                    parcelas_anuais: tipo === 'anual' ? v.parcelas_anuais || '12' : v.parcelas_anuais,
+                  }))
+                }
+              >
+                <Text style={[styles.fatChipTxt, on && styles.fatChipTxtOn]}>
+                  {labelTipoFaturamento(tipo)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {values.tipo_faturamento === 'anual' ? (
+          <>
+            <Text style={styles.fieldLabel}>Quantidade de parcelas</Text>
+            <View style={styles.fatRow}>
+              {PARCELAS_ANUAIS_OPCOES.map((n) => {
+                const on = values.parcelas_anuais === String(n);
+                return (
+                  <Pressable
+                    key={n}
+                    style={[styles.parcelaChip, on && styles.fatChipOn]}
+                    onPress={() => setValues((v) => ({ ...v, parcelas_anuais: String(n) }))}
+                  >
+                    <Text style={[styles.fatChipTxt, on && styles.fatChipTxtOn]}>{n}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {previewAnual ? <Text style={styles.previewAnual}>{previewAnual}</Text> : null}
+          </>
+        ) : null}
+
         <View style={styles.row2}>
-          <DateMaskedField
-            compact
-            label="1º vencimento"
-            value={values.data_inicio}
-            onChange={(d) => setValues((v) => ({ ...v, data_inicio: d }))}
-          />
+          <View style={{ flex: 1 }}>
+            <FormTextInput
+              compact
+              label="Data de vencimento"
+              value={values.dia_vencimento}
+              onChangeText={(t) =>
+                setValues((v) => ({
+                  ...v,
+                  dia_vencimento: t.replace(/\D/g, '').slice(0, 2),
+                }))
+              }
+              keyboardType="number-pad"
+              placeholder="Ex.: 10"
+              maxLength={2}
+            />
+            <Text style={styles.hint}>Dia do mês (1–31). As mensalidades vencem nesse dia.</Text>
+          </View>
           <DateMaskedField
             compact
             label="Data reajuste"
@@ -488,6 +573,43 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     textTransform: 'uppercase',
     letterSpacing: 0.3,
+  },
+  fatRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: spacing.sm,
+  },
+  fatChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+    backgroundColor: colors.white,
+  },
+  parcelaChip: {
+    minWidth: 40,
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+    backgroundColor: colors.white,
+  },
+  fatChipOn: {
+    borderColor: colors.orange,
+    backgroundColor: 'rgba(232, 106, 36, 0.1)',
+  },
+  fatChipTxt: { fontSize: 12, fontWeight: '600', color: colors.gray600 },
+  fatChipTxtOn: { color: colors.petroleum },
+  previewAnual: {
+    fontSize: 12,
+    color: colors.petroleum,
+    fontWeight: '600',
+    marginBottom: spacing.sm,
+    lineHeight: 17,
   },
   hint: {
     fontSize: 11,

@@ -10,12 +10,37 @@ import type {
 } from '@/types/mensalidadeGerada';
 import { toISODate } from '@/utils/date';
 import { mapClienteJoinEmbed } from '@/utils/clientesDbMapping';
+import {
+  montarParcelasAnuais,
+  normalizeParcelasAnuais,
+  normalizeTipoFaturamento,
+} from '@/utils/faturamentoCliente';
 import { calcProximoVencimentoIso } from '@/utils/mensalidadeVencimento';
 import { reaisParaCentavos } from '@/utils/vendasParcelas';
 
 function cents(n: number) {
   return reaisParaCentavos(n);
 }
+
+function newLoteId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `lote-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+type MensalidadeInsertRow = {
+  user_id: string;
+  cliente_id: string;
+  valor: number;
+  valor_pago: number;
+  data_vencimento: string;
+  competencia: string | null;
+  status: MensalidadeGeradaStatusDb;
+  lote_faturamento_id?: string | null;
+  parcela_numero?: number | null;
+  parcela_total?: number | null;
+};
 
 export function mensalidadeGeradaStatusVisual(
   m: Pick<MensalidadeGerada, 'status' | 'data_vencimento' | 'valor' | 'valor_pago'>,
@@ -150,34 +175,58 @@ export async function fetchUltimoVencimentoMensalidadePorCliente(
 export async function resolverVencimentoMensalidadeCliente(
   userId: string,
   clienteId: string,
-  opts?: { dataInicio?: string | null; ultimoVencimento?: string | null; override?: string | null },
+  opts?: {
+    diaVencimento?: number | null;
+    dataInicio?: string | null;
+    ultimoVencimento?: string | null;
+    override?: string | null;
+  },
 ): Promise<string> {
   if (opts?.override) return opts.override;
 
+  let diaVencimento = opts?.diaVencimento ?? null;
   let dataInicio = opts?.dataInicio ?? null;
   let ultimo = opts?.ultimoVencimento ?? null;
 
-  if (dataInicio == null || ultimo == null) {
+  if (diaVencimento == null || dataInicio == null || ultimo == null) {
     const ultimos = await fetchUltimoVencimentoMensalidadePorCliente(userId, [clienteId]);
     ultimo = ultimo ?? ultimos.get(clienteId) ?? null;
-    if (dataInicio == null) {
+    if (diaVencimento == null || dataInicio == null) {
       const { data: c, error } = await supabase
         .from('clientes')
-        .select('data_inicio')
+        .select('dia_vencimento, data_inicio')
         .eq('id', clienteId)
         .maybeSingle();
-      if (error) throw new Error(error.message);
-      dataInicio = (c as { data_inicio: string | null } | null)?.data_inicio ?? null;
+      if (error) {
+        if (/dia_vencimento|column|schema cache/i.test(error.message)) {
+          const { data: c2, error: e2 } = await supabase
+            .from('clientes')
+            .select('data_inicio')
+            .eq('id', clienteId)
+            .maybeSingle();
+          if (e2) throw new Error(e2.message);
+          dataInicio = dataInicio ?? (c2 as { data_inicio: string | null } | null)?.data_inicio ?? null;
+        } else {
+          throw new Error(error.message);
+        }
+      } else {
+        const row = c as { dia_vencimento: number | null; data_inicio: string | null } | null;
+        if (diaVencimento == null && row?.dia_vencimento != null) {
+          diaVencimento = Number(row.dia_vencimento);
+        }
+        dataInicio = dataInicio ?? row?.data_inicio ?? null;
+      }
     }
   }
 
   const iso = calcProximoVencimentoIso({
+    diaVencimento,
     dataInicio,
     ultimoVencimento: ultimo,
   });
   if (!iso) {
     throw new Error(
-      'Informe o primeiro vencimento no cadastro do cliente ou defina a data manualmente na geração.',
+      'Informe o dia de vencimento no cadastro do cliente (1–31) ou defina a data manualmente na geração.',
     );
   }
   return iso;
@@ -246,15 +295,7 @@ export async function criarMensalidadesGeradasLote(params: {
 }> {
   const comp = params.competencia?.trim() || null;
   const ultimos = await fetchUltimoVencimentoMensalidadePorCliente(params.userId, params.clienteIds);
-  const rows: {
-    user_id: string;
-    cliente_id: string;
-    valor: number;
-    valor_pago: number;
-    data_vencimento: string;
-    competencia: string | null;
-    status: MensalidadeGeradaStatusDb;
-  }[] = [];
+  const rows: MensalidadeInsertRow[] = [];
 
   let semVencimento = 0;
   let ignorados = 0;
@@ -262,24 +303,97 @@ export async function criarMensalidadesGeradasLote(params: {
   for (const clienteId of params.clienteIds) {
     const { data: c, error: e0 } = await supabase
       .from('clientes')
-      .select('mensalidade, data_inicio')
+      .select('mensalidade, dia_vencimento, data_inicio, tipo_faturamento, parcelas_anuais')
       .eq('id', clienteId)
       .maybeSingle();
-    if (e0) throw new Error(e0.message);
-    const cli = c as { mensalidade: number | null; data_inicio: string | null } | null;
+
+    let cli: {
+      mensalidade: number | null;
+      dia_vencimento: number | null;
+      data_inicio: string | null;
+      tipo_faturamento?: string | null;
+      parcelas_anuais?: number | null;
+    } | null = null;
+
+    if (e0) {
+      if (/tipo_faturamento|parcelas_anuais|dia_vencimento|column|schema cache/i.test(e0.message)) {
+        const { data: c2, error: e2 } = await supabase
+          .from('clientes')
+          .select('mensalidade, dia_vencimento, data_inicio')
+          .eq('id', clienteId)
+          .maybeSingle();
+        if (e2) {
+          if (/dia_vencimento|column|schema cache/i.test(e2.message)) {
+            const { data: c3, error: e3 } = await supabase
+              .from('clientes')
+              .select('mensalidade, data_inicio')
+              .eq('id', clienteId)
+              .maybeSingle();
+            if (e3) throw new Error(e3.message);
+            cli = {
+              ...(c3 as { mensalidade: number | null; data_inicio: string | null }),
+              dia_vencimento: null,
+            };
+          } else {
+            throw new Error(e2.message);
+          }
+        } else {
+          cli = c2 as typeof cli;
+        }
+      } else {
+        throw new Error(e0.message);
+      }
+    } else {
+      cli = c as typeof cli;
+    }
+
     const valorTemporario = params.valoresPorCliente?.[clienteId];
-    const valor =
+    const valorMensal =
       valorTemporario != null && Number.isFinite(valorTemporario)
         ? valorTemporario
         : Number(cli?.mensalidade);
-    if (!valor || valor <= 0) {
+    if (!valorMensal || valorMensal <= 0) {
       ignorados += 1;
+      continue;
+    }
+
+    const tipo = normalizeTipoFaturamento(cli?.tipo_faturamento);
+    const parcelas = normalizeParcelasAnuais(cli?.parcelas_anuais) ?? 12;
+
+    if (tipo === 'anual' && !params.dataVencimentoOverride) {
+      const plano = montarParcelasAnuais({
+        valorMensalidade: valorMensal,
+        parcelas,
+        diaVencimento: cli?.dia_vencimento ?? null,
+        dataInicio: cli?.data_inicio ?? null,
+        ultimoVencimento: ultimos.get(clienteId) ?? null,
+      });
+      if (!plano?.length) {
+        semVencimento += 1;
+        continue;
+      }
+      const loteId = newLoteId();
+      for (const p of plano) {
+        rows.push({
+          user_id: params.userId,
+          cliente_id: clienteId,
+          valor: p.valor,
+          valor_pago: 0,
+          data_vencimento: p.data_vencimento,
+          competencia: comp,
+          status: 'pendente',
+          lote_faturamento_id: loteId,
+          parcela_numero: p.parcela_numero,
+          parcela_total: p.parcela_total,
+        });
+      }
       continue;
     }
 
     let dataVenc: string;
     try {
       dataVenc = await resolverVencimentoMensalidadeCliente(params.userId, clienteId, {
+        diaVencimento: cli?.dia_vencimento ?? null,
         dataInicio: cli?.data_inicio ?? null,
         ultimoVencimento: ultimos.get(clienteId) ?? null,
         override: params.dataVencimentoOverride ?? null,
@@ -289,10 +403,43 @@ export async function criarMensalidadesGeradasLote(params: {
       continue;
     }
 
+    // Override de data única: se anual, ainda gera N parcelas com o valor anualizado,
+    // mas a 1ª usa o override e as demais seguem o espaçamento a partir dela.
+    if (tipo === 'anual') {
+      const plano = montarParcelasAnuais({
+        valorMensalidade: valorMensal,
+        parcelas,
+        diaVencimento: cli?.dia_vencimento ?? null,
+        dataInicio: cli?.data_inicio ?? null,
+        ultimoVencimento: null,
+        hoje: dataVenc,
+      });
+      if (!plano?.length) {
+        semVencimento += 1;
+        continue;
+      }
+      const loteId = newLoteId();
+      for (const p of plano) {
+        rows.push({
+          user_id: params.userId,
+          cliente_id: clienteId,
+          valor: p.valor,
+          valor_pago: 0,
+          data_vencimento: p.data_vencimento,
+          competencia: comp,
+          status: 'pendente',
+          lote_faturamento_id: loteId,
+          parcela_numero: p.parcela_numero,
+          parcela_total: p.parcela_total,
+        });
+      }
+      continue;
+    }
+
     rows.push({
       user_id: params.userId,
       cliente_id: clienteId,
-      valor,
+      valor: valorMensal,
       valor_pago: 0,
       data_vencimento: dataVenc,
       competencia: comp,
@@ -308,7 +455,14 @@ export async function criarMensalidadesGeradasLote(params: {
     .insert(rows)
     .select('id, cliente_id, valor, data_vencimento, competencia');
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (/lote_faturamento_id|parcela_numero|column|schema cache/i.test(error.message)) {
+      throw new Error(
+        'Falta a migration do faturamento anual. Rode supabase/migrations/040_cliente_faturamento_anual.sql no SQL Editor.',
+      );
+    }
+    throw new Error(error.message);
+  }
 
   const criadosRows = (inserted ?? []) as {
     id: string;

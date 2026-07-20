@@ -318,7 +318,6 @@ export default function ClientDetailScreen() {
     );
   }
 
-  const d1 = parseISODate(data.data_inicio);
   const d2 = parseISODate(data.data_reajuste);
   const dUltimo = parseISODate(data.ultimo_reajuste);
 
@@ -447,6 +446,14 @@ export default function ClientDetailScreen() {
         />
         {data.tipo_ramo ? <Row label="Ramo (legado)" value={data.tipo_ramo} /> : null}
         <Row label="Nota fiscal" value={data.emite_nf ? 'Com NF' : 'Sem NF'} />
+        <Row
+          label="Tipo de faturamento"
+          value={
+            data.tipo_faturamento === 'anual'
+              ? `Anual · ${data.parcelas_anuais ?? '—'} parcela(s)`
+              : 'Mensal'
+          }
+        />
       </Card>
 
       <Card style={styles.block}>
@@ -515,7 +522,7 @@ export default function ClientDetailScreen() {
 
       <Card style={styles.block}>
         <Text style={styles.h}>Datas</Text>
-        <Row label="Primeiro vencimento" value={formatBRDate(d1) || '—'} />
+        <Row label="Data de vencimento" value={data.dia_vencimento != null ? `Dia ${data.dia_vencimento}` : '—'} />
         <Row label="Reajuste" value={formatBRDate(d2) || '—'} />
         <Row label="Último reajuste" value={formatBRDate(dUltimo) || '—'} />
       </Card>

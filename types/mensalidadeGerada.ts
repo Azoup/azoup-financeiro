@@ -21,6 +21,10 @@ export interface MensalidadeGerada {
   observacao_pagamento: string | null;
   created_at: string;
   updated_at?: string;
+  /** Agrupa parcelas do faturamento anual geradas juntas. */
+  lote_faturamento_id?: string | null;
+  parcela_numero?: number | null;
+  parcela_total?: number | null;
   clientes?: { nome_cliente: string; nome_empresa: string | null } | null;
 }
 
@@ -45,7 +49,7 @@ export interface RegistrarPagamentoMensalidadeGeradaInput {
 export interface CriarMensalidadeGeradaInput {
   cliente_id: string;
   valor: number;
-  /** Opcional: calcula a partir do primeiro vencimento do cadastro e do último gerado (+30 dias). */
+  /** Opcional: calcula a partir do dia de vencimento do cadastro (próximo dia N). */
   data_vencimento?: string | null;
   competencia?: string | null;
   observacao?: string | null;

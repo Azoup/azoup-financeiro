@@ -34,7 +34,10 @@ export interface Cliente {
   segmento_cliente_codigo?: string;
   /** Legado; pode ficar nulo após migration 008. */
   tipo_ramo?: string | null;
+  /** @deprecated Preferir `dia_vencimento`. Mantido para compatibilidade. */
   data_inicio: string | null;
+  /** Dia do mês (1–31) para vencimento das mensalidades. */
+  dia_vencimento: number | null;
   data_reajuste: string | null;
   /** Data que estava em data_reajuste antes da última alteração. */
   ultimo_reajuste: string | null;
@@ -53,6 +56,10 @@ export interface Cliente {
   ultima_justificativa_cancelamento?: string | null;
   /** true = com NF (nota fiscal); false = sem NF. Ausente até migration 014 = sem NF. */
   emite_nf?: boolean;
+  /** mensal | anual — faturamento da cobrança. */
+  tipo_faturamento: 'mensal' | 'anual';
+  /** Qtd. de parcelas no ano quando tipo_faturamento=anual (1,2,3,4,6,12). */
+  parcelas_anuais: number | null;
   /** Inscrição estadual do cliente (PJ). */
   inscricao_estadual?: string;
   /** Join opcional (lista/detalhe). */
@@ -78,7 +85,8 @@ export interface ClienteFormValues {
   valor_mensalidade_anterior: string;
   valor_mensalidade: string;
   segmento_cliente_codigo: string;
-  data_inicio: Date | null;
+  /** Dia do mês (1–31) como texto no formulário. */
+  dia_vencimento: string;
   data_reajuste: Date | null;
   /** Somente leitura / espelho: atualiza ao mudar a data de reajuste; persistido no servidor. */
   ultimo_reajuste: Date | null;
@@ -102,6 +110,10 @@ export interface ClienteFormValues {
   cancelamento_justificativa: string;
   /** Com NF (nota fiscal) ou sem NF. */
   emite_nf: boolean;
+  /** mensal | anual */
+  tipo_faturamento: 'mensal' | 'anual';
+  /** Texto 1|2|3|4|6|12 quando anual. */
+  parcelas_anuais: string;
 }
 
 export interface SegmentoClienteRow {
