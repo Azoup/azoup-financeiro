@@ -28,12 +28,17 @@ import {
   OP_SIMP_NAC_OPCOES,
   REGIME_TRIBUTARIO_OPCOES,
   REG_ESP_TRIB_OPCOES,
+  SITUACAO_PIS_COFINS_OPCOES,
+  TIPO_APURACAO_OPCOES,
   TP_RET_ISSQN_OPCOES,
   TRIB_ISSQN_OPCOES,
+  defaultsRegimeNormal,
+  isRegimeNormal,
   isRegimeSimples,
   opSimpNacParaRegime,
   regimeCurto,
   type RegimeTributario,
+  type TipoApuracaoNormal,
 } from '@/utils/nfseTributacao';
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -63,11 +68,19 @@ type FormState = {
   proximo_numero: string;
   ibge: string;
   inscricao_municipal: string;
+  inscricao_estadual: string;
+  natureza_operacao: string;
+  codigo_cnae: string;
   codTribNac: string;
   codTribMun: string;
   codNbs: string;
   descricao: string;
   regimeTributario: RegimeTributario;
+  tipoApuracao: TipoApuracaoNormal;
+  situacaoPisCofins: string;
+  aliquotaIss: string;
+  aliquotaPis: string;
+  aliquotaCofins: string;
   opSimpNac: number;
   regEspTrib: number;
   tribIssqn: number;
@@ -75,6 +88,7 @@ type FormState = {
 };
 
 function formFromEmitente(e: NfseEmitente): FormState {
+  const regime = Math.min(3, Math.max(1, Number(e.regime_tributario ?? 1))) as RegimeTributario;
   return {
     nome: e.nome || 'Emitente',
     razao_social: e.razao_social,
@@ -90,13 +104,21 @@ function formFromEmitente(e: NfseEmitente): FormState {
     proximo_numero: String(e.proximo_numero),
     ibge: e.codigo_ibge_emitente,
     inscricao_municipal: e.inscricao_municipal ?? '',
+    inscricao_estadual: e.inscricao_estadual ?? '',
+    natureza_operacao: e.natureza_operacao ?? 'Prestação de serviço',
+    codigo_cnae: e.codigo_cnae ?? '',
     codTribNac: e.codigo_tributacao_nacional ?? '010701',
     codTribMun:
       e.codigo_tributacao_municipal?.trim() ||
       (e.codigo_ibge_emitente === '3501608' ? '001' : ''),
     codNbs: e.codigo_nbs ?? '115013000',
     descricao: e.descricao_servico_padrao,
-    regimeTributario: (Math.min(3, Math.max(1, Number(e.regime_tributario ?? 1))) as RegimeTributario),
+    regimeTributario: regime,
+    tipoApuracao: e.tipo_apuracao === 'real' ? 'real' : 'presumido',
+    situacaoPisCofins: (e.situacao_pis_cofins || '00').padStart(2, '0').slice(0, 2),
+    aliquotaIss: String(e.aliquota_iss ?? 0),
+    aliquotaPis: String(e.aliquota_pis ?? 0),
+    aliquotaCofins: String(e.aliquota_cofins ?? 0),
     opSimpNac: Number(e.op_simp_nac ?? 3),
     regEspTrib: Number(e.reg_esp_trib ?? 0),
     tribIssqn: Number(e.trib_issqn ?? 1),
@@ -198,6 +220,9 @@ export default function NfeConfigScreen() {
               codigo_tributacao_nacional: form.codTribNac,
               codigo_nbs: form.codNbs,
               descricao_servico_padrao: form.descricao,
+              regime_tributario: form.regimeTributario,
+              codigo_cnae: form.codigo_cnae,
+              inscricao_municipal: form.inscricao_municipal,
             }
           : null,
         certOk || Boolean(pendingCertFile),
@@ -272,6 +297,7 @@ export default function NfeConfigScreen() {
       // 2º CNPJ nasce no regime oposto ao primeiro (Simples ↔ Normal).
       const regimeNovo: RegimeTributario = primeiroSimples ? 3 : 1;
       const opSimpNovo = opSimpNacParaRegime(regimeNovo);
+      const normalDefaults = regimeNovo === 3 ? defaultsRegimeNormal('presumido') : null;
 
       const placeholder = `9${String(Date.now()).slice(-13)}`;
       const created = await createEmitente(user.id, {
@@ -281,12 +307,23 @@ export default function NfeConfigScreen() {
         padrao: false,
         regime_tributario: regimeNovo,
         op_simp_nac: opSimpNovo,
+        ...(normalDefaults
+          ? {
+              tipo_apuracao: normalDefaults.tipo_apuracao,
+              situacao_pis_cofins: normalDefaults.situacao_pis_cofins,
+              aliquota_iss: normalDefaults.aliquota_iss,
+              aliquota_pis: normalDefaults.aliquota_pis,
+              aliquota_cofins: normalDefaults.aliquota_cofins,
+              cst_icms: normalDefaults.cst_icms,
+              csosn: normalDefaults.csosn,
+            }
+          : { tipo_apuracao: null }),
       });
       Toast.show({
         type: 'info',
         text1: '2º emitente criado',
         text2: primeiroSimples
-          ? 'Pré-definido como Regime Normal. Ajuste CNPJ, A1 e salve.'
+          ? 'Pré-definido como Regime Normal · Lucro Presumido. Complete CNAE, IE, ISS e salve.'
           : 'Pré-definido como Simples Nacional. Ajuste CNPJ, A1 e salve.',
       });
       const list = await ensureEmitentes(user.id);
@@ -338,11 +375,19 @@ export default function NfeConfigScreen() {
         proximo_numero: Math.max(1, parseInt(form.proximo_numero, 10) || 1),
         codigo_ibge_emitente: form.ibge,
         inscricao_municipal: form.inscricao_municipal,
+        inscricao_estadual: form.inscricao_estadual,
+        natureza_operacao: form.natureza_operacao,
+        codigo_cnae: form.codigo_cnae,
         codigo_tributacao_nacional: form.codTribNac,
         codigo_tributacao_municipal: form.codTribMun,
         codigo_nbs: form.codNbs,
         descricao_servico_padrao: form.descricao,
         regime_tributario: form.regimeTributario,
+        tipo_apuracao: isRegimeNormal(form.regimeTributario) ? form.tipoApuracao : null,
+        situacao_pis_cofins: form.situacaoPisCofins,
+        aliquota_iss: Number(String(form.aliquotaIss).replace(',', '.')) || 0,
+        aliquota_pis: Number(String(form.aliquotaPis).replace(',', '.')) || 0,
+        aliquota_cofins: Number(String(form.aliquotaCofins).replace(',', '.')) || 0,
         op_simp_nac: Math.min(4, Math.max(1, form.opSimpNac)) as 1 | 2 | 3 | 4,
         reg_esp_trib: form.regEspTrib,
         trib_issqn: Math.min(4, Math.max(1, form.tribIssqn)) as 1 | 2 | 3 | 4,
@@ -443,7 +488,7 @@ export default function NfeConfigScreen() {
                         : styles.regimeBadgeTxtNormal,
                     ]}
                   >
-                    {regimeCurto(regime)}
+                    {regimeCurto(regime, e.tipo_apuracao)}
                   </Text>
                 </View>
               </Pressable>
@@ -466,8 +511,10 @@ export default function NfeConfigScreen() {
       {!form || !selectedId ? (
         <Card style={styles.card}>
           <Text style={styles.sub}>
-            Nenhum emitente encontrado. Rode a migration{' '}
-            <Text style={styles.mono}>037_nfse_emitente.sql</Text> no Supabase e recarregue.
+            Nenhum emitente encontrado. Rode as migrations{' '}
+            <Text style={styles.mono}>037_nfse_emitente.sql</Text> e{' '}
+            <Text style={styles.mono}>038_nfse_emitente_regime_normal.sql</Text> no Supabase e
+            recarregue.
           </Text>
           <PrimaryButton title="Recarregar" onPress={() => void load()} />
         </Card>
@@ -622,8 +669,8 @@ export default function NfeConfigScreen() {
           <Card style={styles.card}>
             <Text style={styles.h}>4. Regime tributário</Text>
             <Text style={styles.sub}>
-              Defina se este CNPJ é Simples Nacional ou Regime Normal. O optante do Simples na NFS-e é
-              alinhado automaticamente.
+              No Regime Normal escolha Lucro Presumido ou Lucro Real e preencha IE, CNAE, ISS e
+              PIS/COFINS — necessários para a NFS-e do 2º CNPJ.
             </Text>
             <NfseEnumField
               label="Regime do emitente (CRT)"
@@ -632,25 +679,123 @@ export default function NfeConfigScreen() {
               options={REGIME_TRIBUTARIO_OPCOES}
               onChange={(v) => {
                 const regime = v as RegimeTributario;
-                patch({
-                  regimeTributario: regime,
-                  opSimpNac: opSimpNacParaRegime(regime, form.opSimpNac),
-                });
+                if (isRegimeNormal(regime)) {
+                  const d = defaultsRegimeNormal(form.tipoApuracao || 'presumido');
+                  patch({
+                    regimeTributario: regime,
+                    opSimpNac: d.op_simp_nac,
+                    tipoApuracao: d.tipo_apuracao,
+                    situacaoPisCofins: d.situacao_pis_cofins,
+                    aliquotaIss: String(d.aliquota_iss),
+                    aliquotaPis: String(d.aliquota_pis),
+                    aliquotaCofins: String(d.aliquota_cofins),
+                  });
+                } else {
+                  patch({
+                    regimeTributario: regime,
+                    opSimpNac: opSimpNacParaRegime(regime, form.opSimpNac),
+                    tipoApuracao: 'presumido',
+                  });
+                }
               }}
             />
+
+            {isRegimeNormal(form.regimeTributario) ? (
+              <>
+                <Text style={styles.sectionLabel}>Apuração do Regime Normal</Text>
+                <NfseEnumField
+                  label="Tipo de apuração (IRPJ/CSLL)"
+                  hint={
+                    TIPO_APURACAO_OPCOES.find((o) => o.value === form.tipoApuracao)?.hint ??
+                    'Lucro Presumido ou Lucro Real.'
+                  }
+                  value={form.tipoApuracao}
+                  options={TIPO_APURACAO_OPCOES.map((o) => ({ value: o.value, label: o.label }))}
+                  showValuePrefix={false}
+                  onChange={(v) => {
+                    const apuracao = v as TipoApuracaoNormal;
+                    const d = defaultsRegimeNormal(apuracao);
+                    patch({
+                      tipoApuracao: apuracao,
+                      aliquotaPis: String(d.aliquota_pis),
+                      aliquotaCofins: String(d.aliquota_cofins),
+                    });
+                  }}
+                />
+                <FormTextInput
+                  label="Inscrição estadual (IE)"
+                  value={form.inscricao_estadual}
+                  onChangeText={(t) => patch({ inscricao_estadual: t })}
+                  placeholder="Número da IE ou ISENTO"
+                  autoCapitalize="characters"
+                />
+                <FormTextInput
+                  label="CNAE principal (7 dígitos)"
+                  value={form.codigo_cnae}
+                  onChangeText={(t) => patch({ codigo_cnae: t })}
+                  keyboardType="number-pad"
+                  maxLength={7}
+                  placeholder="Ex.: 6209100"
+                />
+                <FormTextInput
+                  label="Natureza da operação"
+                  value={form.natureza_operacao}
+                  onChangeText={(t) => patch({ natureza_operacao: t })}
+                />
+                <NfseEnumField
+                  label="Situação tributária PIS/COFINS (NFS-e)"
+                  hint="Na TipLan de Americana o valor mais comum em serviços é 00 (nenhuma)."
+                  value={form.situacaoPisCofins}
+                  options={SITUACAO_PIS_COFINS_OPCOES}
+                  showValuePrefix={false}
+                  onChange={(v) => patch({ situacaoPisCofins: String(v) })}
+                />
+                <View style={styles.row2}>
+                  <View style={{ flex: 1 }}>
+                    <FormTextInput
+                      label="Alíquota ISS (%)"
+                      value={form.aliquotaIss}
+                      onChangeText={(t) => patch({ aliquotaIss: t })}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <FormTextInput
+                      label="Alíquota PIS (%)"
+                      value={form.aliquotaPis}
+                      onChangeText={(t) => patch({ aliquotaPis: t })}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <FormTextInput
+                      label="Alíquota COFINS (%)"
+                      value={form.aliquotaCofins}
+                      onChangeText={(t) => patch({ aliquotaCofins: t })}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                </View>
+                <Text style={styles.lockedHint}>
+                  Optante do Simples: Não optante (fixado no Regime Normal).
+                </Text>
+              </>
+            ) : (
+              <NfseEnumField
+                label="Situação no Simples Nacional (NFS-e)"
+                value={form.opSimpNac}
+                options={OP_SIMP_NAC_OPCOES}
+                onChange={(v) => {
+                  const next: Partial<FormState> = { opSimpNac: v };
+                  if (v === 1 && form.regimeTributario !== 3) next.regimeTributario = 3;
+                  if (v !== 1 && form.regimeTributario === 3) next.regimeTributario = 1;
+                  patch(next);
+                }}
+              />
+            )}
+
             <NfseEnumField
-              label="Situação no Simples Nacional (NFS-e)"
-              value={form.opSimpNac}
-              options={OP_SIMP_NAC_OPCOES}
-              onChange={(v) => {
-                const next: Partial<FormState> = { opSimpNac: v };
-                if (v === 1 && form.regimeTributario !== 3) next.regimeTributario = 3;
-                if (v !== 1 && form.regimeTributario === 3) next.regimeTributario = 1;
-                patch(next);
-              }}
-            />
-            <NfseEnumField
-              label="Regime especial"
+              label="Regime especial de tributação"
               value={form.regEspTrib}
               options={REG_ESP_TRIB_OPCOES}
               onChange={(v) => patch({ regEspTrib: v })}
@@ -713,6 +858,19 @@ const styles = StyleSheet.create({
   cardOk: { borderColor: colors.success, borderWidth: 1 },
   cardWarn: { borderColor: colors.orange, borderWidth: 1 },
   h: { fontSize: 16, fontWeight: '800', color: colors.petroleum, marginBottom: spacing.xs },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.petroleum,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  lockedHint: {
+    fontSize: 11,
+    color: colors.gray600,
+    marginBottom: spacing.md,
+    fontStyle: 'italic',
+  },
   sub: { fontSize: 12, color: colors.gray600, marginBottom: spacing.md, lineHeight: 17 },
   tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.sm },
   tab: {

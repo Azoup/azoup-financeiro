@@ -41,10 +41,16 @@ function emitenteToConfig(e) {
     codigo_tributacao_nacional: e.codigo_tributacao_nacional,
     codigo_tributacao_municipal: e.codigo_tributacao_municipal,
     codigo_nbs: e.codigo_nbs,
+    codigo_cnae: e.codigo_cnae,
     op_simp_nac: e.op_simp_nac,
     reg_esp_trib: e.reg_esp_trib,
     trib_issqn: e.trib_issqn,
     tp_ret_issqn: e.tp_ret_issqn,
+    tipo_apuracao: e.tipo_apuracao,
+    situacao_pis_cofins: e.situacao_pis_cofins,
+    aliquota_iss: e.aliquota_iss,
+    aliquota_pis: e.aliquota_pis,
+    aliquota_cofins: e.aliquota_cofins,
   };
 }
 

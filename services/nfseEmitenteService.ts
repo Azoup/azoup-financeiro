@@ -9,6 +9,7 @@ import {
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
 import type { EmpresaCertificado, NfseEmitente, NfseEmitenteInput } from '@/types/notaFiscal';
 import { AMBIENTE_FISCAL_ATUAL } from '@/types/notaFiscal';
+import { isRegimeNormal, type TipoApuracaoNormal } from '@/utils/nfseTributacao';
 
 export const MAX_NFSE_EMITENTES = 2;
 
@@ -34,6 +35,12 @@ const DEFAULT_FISCAL: Pick<
   | 'reg_esp_trib'
   | 'trib_issqn'
   | 'tp_ret_issqn'
+  | 'tipo_apuracao'
+  | 'codigo_cnae'
+  | 'situacao_pis_cofins'
+  | 'aliquota_iss'
+  | 'aliquota_pis'
+  | 'aliquota_cofins'
 > = {
   serie: '1',
   proximo_numero: 1,
@@ -55,16 +62,33 @@ const DEFAULT_FISCAL: Pick<
   reg_esp_trib: 0,
   trib_issqn: 1,
   tp_ret_issqn: 1,
+  tipo_apuracao: null,
+  codigo_cnae: '',
+  situacao_pis_cofins: '00',
+  aliquota_iss: 0,
+  aliquota_pis: 0,
+  aliquota_cofins: 0,
 };
 
 function onlyDigits(s: string | undefined | null): string {
   return String(s ?? '').replace(/\D/g, '');
 }
 
+function normalizeTipoApuracao(
+  regime: number,
+  raw: string | null | undefined,
+): 'presumido' | 'real' | null {
+  if (!isRegimeNormal(regime)) return null;
+  if (raw === 'real') return 'real';
+  return 'presumido';
+}
+
 function normalizeEmitentePatch(input: Partial<NfseEmitenteInput>): Partial<NfseEmitenteInput> {
   const tribMun = (input.codigo_tributacao_municipal ?? '')
     .replace(/\D/g, '')
     .slice(0, 5);
+  const regime = Math.min(3, Math.max(1, Number(input.regime_tributario ?? 1))) as 1 | 2 | 3;
+  const situacaoRaw = onlyDigits(input.situacao_pis_cofins ?? '00').slice(0, 2) || '00';
   return {
     ...input,
     nome: (input.nome ?? 'Emitente').trim() || 'Emitente',
@@ -80,19 +104,26 @@ function normalizeEmitentePatch(input: Partial<NfseEmitenteInput>): Partial<Nfse
     serie: (input.serie ?? '1').trim() || '1',
     proximo_numero: Math.max(1, Number(input.proximo_numero) || 1),
     ambiente: AMBIENTE_FISCAL_ATUAL,
+    inscricao_estadual: (input.inscricao_estadual ?? '').trim().toUpperCase(),
     codigo_ibge_emitente: onlyDigits(input.codigo_ibge_emitente).slice(0, 7),
     inscricao_municipal: onlyDigits(input.inscricao_municipal),
     codigo_tributacao_nacional: onlyDigits(input.codigo_tributacao_nacional).slice(0, 6) || '010701',
     codigo_tributacao_municipal: tribMun,
     codigo_nbs: onlyDigits(input.codigo_nbs).slice(0, 9) || '115013000',
+    codigo_cnae: onlyDigits(input.codigo_cnae).slice(0, 7),
     descricao_servico_padrao:
       (input.descricao_servico_padrao ?? 'Serviço de mensalidade').trim() || 'Serviço de mensalidade',
     natureza_operacao: (input.natureza_operacao ?? 'Prestação de serviço').trim(),
-    regime_tributario: Math.min(3, Math.max(1, Number(input.regime_tributario ?? 1))) as 1 | 2 | 3,
+    regime_tributario: regime,
     op_simp_nac: Math.min(4, Math.max(1, Number(input.op_simp_nac ?? 3))) as 1 | 2 | 3 | 4,
     reg_esp_trib: Number(input.reg_esp_trib ?? 0),
     trib_issqn: Math.min(4, Math.max(1, Number(input.trib_issqn ?? 1))) as 1 | 2 | 3 | 4,
     tp_ret_issqn: Math.min(3, Math.max(1, Number(input.tp_ret_issqn ?? 1))) as 1 | 2 | 3,
+    tipo_apuracao: normalizeTipoApuracao(regime, input.tipo_apuracao),
+    situacao_pis_cofins: situacaoRaw.padStart(2, '0'),
+    aliquota_iss: Math.max(0, Number(input.aliquota_iss ?? 0) || 0),
+    aliquota_pis: Math.max(0, Number(input.aliquota_pis ?? 0) || 0),
+    aliquota_cofins: Math.max(0, Number(input.aliquota_cofins ?? 0) || 0),
   };
 }
 
@@ -239,7 +270,15 @@ export async function createEmitente(
     .insert({ user_id: userId, ...patch })
     .select('*')
     .single();
-  if (error || !data) throw new Error(error?.message ?? 'Falha ao criar emitente.');
+  if (error) {
+    if (/tipo_apuracao|codigo_cnae|situacao_pis_cofins|aliquota_iss|column|schema cache/i.test(error.message)) {
+      throw new Error(
+        'Falta a migration do Regime Normal. Rode supabase/migrations/038_nfse_emitente_regime_normal.sql no SQL Editor do Supabase.',
+      );
+    }
+    throw new Error(error.message);
+  }
+  if (!data) throw new Error('Falha ao criar emitente.');
 
   const row = data as NfseEmitente;
   await syncNfeConfigFromEmitente(userId, row).catch(() => undefined);
@@ -274,7 +313,15 @@ export async function updateEmitente(
     .eq('user_id', userId)
     .select('*')
     .single();
-  if (error || !data) throw new Error(error?.message ?? 'Falha ao salvar emitente.');
+  if (error) {
+    if (/tipo_apuracao|codigo_cnae|situacao_pis_cofins|aliquota_iss|column|schema cache/i.test(error.message)) {
+      throw new Error(
+        'Falta a migration do Regime Normal. Rode supabase/migrations/038_nfse_emitente_regime_normal.sql no SQL Editor do Supabase.',
+      );
+    }
+    throw new Error(error.message);
+  }
+  if (!data) throw new Error('Falha ao salvar emitente.');
 
   const row = data as NfseEmitente;
   await syncNfeConfigFromEmitente(userId, row).catch(() => undefined);
@@ -355,6 +402,7 @@ export async function uploadCertificadoA1Emitente(
 export function emitenteLabel(
   e: Pick<NfseEmitente, 'nome' | 'documento' | 'razao_social'> & {
     regime_tributario?: number | null;
+    tipo_apuracao?: TipoApuracaoNormal | null;
   },
 ): string {
   const doc = onlyDigits(e.documento);
@@ -365,10 +413,16 @@ export function emitenteLabel(
         ? doc.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4')
         : doc || '—';
   const nome = e.nome?.trim() || e.razao_social?.trim() || 'Emitente';
-  const regime =
-    e.regime_tributario != null
-      ? ` · ${e.regime_tributario === 3 ? 'Normal' : 'Simples'}`
-      : '';
+  let regime = '';
+  if (e.regime_tributario != null) {
+    if (e.regime_tributario === 3) {
+      const ap =
+        e.tipo_apuracao === 'real' ? 'Real' : e.tipo_apuracao === 'presumido' ? 'Presumido' : 'Normal';
+      regime = ` · ${ap === 'Normal' ? 'Normal' : `Normal · ${ap}`}`;
+    } else {
+      regime = ' · Simples';
+    }
+  }
   return `${nome} · ${docFmt}${regime}`;
 }
 

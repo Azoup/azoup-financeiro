@@ -186,6 +186,12 @@ function buildEnviarLoteRpsSincronoXml({
     cliente.nome_fantasia || cliente.nome_cliente || cliente.nome || 'Tomador';
   // ADN: 1=não optante → ABRASF 2; demais (ME/EPP) → 1 (sim), igual ao Delphi.
   const optante = Number(config.op_simp_nac ?? 3) === 1 ? '2' : '1';
+  // ABRASF: IssRetido 1=Sim, 2=Não. tp_ret_issqn: 1=não retido, 2/3=retido.
+  const issRetido = Number(config.tp_ret_issqn ?? 1) === 1 ? '2' : '1';
+  const situacaoPisCofins = String(config.situacao_pis_cofins ?? '00')
+    .replace(/\D/g, '')
+    .padStart(2, '0')
+    .slice(0, 2);
   const idLote = `Lote_${numeroLote}`;
   const idDec = `Dec_${numero}`;
 
@@ -220,9 +226,9 @@ function buildEnviarLoteRpsSincronoXml({
     `<Servico>` +
     `<Valores>` +
     `<ValorServicos>${valor}</ValorServicos>` +
-    `<SituacaoTributariaPISCOFINS>00</SituacaoTributariaPISCOFINS>` +
+    `<SituacaoTributariaPISCOFINS>${escapeXml(situacaoPisCofins)}</SituacaoTributariaPISCOFINS>` +
     `</Valores>` +
-    `<IssRetido>2</IssRetido>` +
+    `<IssRetido>${issRetido}</IssRetido>` +
     `<ItemListaServico>${escapeXml(itemLista)}</ItemListaServico>` +
     `<CodigoCnae>${escapeXml(cnae)}</CodigoCnae>` +
     `<CodigoTributacaoMunicipio>${escapeXml(tribMun)}</CodigoTributacaoMunicipio>` +

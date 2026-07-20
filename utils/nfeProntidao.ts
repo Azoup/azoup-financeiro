@@ -34,7 +34,8 @@ export function avaliarProntidaoEmitente(
     | 'codigo_tributacao_nacional'
     | 'codigo_nbs'
     | 'descricao_servico_padrao'
-  > | null,
+  > &
+    Partial<Pick<NfseEmitente, 'regime_tributario' | 'codigo_cnae' | 'inscricao_municipal'>> | null,
   temCertificado: boolean,
 ): NfeProntidao {
   const emitenteOk =
@@ -44,6 +45,11 @@ export function avaliarProntidaoEmitente(
     Boolean(emitente?.cidade?.trim()) &&
     Boolean(emitente?.uf?.trim()?.length === 2) &&
     Boolean(emitente?.cep?.trim());
+
+  const regime = Number(emitente?.regime_tributario ?? 1);
+  const isNormal = regime === 3;
+  const cnaeOk = !isNormal || onlyDigits(emitente?.codigo_cnae).length >= 7;
+  const imOk = Boolean(onlyDigits(emitente?.inscricao_municipal).length);
 
   const itens: NfeProntidaoItem[] = [
     {
@@ -65,6 +71,12 @@ export function avaliarProntidaoEmitente(
       hint: 'Ex.: Americana = 3501608 (ABRASF TipLan).',
     },
     {
+      id: 'im',
+      label: 'Inscrição municipal do prestador',
+      ok: imOk,
+      hint: imOk ? undefined : 'Obrigatória na NFS-e (prestador).',
+    },
+    {
       id: 'servico',
       label: 'Código do serviço (LC 116) e NBS',
       ok:
@@ -75,7 +87,20 @@ export function avaliarProntidaoEmitente(
     },
   ];
 
+  if (isNormal) {
+    itens.push({
+      id: 'cnae',
+      label: 'CNAE principal (7 dígitos) — Regime Normal',
+      ok: cnaeOk,
+      hint: cnaeOk ? undefined : 'Informe o CNAE na seção Regime tributário.',
+    });
+  }
+
   return { pronto: itens.every((i) => i.ok), itens };
+}
+
+function onlyDigits(s: string | undefined | null): string {
+  return String(s ?? '').replace(/\D/g, '');
 }
 
 /** Pronto se pelo menos um emitente estiver completo + A1. */

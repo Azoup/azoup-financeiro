@@ -80,6 +80,13 @@ export type NfseEmitente = {
   reg_esp_trib: number;
   trib_issqn: 1 | 2 | 3 | 4;
   tp_ret_issqn: 1 | 2 | 3;
+  /** Lucro Presumido / Lucro Real quando regime_tributario = 3. */
+  tipo_apuracao: 'presumido' | 'real' | null;
+  codigo_cnae: string;
+  situacao_pis_cofins: string;
+  aliquota_iss: number;
+  aliquota_pis: number;
+  aliquota_cofins: number;
   padrao: boolean;
   created_at: string;
   updated_at: string;

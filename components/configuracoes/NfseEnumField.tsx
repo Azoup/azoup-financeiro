@@ -1,17 +1,30 @@
 import { colors, radius, spacing } from '@/theme/colors';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-type Option = { value: number; label: string };
-
-type Props = {
+type Option<T extends string | number = string | number> = {
+  value: T;
   label: string;
-  hint?: string;
-  value: number;
-  options: Option[];
-  onChange: (value: number) => void;
 };
 
-export function NfseEnumField({ label, hint, value, options, onChange }: Props) {
+type Props<T extends string | number = string | number> = {
+  label: string;
+  hint?: string;
+  value: T;
+  options: Option<T>[];
+  onChange: (value: T) => void;
+  /** Se false, não prefixa o valor numérico no rótulo (útil para opções string). */
+  showValuePrefix?: boolean;
+};
+
+export function NfseEnumField<T extends string | number = number>({
+  label,
+  hint,
+  value,
+  options,
+  onChange,
+  showValuePrefix,
+}: Props<T>) {
+  const prefix = showValuePrefix ?? typeof value === 'number';
   return (
     <View style={styles.wrap}>
       <Text style={styles.label}>{label}</Text>
@@ -20,13 +33,13 @@ export function NfseEnumField({ label, hint, value, options, onChange }: Props) 
         const active = value === opt.value;
         return (
           <Pressable
-            key={opt.value}
+            key={String(opt.value)}
             onPress={() => onChange(opt.value)}
             style={[styles.row, active && styles.rowActive]}
           >
             <View style={[styles.dot, active && styles.dotActive]} />
             <Text style={[styles.rowTxt, active && styles.rowTxtActive]}>
-              {opt.value} — {opt.label}
+              {prefix ? `${opt.value} — ${opt.label}` : opt.label}
             </Text>
           </Pressable>
         );
