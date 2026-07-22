@@ -146,6 +146,8 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
             xDescServ,
             cNBS: padNbs(config.codigo_nbs),
           },
+          /** IndOp — indicador da operação (reforma / layout municipal). */
+          indOp: String(config.ind_op ?? '100501').replace(/\D/g, '').slice(0, 10) || '100501',
         },
         valores: {
           vServPrest: { vServ: money2(valor) },
@@ -154,6 +156,8 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
               tribISSQN: tribMun,
               tpRetISSQN: Number(config.tp_ret_issqn ?? 1),
             },
+            // Reforma tributária IBS/CBS (teste 2026).
+            IBSCBS: buildIbsCbs(config, valor),
             totTrib: {
               vTotTrib: {
                 vTotTribFed: money2(0),
@@ -163,6 +167,42 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
             },
           },
         },
+      },
+    },
+  };
+}
+
+/** Grupo IBSCBS da DPS nacional (CST / cClassTrib / alíquotas teste 2026). */
+function buildIbsCbs(config, valorServico) {
+  const cst = String(config.cst_ibs_cbs ?? '000').replace(/\D/g, '').padStart(3, '0').slice(0, 3);
+  const cClassTrib = String(config.c_class_trib ?? '000001')
+    .replace(/\D/g, '')
+    .padStart(6, '0')
+    .slice(0, 6);
+  const pIBSUF = Number(config.aliquota_ibs_uf ?? 0.1);
+  const pIBSMun = Number(config.aliquota_ibs_mun ?? 0);
+  const pCBS = Number(config.aliquota_cbs ?? 0.9);
+  const vBC = Number(valorServico);
+  const vIBSUF = Math.round(vBC * (pIBSUF / 100) * 100) / 100;
+  const vIBSMun = Math.round(vBC * (pIBSMun / 100) * 100) / 100;
+  const vCBS = Math.round(vBC * (pCBS / 100) * 100) / 100;
+
+  return {
+    CST: cst || '000',
+    cClassTrib: cClassTrib || '000001',
+    gIBSCBS: {
+      vBC: money2(vBC),
+      gIBSUF: {
+        pIBSUF: Number.isFinite(pIBSUF) ? pIBSUF : 0.1,
+        vIBSUF: money2(vIBSUF),
+      },
+      gIBSMun: {
+        pIBSMun: Number.isFinite(pIBSMun) ? pIBSMun : 0,
+        vIBSMun: money2(vIBSMun),
+      },
+      gCBS: {
+        pCBS: Number.isFinite(pCBS) ? pCBS : 0.9,
+        vCBS: money2(vCBS),
       },
     },
   };

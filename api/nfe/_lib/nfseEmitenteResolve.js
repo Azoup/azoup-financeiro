@@ -51,6 +51,12 @@ function emitenteToConfig(e) {
     aliquota_iss: e.aliquota_iss,
     aliquota_pis: e.aliquota_pis,
     aliquota_cofins: e.aliquota_cofins,
+    ind_op: e.ind_op,
+    cst_ibs_cbs: e.cst_ibs_cbs,
+    c_class_trib: e.c_class_trib,
+    aliquota_ibs_uf: e.aliquota_ibs_uf,
+    aliquota_ibs_mun: e.aliquota_ibs_mun,
+    aliquota_cbs: e.aliquota_cbs,
   };
 }
 

@@ -41,6 +41,12 @@ const DEFAULT_FISCAL: Pick<
   | 'aliquota_iss'
   | 'aliquota_pis'
   | 'aliquota_cofins'
+  | 'ind_op'
+  | 'cst_ibs_cbs'
+  | 'c_class_trib'
+  | 'aliquota_ibs_uf'
+  | 'aliquota_ibs_mun'
+  | 'aliquota_cbs'
 > = {
   serie: '1',
   proximo_numero: 1,
@@ -68,6 +74,12 @@ const DEFAULT_FISCAL: Pick<
   aliquota_iss: 0,
   aliquota_pis: 0,
   aliquota_cofins: 0,
+  ind_op: '100501',
+  cst_ibs_cbs: '000',
+  c_class_trib: '000001',
+  aliquota_ibs_uf: 0.1,
+  aliquota_ibs_mun: 0,
+  aliquota_cbs: 0.9,
 };
 
 function onlyDigits(s: string | undefined | null): string {
@@ -124,6 +136,12 @@ function normalizeEmitentePatch(input: Partial<NfseEmitenteInput>): Partial<Nfse
     aliquota_iss: Math.max(0, Number(input.aliquota_iss ?? 0) || 0),
     aliquota_pis: Math.max(0, Number(input.aliquota_pis ?? 0) || 0),
     aliquota_cofins: Math.max(0, Number(input.aliquota_cofins ?? 0) || 0),
+    ind_op: onlyDigits(input.ind_op ?? '100501').slice(0, 10) || '100501',
+    cst_ibs_cbs: onlyDigits(input.cst_ibs_cbs ?? '000').padStart(3, '0').slice(0, 3) || '000',
+    c_class_trib: onlyDigits(input.c_class_trib ?? '000001').padStart(6, '0').slice(0, 6) || '000001',
+    aliquota_ibs_uf: Math.max(0, Number(input.aliquota_ibs_uf ?? 0.1) || 0),
+    aliquota_ibs_mun: Math.max(0, Number(input.aliquota_ibs_mun ?? 0) || 0),
+    aliquota_cbs: Math.max(0, Number(input.aliquota_cbs ?? 0.9) || 0),
   };
 }
 
@@ -271,9 +289,9 @@ export async function createEmitente(
     .select('*')
     .single();
   if (error) {
-    if (/tipo_apuracao|codigo_cnae|situacao_pis_cofins|aliquota_iss|column|schema cache/i.test(error.message)) {
+    if (/tipo_apuracao|codigo_cnae|situacao_pis_cofins|aliquota_iss|ind_op|cst_ibs_cbs|c_class_trib|aliquota_ibs|aliquota_cbs|column|schema cache/i.test(error.message)) {
       throw new Error(
-        'Falta a migration do Regime Normal. Rode supabase/migrations/038_nfse_emitente_regime_normal.sql no SQL Editor do Supabase.',
+        'Falta migration fiscal do emitente. Rode no SQL Editor: 038_nfse_emitente_regime_normal.sql e 041_nfse_ibs_cbs.sql.',
       );
     }
     throw new Error(error.message);
@@ -314,9 +332,9 @@ export async function updateEmitente(
     .select('*')
     .single();
   if (error) {
-    if (/tipo_apuracao|codigo_cnae|situacao_pis_cofins|aliquota_iss|column|schema cache/i.test(error.message)) {
+    if (/tipo_apuracao|codigo_cnae|situacao_pis_cofins|aliquota_iss|ind_op|cst_ibs_cbs|c_class_trib|aliquota_ibs|aliquota_cbs|column|schema cache/i.test(error.message)) {
       throw new Error(
-        'Falta a migration do Regime Normal. Rode supabase/migrations/038_nfse_emitente_regime_normal.sql no SQL Editor do Supabase.',
+        'Falta migration fiscal do emitente. Rode no SQL Editor: 038_nfse_emitente_regime_normal.sql e 041_nfse_ibs_cbs.sql.',
       );
     }
     throw new Error(error.message);

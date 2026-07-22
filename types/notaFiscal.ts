@@ -87,6 +87,15 @@ export type NfseEmitente = {
   aliquota_iss: number;
   aliquota_pis: number;
   aliquota_cofins: number;
+  /** Reforma IBS/CBS — IndOp (ex.: 100501). */
+  ind_op: string;
+  /** CST IBS/CBS (ex.: 000 = tributação integral). */
+  cst_ibs_cbs: string;
+  /** cClassTrib (ex.: 000001). */
+  c_class_trib: string;
+  aliquota_ibs_uf: number;
+  aliquota_ibs_mun: number;
+  aliquota_cbs: number;
   padrao: boolean;
   created_at: string;
   updated_at: string;

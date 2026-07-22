@@ -81,6 +81,12 @@ type FormState = {
   aliquotaIss: string;
   aliquotaPis: string;
   aliquotaCofins: string;
+  indOp: string;
+  cstIbsCbs: string;
+  cClassTrib: string;
+  aliquotaIbsUf: string;
+  aliquotaIbsMun: string;
+  aliquotaCbs: string;
   opSimpNac: number;
   regEspTrib: number;
   tribIssqn: number;
@@ -119,6 +125,12 @@ function formFromEmitente(e: NfseEmitente): FormState {
     aliquotaIss: String(e.aliquota_iss ?? 0),
     aliquotaPis: String(e.aliquota_pis ?? 0),
     aliquotaCofins: String(e.aliquota_cofins ?? 0),
+    indOp: e.ind_op ?? '100501',
+    cstIbsCbs: e.cst_ibs_cbs ?? '000',
+    cClassTrib: e.c_class_trib ?? '000001',
+    aliquotaIbsUf: String(e.aliquota_ibs_uf ?? 0.1),
+    aliquotaIbsMun: String(e.aliquota_ibs_mun ?? 0),
+    aliquotaCbs: String(e.aliquota_cbs ?? 0.9),
     opSimpNac: Number(e.op_simp_nac ?? 3),
     regEspTrib: Number(e.reg_esp_trib ?? 0),
     tribIssqn: Number(e.trib_issqn ?? 1),
@@ -388,6 +400,12 @@ export default function NfeConfigScreen() {
         aliquota_iss: Number(String(form.aliquotaIss).replace(',', '.')) || 0,
         aliquota_pis: Number(String(form.aliquotaPis).replace(',', '.')) || 0,
         aliquota_cofins: Number(String(form.aliquotaCofins).replace(',', '.')) || 0,
+        ind_op: form.indOp,
+        cst_ibs_cbs: form.cstIbsCbs,
+        c_class_trib: form.cClassTrib,
+        aliquota_ibs_uf: Number(String(form.aliquotaIbsUf).replace(',', '.')) || 0,
+        aliquota_ibs_mun: Number(String(form.aliquotaIbsMun).replace(',', '.')) || 0,
+        aliquota_cbs: Number(String(form.aliquotaCbs).replace(',', '.')) || 0,
         op_simp_nac: Math.min(4, Math.max(1, form.opSimpNac)) as 1 | 2 | 3 | 4,
         reg_esp_trib: form.regEspTrib,
         trib_issqn: Math.min(4, Math.max(1, form.tribIssqn)) as 1 | 2 | 3 | 4,
@@ -513,7 +531,8 @@ export default function NfeConfigScreen() {
           <Text style={styles.sub}>
             Nenhum emitente encontrado. Rode as migrations{' '}
             <Text style={styles.mono}>037_nfse_emitente.sql</Text> e{' '}
-            <Text style={styles.mono}>038_nfse_emitente_regime_normal.sql</Text> no Supabase e
+            <Text style={styles.mono}>038_nfse_emitente_regime_normal.sql</Text> e{' '}
+            <Text style={styles.mono}>041_nfse_ibs_cbs.sql</Text> no Supabase e
             recarregue.
           </Text>
           <PrimaryButton title="Recarregar" onPress={() => void load()} />
@@ -840,6 +859,68 @@ export default function NfeConfigScreen() {
               value={form.descricao}
               onChangeText={(t) => patch({ descricao: t })}
             />
+          </Card>
+
+          <Card style={styles.card}>
+            <Text style={styles.h}>6. Reforma tributária — IBS / CBS</Text>
+            <Text style={styles.sub}>
+              Campos exigidos na NFS-e (ADN/DPS) a partir da reforma. Valores de teste 2026:
+              IBS-UF 0,10% · IBS-Mun 0% · CBS 0,90%.
+            </Text>
+            <FormTextInput
+              label="IndOp (indicador da operação)"
+              value={form.indOp}
+              onChangeText={(t) => patch({ indOp: t.replace(/\D/g, '').slice(0, 10) })}
+              keyboardType="number-pad"
+              placeholder="100501"
+            />
+            <FormTextInput
+              label="CST IBS/CBS"
+              value={form.cstIbsCbs}
+              onChangeText={(t) => patch({ cstIbsCbs: t.replace(/\D/g, '').slice(0, 3) })}
+              keyboardType="number-pad"
+              placeholder="000"
+            />
+            <Text style={styles.lockedHint}>000 — Tributação integral</Text>
+            <FormTextInput
+              label="cClassTrib"
+              value={form.cClassTrib}
+              onChangeText={(t) => patch({ cClassTrib: t.replace(/\D/g, '').slice(0, 6) })}
+              keyboardType="number-pad"
+              placeholder="000001"
+            />
+            <Text style={styles.lockedHint}>
+              000001 — Situações tributadas integralmente pelo IBS e CBS
+            </Text>
+            <View style={styles.row2}>
+              <View style={{ flex: 1 }}>
+                <FormTextInput
+                  label="Alíquota IBS — UF (%)"
+                  value={form.aliquotaIbsUf}
+                  onChangeText={(t) => patch({ aliquotaIbsUf: t })}
+                  keyboardType="decimal-pad"
+                  placeholder="0.10"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <FormTextInput
+                  label="Alíquota IBS — Município (%)"
+                  value={form.aliquotaIbsMun}
+                  onChangeText={(t) => patch({ aliquotaIbsMun: t })}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <FormTextInput
+                  label="Alíquota CBS (%)"
+                  value={form.aliquotaCbs}
+                  onChangeText={(t) => patch({ aliquotaCbs: t })}
+                  keyboardType="decimal-pad"
+                  placeholder="0.90"
+                />
+              </View>
+            </View>
           </Card>
 
           <PrimaryButton title="Salvar este emitente" onPress={() => void salvarTudo()} loading={busy} />
