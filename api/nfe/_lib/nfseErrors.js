@@ -44,12 +44,12 @@ function humanizeNfseRejection(message, ibge) {
   }
 
   if (/X160/i.test(raw)) {
+    const detail = raw.replace(/\s+/g, ' ').trim().slice(0, 500);
     return [
       'X160 — XML rejeitado pelo schema ABRASF TipLan de Americana (estrutura inválida).',
-      'Na emissão (competência 2026+), o grupo IBSCBS em Servico é obrigatório (Operacao / SituacaoTributaria / ClassificacaoTributaria).',
-      'Confira em Configurações › NFS-e: IndOp, CST e cClassTrib (ex.: 100501 / 000 / 000001).',
-      'No cancelamento, IdentificacaoNfse aceita só Numero, CNPJ, IM e CodigoMunicipio (sem CodigoVerificacao).',
-      'Faça redeploy da API e tente emitir/cancelar de novo.',
+      `Detalhe TipLan: ${detail}`,
+      'No Regime Normal, Situação PIS/COFINS não deve ser 00 (use 01). Confira também IndOp/CST/cClassTrib.',
+      'Faça redeploy, reemitir, e se falhar copie o texto completo em Notas fiscais › Rejeição.',
     ].join(' ');
   }
 

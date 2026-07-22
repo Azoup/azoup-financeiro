@@ -192,6 +192,12 @@ function buildEnviarLoteRpsSincronoXml({
     .replace(/\D/g, '')
     .padStart(2, '0')
     .slice(0, 2);
+  // TipLan (manual complementar): códigos usuais 01–09/49/99 — "00" não entra no enum tipico.
+  // No Regime Normal (não optante) defaultamos para 01 se ainda estiver 00.
+  const optanteSimples = Number(config.op_simp_nac ?? 3) !== 1;
+  const situacaoPisEnvio =
+    situacaoPisCofins === '00' && !optanteSimples ? '01' : situacaoPisCofins;
+  const incluirSitPis = situacaoPisEnvio !== '00';
   // TipLan XSD (reforma 2026): IBSCBS obrigatório em Servico (IndOp / CST / cClassTrib).
   const opDigits = onlyDigits(config.ind_op ?? config.codigo_operacao_ibscbs);
   const operacao = opDigits ? opDigits.slice(-6).padStart(6, '0') : '100501';
@@ -238,7 +244,9 @@ function buildEnviarLoteRpsSincronoXml({
     `<Servico>` +
     `<Valores>` +
     `<ValorServicos>${valor}</ValorServicos>` +
-    `<SituacaoTributariaPISCOFINS>${escapeXml(situacaoPisCofins)}</SituacaoTributariaPISCOFINS>` +
+    (incluirSitPis
+      ? `<SituacaoTributariaPISCOFINS>${escapeXml(situacaoPisEnvio)}</SituacaoTributariaPISCOFINS>`
+      : '') +
     `</Valores>` +
     `<IssRetido>${issRetido}</IssRetido>` +
     `<ItemListaServico>${escapeXml(itemLista)}</ItemListaServico>` +
@@ -365,9 +373,14 @@ function parseLoteResult(soapBody) {
   const inner = decodeSoapInner(soapBody);
   const mensagens = [
     ...inner.matchAll(
-      /<Codigo>\s*([^<]+)\s*<\/Codigo>[\s\S]*?<Mensagem>\s*([^<]+)\s*<\/Mensagem>/gi,
+      /<Codigo>\s*([^<]+)\s*<\/Codigo>[\s\S]*?<Mensagem>\s*([^<]+)\s*<\/Mensagem>(?:[\s\S]*?<Correcao>\s*([^<]*)\s*<\/Correcao>)?/gi,
     ),
-  ].map((m) => `${m[1].trim()}: ${m[2].trim()}`);
+  ].map((m) => {
+    const cod = m[1].trim();
+    const msg = m[2].trim();
+    const cor = (m[3] || '').trim();
+    return cor ? `${cod}: ${msg} — ${cor}` : `${cod}: ${msg}`;
+  });
 
   // TipLan: A* = alerta (ex. A14); E*/X* = erro que impede autorização.
   const erros = mensagens.filter((m) => !/^A\d+/i.test(m));
@@ -670,9 +683,14 @@ async function cancelarNfseAbrasfAmericana({
   const inner = decodeSoapInner(httpRes.body);
   const mensagens = [
     ...inner.matchAll(
-      /<Codigo>\s*([^<]+)\s*<\/Codigo>[\s\S]*?<Mensagem>\s*([^<]+)\s*<\/Mensagem>/gi,
+      /<Codigo>\s*([^<]+)\s*<\/Codigo>[\s\S]*?<Mensagem>\s*([^<]+)\s*<\/Mensagem>(?:[\s\S]*?<Correcao>\s*([^<]*)\s*<\/Correcao>)?/gi,
     ),
-  ].map((m) => `${m[1].trim()}: ${m[2].trim()}`);
+  ].map((m) => {
+    const cod = m[1].trim();
+    const msg = m[2].trim();
+    const cor = (m[3] || '').trim();
+    return cor ? `${cod}: ${msg} — ${cor}` : `${cod}: ${msg}`;
+  });
 
   const fault =
     inner.match(/<faultstring>\s*([^<]+)\s*<\/faultstring>/i)?.[1]?.trim() ||

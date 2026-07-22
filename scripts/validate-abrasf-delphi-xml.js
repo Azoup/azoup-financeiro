@@ -49,7 +49,6 @@ const required = [
   '<Status>1</Status>',
   '<Competencia>2026-07-17</Competencia>',
   '<ValorServicos>2.00</ValorServicos>',
-  '<SituacaoTributariaPISCOFINS>00</SituacaoTributariaPISCOFINS>',
   '<IssRetido>2</IssRetido>',
   '<ItemListaServico>01.07</ItemListaServico>',
   '<CodigoCnae>6209100</CodigoCnae>',
@@ -72,7 +71,14 @@ const required = [
   '<IncentivoFiscal>2</IncentivoFiscal>',
 ];
 
-const forbidden = ['GerarNfseEnvio', 'TomadorServico', '<Aliquota>', '<ValorIss>'];
+const forbidden = [
+  'GerarNfseEnvio',
+  'TomadorServico',
+  '<Aliquota>',
+  '<ValorIss>',
+  // Simples com situacao 00: campo omitido (enum TipLan típico não lista 00)
+  '<SituacaoTributariaPISCOFINS>00</SituacaoTributariaPISCOFINS>',
+];
 
 let ok = true;
 for (const s of required) {

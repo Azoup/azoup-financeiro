@@ -102,8 +102,8 @@ export function defaultsRegimeNormal(apuracao: TipoApuracaoNormal = 'presumido')
     regime_tributario: 3 as RegimeTributario,
     op_simp_nac: 1 as OpSimpNac,
     tipo_apuracao: apuracao,
-    /** TipLan: 00 = sem PIS/COFINS no RPS (comum em serviços municipais). */
-    situacao_pis_cofins: '00',
+    /** TipLan: no Regime Normal use 01 (alíquota básica); 00 costuma falhar no schema. */
+    situacao_pis_cofins: '01',
     aliquota_iss: 0,
     aliquota_pis: apuracao === 'presumido' ? 0.65 : 1.65,
     aliquota_cofins: apuracao === 'presumido' ? 3 : 7.6,

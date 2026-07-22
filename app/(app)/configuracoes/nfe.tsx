@@ -121,7 +121,9 @@ function formFromEmitente(e: NfseEmitente): FormState {
     descricao: e.descricao_servico_padrao,
     regimeTributario: regime,
     tipoApuracao: e.tipo_apuracao === 'real' ? 'real' : 'presumido',
-    situacaoPisCofins: (e.situacao_pis_cofins || '00').padStart(2, '0').slice(0, 2),
+    situacaoPisCofins: (e.situacao_pis_cofins || (Number(e.regime_tributario) === 3 ? '01' : '00'))
+      .padStart(2, '0')
+      .slice(0, 2),
     aliquotaIss: String(e.aliquota_iss ?? 0),
     aliquotaPis: String(e.aliquota_pis ?? 0),
     aliquotaCofins: String(e.aliquota_cofins ?? 0),
@@ -763,7 +765,7 @@ export default function NfeConfigScreen() {
                 />
                 <NfseEnumField
                   label="Situação tributária PIS/COFINS (NFS-e)"
-                  hint="Na TipLan de Americana o valor mais comum em serviços é 00 (nenhuma)."
+                  hint="Regime Normal: use 01 (alíquota básica). Evite 00 — a TipLan pode rejeitar no schema (X160)."
                   value={form.situacaoPisCofins}
                   options={SITUACAO_PIS_COFINS_OPCOES}
                   showValuePrefix={false}
