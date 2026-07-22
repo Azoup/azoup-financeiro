@@ -842,7 +842,11 @@ export default function NfeConfigScreen() {
               value={form.codTribNac}
               onChangeText={(t) => patch({ codTribNac: t })}
               keyboardType="number-pad"
+              placeholder="010701"
             />
+            <Text style={styles.sub}>
+              6 dígitos da LC 116 (ex.: 010701 → ItemListaServico 01.07). Não use 001 nem 000001.
+            </Text>
             <FormTextInput
               label="Código municipal (cTribMun)"
               value={form.codTribMun}

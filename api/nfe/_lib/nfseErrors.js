@@ -45,6 +45,14 @@ function humanizeNfseRejection(message, ibge) {
 
   if (/X160/i.test(raw)) {
     const detail = raw.replace(/\s+/g, ' ').trim().slice(0, 500);
+    if (/ItemListaServico|00\.01|tsItemListaServico/i.test(detail)) {
+      return [
+        'X160 — ItemListaServico inválido no schema TipLan.',
+        `Detalhe TipLan: ${detail}`,
+        'Em Configurações › NFS-e do emitente, o código de tributação nacional deve ser o da LC 116 (ex.: 010701 → 01.07), não o municipal ADN (001) nem o cClassTrib (000001).',
+        'Faça redeploy e reemitir.',
+      ].join(' ');
+    }
     return [
       'X160 — XML rejeitado pelo schema ABRASF TipLan de Americana (estrutura inválida).',
       `Detalhe TipLan: ${detail}`,

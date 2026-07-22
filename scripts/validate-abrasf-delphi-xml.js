@@ -96,11 +96,17 @@ for (const s of forbidden) {
 
 console.log('helpers', {
   item: itemListaServico('010701'),
+  itemFromClassTrib: itemListaServico('000001'),
+  itemFromMun: itemListaServico('001'),
   mun: codigoTributacaoMunicipioAbrasf({
     codigo_tributacao_municipal: '001',
     codigo_tributacao_nacional: '010701',
   }),
   nbs: codigoNbs({ codigo_nbs: '106043000' }),
 });
+if (itemListaServico('000001') !== '01.07' || itemListaServico('001') !== '01.07') {
+  console.error('itemListaServico fallback FAIL');
+  process.exit(1);
+}
 console.log(ok ? 'XML Delphi-compatible: OK' : 'XML Delphi-compatible: FAIL');
 process.exit(ok ? 0 : 1);

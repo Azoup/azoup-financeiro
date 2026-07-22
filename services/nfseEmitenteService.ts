@@ -119,7 +119,12 @@ function normalizeEmitentePatch(input: Partial<NfseEmitenteInput>): Partial<Nfse
     inscricao_estadual: (input.inscricao_estadual ?? '').trim().toUpperCase(),
     codigo_ibge_emitente: onlyDigits(input.codigo_ibge_emitente).slice(0, 7),
     inscricao_municipal: onlyDigits(input.inscricao_municipal),
-    codigo_tributacao_nacional: onlyDigits(input.codigo_tributacao_nacional).slice(0, 6) || '010701',
+    codigo_tributacao_nacional: (() => {
+      const nac = onlyDigits(input.codigo_tributacao_nacional).slice(0, 6);
+      // Evita 000001 (cClassTrib) / códigos curtos que viram ItemListaServico 00.xx (X160 TipLan).
+      if (!nac || nac.length < 4 || nac.startsWith('00')) return '010701';
+      return nac.padStart(6, '0');
+    })(),
     codigo_tributacao_municipal: tribMun,
     codigo_nbs: onlyDigits(input.codigo_nbs).slice(0, 9) || '115013000',
     codigo_cnae: onlyDigits(input.codigo_cnae).slice(0, 7),

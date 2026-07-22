@@ -63,13 +63,29 @@ function parseCompetenciaIso(competencia, fallbackDate) {
   return dateYmd(fallbackDate);
 }
 
-/** cTribNac 010701 → ItemListaServico 01.07 */
+/** Item da lista LC 116 no formato TipLan XX.XX (ex.: 01.07). */
+const ITEM_LISTA_DEFAULT_AZOUP = '01.07';
+
+/**
+ * cTribNac 010701 → ItemListaServico 01.07.
+ * Não confudir com cClassTrib (000001) nem cTribMun ADN (001) — isso virava 00.01 (X160).
+ */
 function itemListaServico(cTribNac) {
   const raw = String(cTribNac ?? '').trim();
   const dotted = raw.match(/^(\d{1,2})\.(\d{2})$/);
-  if (dotted) return `${dotted[1].padStart(2, '0')}.${dotted[2]}`;
-  const d = onlyDigits(raw).padStart(6, '0').slice(0, 6);
-  return `${d.slice(0, 2)}.${d.slice(2, 4)}`;
+  if (dotted) {
+    const item = `${dotted[1].padStart(2, '0')}.${dotted[2]}`;
+    return item.startsWith('00.') ? ITEM_LISTA_DEFAULT_AZOUP : item;
+  }
+  const d = onlyDigits(raw);
+  // Código municipal ADN curto (001) ou vazio → subitem padrão Azoup.
+  if (!d || d.length <= 3) return ITEM_LISTA_DEFAULT_AZOUP;
+
+  const padded = d.padStart(6, '0').slice(0, 6);
+  const item = `${padded.slice(0, 2)}.${padded.slice(2, 4)}`;
+  // 000001 (cClassTrib) / 0000xx → inválido no enum tsItemListaServico.
+  if (item.startsWith('00.')) return ITEM_LISTA_DEFAULT_AZOUP;
+  return item;
 }
 
 /**
@@ -79,11 +95,17 @@ function itemListaServico(cTribNac) {
 function codigoTributacaoMunicipioAbrasf(config) {
   const raw = String(config.codigo_tributacao_municipal ?? '').trim();
   const dotted = raw.match(/^(\d{1,2})\.(\d{2})$/);
-  if (dotted) return `${dotted[1].padStart(2, '0')}.${dotted[2]}`;
+  if (dotted) {
+    const item = `${dotted[1].padStart(2, '0')}.${dotted[2]}`;
+    return item.startsWith('00.')
+      ? itemListaServico(config.codigo_tributacao_nacional)
+      : item;
+  }
 
   const mun = onlyDigits(raw);
   if (mun.length >= 4) {
-    return `${mun.slice(0, 2)}.${mun.slice(2, 4)}`;
+    const item = `${mun.slice(0, 2)}.${mun.slice(2, 4)}`;
+    if (!item.startsWith('00.')) return item;
   }
   return itemListaServico(config.codigo_tributacao_nacional);
 }
