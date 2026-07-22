@@ -59,6 +59,12 @@ const required = [
   '<CodigoMunicipio>3501608</CodigoMunicipio>',
   '<ExigibilidadeISS>1</ExigibilidadeISS>',
   '<MunicipioIncidencia>3501608</MunicipioIncidencia>',
+  '<IBSCBS>',
+  '<OperacaoUsoConsumoPessoal>0</OperacaoUsoConsumoPessoal>',
+  '<Operacao>100501</Operacao>',
+  '<SituacaoTributaria>000</SituacaoTributaria>',
+  '<ClassificacaoTributaria>000001</ClassificacaoTributaria>',
+  '</IBSCBS>',
   '<Tomador>',
   '<Complemento>',
   '<Contato><Email>jessica@azoup.com.br</Email></Contato>',
@@ -66,7 +72,7 @@ const required = [
   '<IncentivoFiscal>2</IncentivoFiscal>',
 ];
 
-const forbidden = ['GerarNfseEnvio', 'IBSCBS', 'TomadorServico', '<Aliquota>', '<ValorIss>'];
+const forbidden = ['GerarNfseEnvio', 'TomadorServico', '<Aliquota>', '<ValorIss>'];
 
 let ok = true;
 for (const s of required) {

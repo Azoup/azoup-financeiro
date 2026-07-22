@@ -192,6 +192,18 @@ function buildEnviarLoteRpsSincronoXml({
     .replace(/\D/g, '')
     .padStart(2, '0')
     .slice(0, 2);
+  // TipLan XSD (reforma 2026): IBSCBS obrigatório em Servico (IndOp / CST / cClassTrib).
+  const opDigits = onlyDigits(config.ind_op ?? config.codigo_operacao_ibscbs);
+  const operacao = opDigits ? opDigits.slice(-6).padStart(6, '0') : '100501';
+  const sitDigits = onlyDigits(config.cst_ibs_cbs ?? config.situacao_tributaria_ibscbs);
+  const sitTrib = sitDigits ? sitDigits.padStart(3, '0').slice(0, 3) : '000';
+  const classTribRaw = onlyDigits(
+    config.c_class_trib ?? config.classificacao_tributaria_ibscbs,
+  );
+  const classTrib =
+    classTribRaw.length === 6
+      ? classTribRaw
+      : `${sitTrib}${(classTribRaw || '001').padStart(3, '0').slice(0, 3)}`;
   const idLote = `Lote_${numeroLote}`;
   const idDec = `Dec_${numero}`;
 
@@ -237,6 +249,14 @@ function buildEnviarLoteRpsSincronoXml({
     `<CodigoMunicipio>${ibge}</CodigoMunicipio>` +
     `<ExigibilidadeISS>1</ExigibilidadeISS>` +
     `<MunicipioIncidencia>${ibge}</MunicipioIncidencia>` +
+    `<IBSCBS>` +
+    `<OperacaoUsoConsumoPessoal>0</OperacaoUsoConsumoPessoal>` +
+    `<Operacao>${escapeXml(operacao)}</Operacao>` +
+    `<ValoresTributos>` +
+    `<SituacaoTributaria>${escapeXml(sitTrib)}</SituacaoTributaria>` +
+    `<ClassificacaoTributaria>${escapeXml(classTrib)}</ClassificacaoTributaria>` +
+    `</ValoresTributos>` +
+    `</IBSCBS>` +
     `</Servico>` +
     `<Prestador>` +
     `<CpfCnpj><Cnpj>${cnpj}</Cnpj></CpfCnpj>` +
