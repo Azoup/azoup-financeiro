@@ -7,8 +7,9 @@ function humanizeNfseRejection(message, ibge) {
   if (/L327|X327/i.test(raw)) {
     return [
       'X327 — A tributação na NFS-e não confere com o perfil do prestador na prefeitura.',
-      'Em Configurações › NFS-e › Emitente 2: Regime Normal + Situação no Simples = "Não optante" (1).',
-      'No portal nfse.americana.sp.gov.br o CNPJ 66.639.480/0001-43 deve estar como Tributação Normal (não Simples).',
+      '1) Portal nfse.americana.sp.gov.br: confira se o CNPJ está como Simples ou Tributação Normal.',
+      '2) No Azoup › Configurações › NFS-e › Emitente 2: se o portal é Normal → Regime Normal + Situação "Não optante" (1); se o portal é Simples → Regime Simples + opção 3 (ME/EPP).',
+      '3) Salve, redeploy da API e reemitir. O certificado (.pfx) deve ser deste mesmo CNPJ.',
     ].join(' ');
   }
 

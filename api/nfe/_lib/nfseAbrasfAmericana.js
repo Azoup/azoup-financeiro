@@ -206,19 +206,20 @@ function buildEnviarLoteRpsSincronoXml({
     itens[0]?.descricao ?? config.descricao_servico_padrao ?? 'Prestacao de servicos';
   const tomadorNome =
     cliente.nome_fantasia || cliente.nome_cliente || cliente.nome || 'Tomador';
-  // ADN: 1=não optante → ABRASF 2; demais (ME/EPP) → 1 (sim), igual ao Delphi.
-  const optante = Number(config.op_simp_nac ?? 3) === 1 ? '2' : '1';
+  // ABRASF OptanteSimplesNacional: 1=Sim, 2=Não.
+  // Regime Normal (CRT 3) sempre não optante — evita X327 se op_simp_nac ficou 3 por engano.
+  const regime = Number(config.regime_tributario ?? 0);
+  const opSimp = Number(config.op_simp_nac ?? 3);
+  const naoOptante = regime === 3 || opSimp === 1;
+  const optante = naoOptante ? '2' : '1';
   // ABRASF: IssRetido 1=Sim, 2=Não. tp_ret_issqn: 1=não retido, 2/3=retido.
   const issRetido = Number(config.tp_ret_issqn ?? 1) === 1 ? '2' : '1';
   const situacaoPisCofins = String(config.situacao_pis_cofins ?? '00')
     .replace(/\D/g, '')
     .padStart(2, '0')
     .slice(0, 2);
-  // TipLan (manual complementar): códigos usuais 01–09/49/99 — "00" não entra no enum tipico.
-  // No Regime Normal (não optante) defaultamos para 01 se ainda estiver 00.
-  const optanteSimples = Number(config.op_simp_nac ?? 3) !== 1;
-  const situacaoPisEnvio =
-    situacaoPisCofins === '00' && !optanteSimples ? '01' : situacaoPisCofins;
+  // TipLan: no Regime Normal / não optante, "00" → "01".
+  const situacaoPisEnvio = situacaoPisCofins === '00' && naoOptante ? '01' : situacaoPisCofins;
   const incluirSitPis = situacaoPisEnvio !== '00';
   // TipLan XSD (reforma 2026): IBSCBS obrigatório em Servico (IndOp / CST / cClassTrib).
   const opDigits = onlyDigits(config.ind_op ?? config.codigo_operacao_ibscbs);
