@@ -215,13 +215,11 @@ function buildEnviarLoteRpsSincronoXml({
     itens[0]?.descricao ?? config.descricao_servico_padrao ?? 'Prestacao de servicos';
   const tomadorNome =
     cliente.nome_fantasia || cliente.nome_cliente || cliente.nome || 'Tomador';
-  // ABRASF OptanteSimplesNacional: 1=Sim, 2=Não.
-  // Regime Normal / Lucro Presumido|Real → sempre não optante (evita X327).
-  const regime = Number(config.regime_tributario ?? 0);
+  // ABRASF OptanteSimplesNacional: 1=Sim (optante), 2=Não.
+  // Usa op_simp_nac do emitente (1=não optante → XML 2). Não forçar só pelo CRT:
+  // o portal TipLan pode ainda estar Simples mesmo com CRT Normal no Azoup.
   const opSimp = Number(config.op_simp_nac ?? 3);
-  const temApuracaoNormal =
-    config.tipo_apuracao === 'presumido' || config.tipo_apuracao === 'real';
-  const naoOptante = regime === 3 || opSimp === 1 || temApuracaoNormal;
+  const naoOptante = opSimp === 1;
   const optante = naoOptante ? '2' : '1';
   // ABRASF: IssRetido 1=Sim, 2=Não. tp_ret_issqn: 1=não retido, 2/3=retido.
   const issRetido = Number(config.tp_ret_issqn ?? 1) === 1 ? '2' : '1';
@@ -229,7 +227,6 @@ function buildEnviarLoteRpsSincronoXml({
     .replace(/\D/g, '')
     .padStart(2, '0')
     .slice(0, 2);
-  // TipLan: no Regime Normal / não optante, "00" → "01".
   const situacaoPisEnvio = situacaoPisCofins === '00' && naoOptante ? '01' : situacaoPisCofins;
   const incluirSitPis = situacaoPisEnvio !== '00';
   // TipLan XSD (reforma 2026): IBSCBS obrigatório em Servico (IndOp / CST / cClassTrib).
@@ -631,7 +628,11 @@ async function emitirNfseAbrasfAmericana({
 
   const parsed = parseLoteResult(httpRes.body);
   if (!parsed.sucesso) {
-    const msg = parsed.erros.join(' | ') || 'Rejeitada pelo WebService ABRASF de Americana.';
+    let msg = parsed.erros.join(' | ') || 'Rejeitada pelo WebService ABRASF de Americana.';
+    const optanteXml = dadosXml.match(/<OptanteSimplesNacional>(\d)<\/OptanteSimplesNacional>/)?.[1];
+    if (/X327|L327/i.test(msg)) {
+      msg += ` | XML OptanteSimplesNacional=${optanteXml} (1=Simples, 2=Não). op_simp_nac=${config.op_simp_nac}. Ajuste em Configurações › NFS-e › Emitente 2 › "Opção Simples na NFS-e" para bater com o portal.`;
+    }
     return { success: false, status: 'ERR', message: msg, xml_autorizado: parsed.xml };
   }
 

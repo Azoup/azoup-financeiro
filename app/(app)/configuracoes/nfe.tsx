@@ -412,7 +412,9 @@ export default function NfeConfigScreen() {
         aliquota_ibs_uf: Number(String(form.aliquotaIbsUf).replace(',', '.')) || 0,
         aliquota_ibs_mun: Number(String(form.aliquotaIbsMun).replace(',', '.')) || 0,
         aliquota_cbs: Number(String(form.aliquotaCbs).replace(',', '.')) || 0,
-        op_simp_nac: Math.min(4, Math.max(1, form.opSimpNac)) as 1 | 2 | 3 | 4,
+        op_simp_nac: isRegimeNormal(form.regimeTributario)
+          ? ((form.opSimpNac === 1 ? 1 : 3) as 1 | 2 | 3 | 4)
+          : (Math.min(4, Math.max(1, form.opSimpNac)) as 1 | 2 | 3 | 4),
         reg_esp_trib: form.regEspTrib,
         trib_issqn: Math.min(4, Math.max(1, form.tribIssqn)) as 1 | 2 | 3 | 4,
         tp_ret_issqn: Math.min(3, Math.max(1, form.tpRetIssqn)) as 1 | 2 | 3,
@@ -805,14 +807,16 @@ export default function NfeConfigScreen() {
                     />
                   </View>
                 </View>
-                <View style={styles.lockedBox}>
-                  <Text style={styles.lockedTitle}>Situação no Simples Nacional</Text>
-                  <Text style={styles.lockedValue}>Não optante (1) — fixo no Regime Normal</Text>
-                  <Text style={styles.lockedHint}>
-                    Não precisa escolher: a NFS-e TipLan envia OptanteSimplesNacional = 2 (não).
-                    Confira só se o portal Americana também está em Tributação Normal neste CNPJ.
-                  </Text>
-                </View>
+                <NfseEnumField
+                  label="Opção Simples na NFS-e (portal Americana)"
+                  hint="Tem que ser igual ao cadastro deste CNPJ no portal nfse.americana.sp.gov.br. Regime Normal → Não optante. Se o portal ainda estiver Simples, use ME/EPP temporariamente."
+                  value={form.opSimpNac === 1 ? 1 : 3}
+                  options={[
+                    { value: 1, label: 'Não optante — Tributação Normal no portal' },
+                    { value: 3, label: 'Optante ME/EPP — Simples no portal' },
+                  ]}
+                  onChange={(v) => patch({ opSimpNac: v })}
+                />
               </>
             ) : (
               <NfseEnumField
