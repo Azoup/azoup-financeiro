@@ -805,9 +805,14 @@ export default function NfeConfigScreen() {
                     />
                   </View>
                 </View>
-                <Text style={styles.lockedHint}>
-                  Optante do Simples: Não optante (fixado no Regime Normal).
-                </Text>
+                <View style={styles.lockedBox}>
+                  <Text style={styles.lockedTitle}>Situação no Simples Nacional</Text>
+                  <Text style={styles.lockedValue}>Não optante (1) — fixo no Regime Normal</Text>
+                  <Text style={styles.lockedHint}>
+                    Não precisa escolher: a NFS-e TipLan envia OptanteSimplesNacional = 2 (não).
+                    Confira só se o portal Americana também está em Tributação Normal neste CNPJ.
+                  </Text>
+                </View>
               </>
             ) : (
               <NfseEnumField
@@ -973,8 +978,27 @@ const styles = StyleSheet.create({
   lockedHint: {
     fontSize: 11,
     color: colors.gray600,
+    marginTop: 4,
+    lineHeight: 16,
+  },
+  lockedBox: {
+    backgroundColor: colors.infoSoft,
+    borderRadius: radius.md,
+    padding: spacing.md,
     marginBottom: spacing.md,
-    fontStyle: 'italic',
+    borderWidth: 1,
+    borderColor: colors.petroleum + '22',
+  },
+  lockedTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.petroleum,
+    marginBottom: 4,
+  },
+  lockedValue: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.petroleum,
   },
   sub: { fontSize: 12, color: colors.gray600, marginBottom: spacing.md, lineHeight: 17 },
   tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.sm },
