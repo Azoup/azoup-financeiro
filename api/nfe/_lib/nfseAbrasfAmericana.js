@@ -134,9 +134,18 @@ function loadPfx(certPath, senha) {
   if (!keyBag?.key || !certBag?.cert) {
     throw new Error('Não foi possível ler chave/certificado do .pfx para ABRASF Americana.');
   }
+  const attrs = certBag.cert.subject?.attributes ?? [];
+  const subject = attrs.map((a) => `${a.shortName || a.name}=${a.value}`).join(',');
+  const cnpjCert =
+    onlyDigits(subject.match(/:\s*(\d{14})\b/)?.[1]) ||
+    onlyDigits(subject.match(/CNPJ[=:\s]*(\d{14})/i)?.[1]) ||
+    onlyDigits(
+      attrs.find((a) => /CNPJ|serialNumber/i.test(String(a.shortName || a.name || '')))?.value,
+    );
   return {
     privateKeyPem: forge.pki.privateKeyToPem(keyBag.key),
     certificatePem: forge.pki.certificateToPem(certBag.cert),
+    cnpjCert: cnpjCert.length === 14 ? cnpjCert : null,
   };
 }
 
@@ -207,10 +216,12 @@ function buildEnviarLoteRpsSincronoXml({
   const tomadorNome =
     cliente.nome_fantasia || cliente.nome_cliente || cliente.nome || 'Tomador';
   // ABRASF OptanteSimplesNacional: 1=Sim, 2=Não.
-  // Regime Normal (CRT 3) sempre não optante — evita X327 se op_simp_nac ficou 3 por engano.
+  // Regime Normal / Lucro Presumido|Real → sempre não optante (evita X327).
   const regime = Number(config.regime_tributario ?? 0);
   const opSimp = Number(config.op_simp_nac ?? 3);
-  const naoOptante = regime === 3 || opSimp === 1;
+  const temApuracaoNormal =
+    config.tipo_apuracao === 'presumido' || config.tipo_apuracao === 'real';
+  const naoOptante = regime === 3 || opSimp === 1 || temApuracaoNormal;
   const optante = naoOptante ? '2' : '1';
   // ABRASF: IssRetido 1=Sim, 2=Não. tp_ret_issqn: 1=não retido, 2/3=retido.
   const issRetido = Number(config.tp_ret_issqn ?? 1) === 1 ? '2' : '1';
@@ -539,12 +550,23 @@ async function emitirNfseAbrasfAmericana({
   if (tomadorDoc.length !== 11 && tomadorDoc.length !== 14) {
     throw new Error('Cliente sem CPF/CNPJ válido.');
   }
+  if (tomadorDoc === cnpj) {
+    throw new Error(
+      'X52 — O tomador (cliente) tem o mesmo CNPJ do emitente. Use um cliente com outro documento.',
+    );
+  }
   const valor = Number(nota.valor_total);
   if (!Number.isFinite(valor) || valor <= 0) {
     throw new Error('Valor da nota inválido.');
   }
 
-  const { privateKeyPem, certificatePem } = loadPfx(certPath, senha);
+  const { privateKeyPem, certificatePem, cnpjCert } = loadPfx(certPath, senha);
+  if (cnpjCert && cnpjCert !== cnpj) {
+    throw new Error(
+      `O certificado A1 é do CNPJ ${cnpjCert}, mas o emitente da nota é ${cnpj}. ` +
+        'Em Configurações › NFS-e › Emitente 2, envie o .pfx deste mesmo CNPJ.',
+    );
+  }
   let dadosXml = buildEnviarLoteRpsSincronoXml({
     nota,
     itens,
@@ -559,9 +581,22 @@ async function emitirNfseAbrasfAmericana({
   const url = WS_URL[Number(ambiente) === 2 ? 2 : 1];
   const pfxBuf = fs.readFileSync(certPath);
 
+  const optanteXml = dadosXml.match(/<OptanteSimplesNacional>(\d)<\/OptanteSimplesNacional>/)?.[1];
   console.info(
     '[nfse] gateway ABRASF Americana RecepcionarLoteRpsSincrono',
     url,
+    'CNPJ',
+    cnpj,
+    'IM',
+    im,
+    'OptanteSimplesNacional',
+    optanteXml,
+    'regime',
+    config.regime_tributario,
+    'op_simp_nac',
+    config.op_simp_nac,
+    'tipo_apuracao',
+    config.tipo_apuracao,
     'ItemListaServico',
     itemListaServico(config.codigo_tributacao_nacional),
     'NBS',

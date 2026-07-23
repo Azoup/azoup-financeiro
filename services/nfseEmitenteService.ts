@@ -136,7 +136,9 @@ function normalizeEmitentePatch(input: Partial<NfseEmitenteInput>): Partial<Nfse
       (input.descricao_servico_padrao ?? 'Serviço de mensalidade').trim() || 'Serviço de mensalidade',
     natureza_operacao: (input.natureza_operacao ?? 'Prestação de serviço').trim(),
     regime_tributario: regime,
-    op_simp_nac: Math.min(4, Math.max(1, Number(input.op_simp_nac ?? 3))) as 1 | 2 | 3 | 4,
+    op_simp_nac: (regime === 3
+      ? 1
+      : Math.min(4, Math.max(1, Number(input.op_simp_nac ?? 3)))) as 1 | 2 | 3 | 4,
     reg_esp_trib: Number(input.reg_esp_trib ?? 0),
     trib_issqn: Math.min(4, Math.max(1, Number(input.trib_issqn ?? 1))) as 1 | 2 | 3 | 4,
     tp_ret_issqn: Math.min(3, Math.max(1, Number(input.tp_ret_issqn ?? 1))) as 1 | 2 | 3,
