@@ -4,11 +4,34 @@ function humanizeNfseRejection(message, ibge) {
   const raw = String(message ?? '').trim();
   if (!raw) return 'NFS-e rejeitada pela SEFIN.';
 
-  if (/L327/i.test(raw)) {
+  if (/L327|X327/i.test(raw)) {
     return [
-      'L327 — A opção de tributação na NFS-e não confere com o perfil do prestador na prefeitura.',
-      'Em Configurações › NFS-e, ajuste "Situação no Simples Nacional" para o mesmo valor cadastrado no portal da prefeitura (americanahomologacao.nfe.com.br).',
-      'Ex.: se a empresa é ME/EPP no Simples, selecione opção 3 — não "Não optante" (1).',
+      'X327 — A tributação na NFS-e não confere com o perfil do prestador na prefeitura.',
+      'Em Configurações › NFS-e › Emitente 2: Regime Normal + Situação no Simples = "Não optante" (1).',
+      'No portal nfse.americana.sp.gov.br o CNPJ 66.639.480/0001-43 deve estar como Tributação Normal (não Simples).',
+    ].join(' ');
+  }
+
+  if (/X345|Inscrição Municipal.*não está vinculada|Inscricao Municipal.*nao esta vinculada/i.test(raw)) {
+    return [
+      'X345 — A Inscrição Municipal informada não está vinculada a este CNPJ na prefeitura.',
+      'Em Configurações › NFS-e › Emitente 2, use a IM do CNPJ 66.639.480/0001-43 (não a do outro CNPJ/Simples).',
+      'Confira no portal nfse.americana.sp.gov.br o CCM/IM cadastrado para esse CNPJ.',
+    ].join(' ');
+  }
+
+  if (/X138|não autorizado a realizar o serviço|nao autorizado a realizar o serviço/i.test(raw)) {
+    return [
+      'X138 — Certificado/usuário sem autorização para emitir esse serviço neste CNPJ.',
+      'No portal da NFS-e de Americana: Autorização para Emissão / WebService para o CNPJ do Emitente 2.',
+      'O .pfx usado na emissão deve ser do mesmo CNPJ 66.639.480/0001-43.',
+    ].join(' ');
+  }
+
+  if (/X52|tomador.*próprio prestador|tomador.*proprio prestador/i.test(raw)) {
+    return [
+      'X52 — O tomador (cliente) tem o mesmo CNPJ do prestador (emitente).',
+      'Não emita NFS-e para a própria empresa. Use um cliente com outro CPF/CNPJ na mensalidade/teste.',
     ].join(' ');
   }
 
