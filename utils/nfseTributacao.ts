@@ -104,12 +104,60 @@ export function defaultsRegimeNormal(apuracao: TipoApuracaoNormal = 'presumido')
     tipo_apuracao: apuracao,
     /** TipLan: no Regime Normal use 01 (alíquota básica); 00 costuma falhar no schema. */
     situacao_pis_cofins: '01',
+    /** LC 116 01.05 — licenciamento / cessão de software (empresa 2). */
+    codigo_tributacao_nacional: '010501',
+    codigo_tributacao_municipal: '01.05',
+    codigo_nbs: '111032200',
+    descricao_servico_padrao:
+      'Licenciamento ou cessão de direito de uso de programas de computação',
     aliquota_iss: 0,
     aliquota_pis: apuracao === 'presumido' ? 0.65 : 1.65,
     aliquota_cofins: apuracao === 'presumido' ? 3 : 7.6,
     cst_icms: '00',
     csosn: '',
   };
+}
+
+/**
+ * "01.05" | "010501" | "0105" → cTribNac 6 dígitos (010501).
+ * Evita pad de "01.05" → 000105 → ItemListaServico 00.01 (X160).
+ */
+export function normalizeCTribNac(
+  raw: string | null | undefined,
+  fallback = '010501',
+): string {
+  const s = String(raw ?? '').trim();
+  const dotted = s.match(/^(\d{1,2})\.(\d{2})(?:\.(\d{2}))?$/);
+  if (dotted) {
+    return `${dotted[1].padStart(2, '0')}${dotted[2]}${(dotted[3] || '01').padStart(2, '0')}`;
+  }
+  let d = String(raw ?? '').replace(/\D/g, '').slice(0, 6);
+  if (d.length === 4) d = `${d}01`;
+  if (!d || d.length < 4 || /^00/.test(d)) return fallback;
+  return d.padStart(6, '0');
+}
+
+/**
+ * Prefer TipLan XX.XX (ex.: 01.05). Mantém ADN curto (001) se informado assim.
+ */
+export function normalizeCTribMun(
+  raw: string | null | undefined,
+  cTribNac?: string | null,
+): string {
+  const s = String(raw ?? '').trim();
+  const dotted = s.match(/^(\d{1,2})\.(\d{2})$/);
+  if (dotted) return `${dotted[1].padStart(2, '0')}.${dotted[2]}`;
+  const d = String(raw ?? '').replace(/\D/g, '');
+  if (d.length === 4) return `${d.slice(0, 2)}.${d.slice(2, 4)}`;
+  if (d.length >= 1 && d.length <= 3) return d;
+  const nac = normalizeCTribNac(cTribNac);
+  return `${nac.slice(0, 2)}.${nac.slice(2, 4)}`;
+}
+
+/** "1.1103.22.00" → 111032200 */
+export function normalizeNbs(raw: string | null | undefined, fallback = '111032200'): string {
+  const d = String(raw ?? '').replace(/\D/g, '').slice(0, 9);
+  return d.length === 9 ? d : fallback;
 }
 
 export function regimeCurto(regime: number, tipoApuracao?: string | null): string {

@@ -63,11 +63,11 @@ function parseCompetenciaIso(competencia, fallbackDate) {
   return dateYmd(fallbackDate);
 }
 
-/** Item da lista LC 116 no formato TipLan XX.XX (ex.: 01.07). */
+/** Fallback TipLan quando o cTribNac é inválido (emitente Simples Azoup histórico). */
 const ITEM_LISTA_DEFAULT_AZOUP = '01.07';
 
 /**
- * cTribNac 010701 → ItemListaServico 01.07.
+ * cTribNac 010501 → 01.05; 010701 → 01.07.
  * Não confudir com cClassTrib (000001) nem cTribMun ADN (001) — isso virava 00.01 (X160).
  */
 function itemListaServico(cTribNac) {

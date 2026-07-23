@@ -330,6 +330,10 @@ export default function NfeConfigScreen() {
               aliquota_cofins: normalDefaults.aliquota_cofins,
               cst_icms: normalDefaults.cst_icms,
               csosn: normalDefaults.csosn,
+              codigo_tributacao_nacional: normalDefaults.codigo_tributacao_nacional,
+              codigo_tributacao_municipal: normalDefaults.codigo_tributacao_municipal,
+              codigo_nbs: normalDefaults.codigo_nbs,
+              descricao_servico_padrao: normalDefaults.descricao_servico_padrao,
             }
           : { tipo_apuracao: null }),
       });
@@ -710,6 +714,10 @@ export default function NfeConfigScreen() {
                     aliquotaIss: String(d.aliquota_iss),
                     aliquotaPis: String(d.aliquota_pis),
                     aliquotaCofins: String(d.aliquota_cofins),
+                    codTribNac: d.codigo_tributacao_nacional,
+                    codTribMun: d.codigo_tributacao_municipal,
+                    codNbs: d.codigo_nbs,
+                    descricao: d.descricao_servico_padrao,
                   });
                 } else {
                   patch({
@@ -841,25 +849,35 @@ export default function NfeConfigScreen() {
               label="Código LC 116 (cTribNac)"
               value={form.codTribNac}
               onChangeText={(t) => patch({ codTribNac: t })}
-              keyboardType="number-pad"
-              placeholder="010701"
+              placeholder={form.regimeTributario === 3 ? '010501' : '010701'}
             />
             <Text style={styles.sub}>
-              6 dígitos da LC 116 (ex.: 010701 → ItemListaServico 01.07). Não use 001 nem 000001.
+              {form.regimeTributario === 3
+                ? 'Empresa 2: 01.05 ou 010501 — Licenciamento / cessão de uso de software.'
+                : 'Ex.: 010701 → ItemListaServico 01.07. Não use 001 nem 000001.'}
             </Text>
             <FormTextInput
               label="Código municipal (cTribMun)"
               value={form.codTribMun}
               onChangeText={(t) => patch({ codTribMun: t })}
-              keyboardType="number-pad"
+              placeholder={form.regimeTributario === 3 ? '01.05' : '01.07'}
               maxLength={5}
             />
+            <Text style={styles.sub}>
+              TipLan Americana: mesmo subitem da LC 116 (ex.: 01.05).
+            </Text>
             <FormTextInput
               label="NBS"
               value={form.codNbs}
               onChangeText={(t) => patch({ codNbs: t })}
-              keyboardType="number-pad"
+              placeholder={form.regimeTributario === 3 ? '1.1103.22.00' : '115013000'}
+              maxLength={14}
             />
+            <Text style={styles.sub}>
+              {form.regimeTributario === 3
+                ? 'Empresa 2: 1.1103.22.00 — Licenciamento de direitos de uso de software.'
+                : '9 dígitos NBS (pode colar com pontos).'}
+            </Text>
             <FormTextInput
               label="Descrição do serviço"
               value={form.descricao}

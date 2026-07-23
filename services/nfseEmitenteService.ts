@@ -9,7 +9,13 @@ import {
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
 import type { EmpresaCertificado, NfseEmitente, NfseEmitenteInput } from '@/types/notaFiscal';
 import { AMBIENTE_FISCAL_ATUAL } from '@/types/notaFiscal';
-import { isRegimeNormal, type TipoApuracaoNormal } from '@/utils/nfseTributacao';
+import {
+  isRegimeNormal,
+  normalizeCTribMun,
+  normalizeCTribNac,
+  normalizeNbs,
+  type TipoApuracaoNormal,
+} from '@/utils/nfseTributacao';
 
 export const MAX_NFSE_EMITENTES = 2;
 
@@ -96,11 +102,14 @@ function normalizeTipoApuracao(
 }
 
 function normalizeEmitentePatch(input: Partial<NfseEmitenteInput>): Partial<NfseEmitenteInput> {
-  const tribMun = (input.codigo_tributacao_municipal ?? '')
-    .replace(/\D/g, '')
-    .slice(0, 5);
   const regime = Math.min(3, Math.max(1, Number(input.regime_tributario ?? 1))) as 1 | 2 | 3;
   const situacaoRaw = onlyDigits(input.situacao_pis_cofins ?? '00').slice(0, 2) || '00';
+  const cTribNac = normalizeCTribNac(
+    input.codigo_tributacao_nacional,
+    isRegimeNormal(regime) ? '010501' : '010701',
+  );
+  const cTribMun = normalizeCTribMun(input.codigo_tributacao_municipal, cTribNac);
+  const nbsFallback = isRegimeNormal(regime) ? '111032200' : '115013000';
   return {
     ...input,
     nome: (input.nome ?? 'Emitente').trim() || 'Emitente',
@@ -119,14 +128,9 @@ function normalizeEmitentePatch(input: Partial<NfseEmitenteInput>): Partial<Nfse
     inscricao_estadual: (input.inscricao_estadual ?? '').trim().toUpperCase(),
     codigo_ibge_emitente: onlyDigits(input.codigo_ibge_emitente).slice(0, 7),
     inscricao_municipal: onlyDigits(input.inscricao_municipal),
-    codigo_tributacao_nacional: (() => {
-      const nac = onlyDigits(input.codigo_tributacao_nacional).slice(0, 6);
-      // Evita 000001 (cClassTrib) / códigos curtos que viram ItemListaServico 00.xx (X160 TipLan).
-      if (!nac || nac.length < 4 || nac.startsWith('00')) return '010701';
-      return nac.padStart(6, '0');
-    })(),
-    codigo_tributacao_municipal: tribMun,
-    codigo_nbs: onlyDigits(input.codigo_nbs).slice(0, 9) || '115013000',
+    codigo_tributacao_nacional: cTribNac,
+    codigo_tributacao_municipal: cTribMun,
+    codigo_nbs: normalizeNbs(input.codigo_nbs, nbsFallback),
     codigo_cnae: onlyDigits(input.codigo_cnae).slice(0, 7),
     descricao_servico_padrao:
       (input.descricao_servico_padrao ?? 'Serviço de mensalidade').trim() || 'Serviço de mensalidade',
