@@ -217,9 +217,12 @@ function buildEnviarLoteRpsSincronoXml({
     cliente.nome_fantasia || cliente.nome_cliente || cliente.nome || 'Tomador';
   // ABRASF OptanteSimplesNacional: 1=Sim (optante), 2=Não.
   // CRT 3 (Regime Normal) → sempre XML 2. op_simp_nac=1 também → 2.
+  // _forceOptanteXml: '1'|'2' — retry X327 quando cadastro TipLan ≠ Azoup.
   const regime = Number(config.regime_tributario ?? 0);
   const opSimp = Number(config.op_simp_nac ?? 3);
-  const naoOptante = regime === 3 || opSimp === 1;
+  let naoOptante = regime === 3 || opSimp === 1;
+  if (config._forceOptanteXml === '1') naoOptante = false;
+  if (config._forceOptanteXml === '2') naoOptante = true;
   const optante = naoOptante ? '2' : '1';
   const regEsp = Number(config.reg_esp_trib ?? 0);
   // ABRASF: IssRetido 1=Sim, 2=Não. tp_ret_issqn: 1=não retido, 2/3=retido.
@@ -588,49 +591,52 @@ async function emitirNfseAbrasfAmericana({
         'Em Configurações › NFS-e › Emitente 2, envie o .pfx deste mesmo CNPJ.',
     );
   }
-  let dadosXml = buildEnviarLoteRpsSincronoXml({
-    nota,
-    itens,
-    perfil,
-    cliente,
-    config,
-  });
-  dadosXml = signLoteRps(dadosXml, privateKeyPem, certificatePem);
-
   const cab = buildCabecalho();
-  const soap = soapRecepcionarLoteSincrono(cab, dadosXml);
   const url = WS_URL[Number(ambiente) === 2 ? 2 : 1];
   const pfxBuf = fs.readFileSync(certPath);
 
-  const optanteXml = dadosXml.match(/<OptanteSimplesNacional>(\d)<\/OptanteSimplesNacional>/)?.[1];
-  console.info(
-    '[nfse] gateway ABRASF Americana RecepcionarLoteRpsSincrono',
-    url,
-    'CNPJ',
-    cnpj,
-    'IM',
-    im,
-    'OptanteSimplesNacional',
-    optanteXml,
-    'regime',
-    config.regime_tributario,
-    'op_simp_nac',
-    config.op_simp_nac,
-    'tipo_apuracao',
-    config.tipo_apuracao,
-    'ItemListaServico',
-    itemListaServico(config.codigo_tributacao_nacional),
-    'NBS',
-    codigoNbs(config),
-  );
+  async function enviarUmaVez(cfg) {
+    let dadosXml = buildEnviarLoteRpsSincronoXml({
+      nota,
+      itens,
+      perfil,
+      cliente,
+      config: cfg,
+    });
+    dadosXml = signLoteRps(dadosXml, privateKeyPem, certificatePem);
+    const soap = soapRecepcionarLoteSincrono(cab, dadosXml);
+    const optanteXml = dadosXml.match(/<OptanteSimplesNacional>(\d)<\/OptanteSimplesNacional>/)?.[1];
+    console.info(
+      '[nfse] gateway ABRASF Americana RecepcionarLoteRpsSincrono',
+      url,
+      'CNPJ',
+      cnpj,
+      'IM',
+      im,
+      'OptanteSimplesNacional',
+      optanteXml,
+      'force',
+      cfg._forceOptanteXml || '-',
+      'regime',
+      cfg.regime_tributario,
+      'op_simp_nac',
+      cfg.op_simp_nac,
+      'ItemListaServico',
+      itemListaServico(cfg.codigo_tributacao_nacional),
+      'NBS',
+      codigoNbs(cfg),
+    );
+    const httpRes = await httpsSoap({
+      url,
+      body: soap,
+      pfx: pfxBuf,
+      passphrase: senha,
+      soapAction: SOAP_ACTION_LOTE_SYNC,
+    });
+    return { httpRes, dadosXml, optanteXml };
+  }
 
-  const httpRes = await httpsSoap({
-    url,
-    body: soap,
-    pfx: pfxBuf,
-    passphrase: senha,
-    soapAction: SOAP_ACTION_LOTE_SYNC,
-  });
+  let { httpRes, dadosXml, optanteXml } = await enviarUmaVez(config);
 
   if (httpRes.statusCode === 403) {
     return {
@@ -650,12 +656,43 @@ async function emitirNfseAbrasfAmericana({
     };
   }
 
-  const parsed = parseLoteResult(httpRes.body);
+  let parsed = parseLoteResult(httpRes.body);
+  let retryOptante = null;
+  // X327: TipLan cadastro ≠ XML. Tenta 1x com Optante invertido (Valores ajustados).
+  if (
+    !parsed.sucesso &&
+    /X327|L327/i.test(parsed.erros.join(' ')) &&
+    (optanteXml === '1' || optanteXml === '2')
+  ) {
+    retryOptante = optanteXml === '2' ? '1' : '2';
+    console.warn(
+      '[nfse] X327 — retry OptanteSimplesNacional',
+      optanteXml,
+      '→',
+      retryOptante,
+      '(cadastro TipLan provavelmente divergente do Azoup)',
+    );
+    const retryCfg = { ...config, _forceOptanteXml: retryOptante };
+    ({ httpRes, dadosXml, optanteXml } = await enviarUmaVez(retryCfg));
+    if (httpRes.statusCode >= 400) {
+      const plain = httpRes.body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+      return {
+        success: false,
+        status: 'ERR',
+        message: `ABRASF Americana HTTP ${httpRes.statusCode} (retry Optante=${retryOptante}): ${plain || 'falha'}`,
+        xml_autorizado: httpRes.body?.slice?.(0, 4000) || null,
+      };
+    }
+    parsed = parseLoteResult(httpRes.body);
+  }
+
   if (!parsed.sucesso) {
     let msg = parsed.erros.join(' | ') || 'Rejeitada pelo WebService ABRASF de Americana.';
-    const optanteXml = dadosXml.match(/<OptanteSimplesNacional>(\d)<\/OptanteSimplesNacional>/)?.[1];
-    if (/X327|L327/i.test(msg)) {
-      msg += ` | XML OptanteSimplesNacional=${optanteXml} (1=Simples, 2=Não). op_simp_nac=${config.op_simp_nac}. Ajuste em Configurações › NFS-e › Emitente 2 › "Opção Simples na NFS-e" para bater com o portal.`;
+    msg += ` | XML OptanteSimplesNacional=${optanteXml} (1=Simples, 2=Não). op_simp_nac=${config.op_simp_nac}`;
+    if (retryOptante) {
+      msg += `. Já tentou invertido (${retryOptante}) e TipLan ainda rejeitou — alinhe o cadastro em nfse.americana.sp.gov.br.`;
+    } else {
+      msg += '. Ajuste "Opção Simples na NFS-e" no Azoup ou o cadastro na prefeitura.';
     }
     return { success: false, status: 'ERR', message: msg, xml_autorizado: parsed.xml };
   }
@@ -670,7 +707,9 @@ async function emitirNfseAbrasfAmericana({
     xml_autorizado: parsed.xml,
     danfe_url: null,
     danfe_storage_path: null,
-    message: 'NFS-e autorizada via WebService ABRASF (Americana).',
+    message: retryOptante
+      ? `NFS-e autorizada (ABRASF Americana) com OptanteSimplesNacional=${optanteXml} após retry X327. Cadastro TipLan ≠ Azoup — atualize o portal ou a opção Simples no Emitente 2.`
+      : 'NFS-e autorizada via WebService ABRASF (Americana).',
   };
 }
 

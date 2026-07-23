@@ -5,12 +5,17 @@ function humanizeNfseRejection(message, ibge) {
   if (!raw) return 'NFS-e rejeitada pela SEFIN.';
 
   if (/L327|X327/i.test(raw)) {
-    const detail = raw.replace(/\s+/g, ' ').trim().slice(0, 400);
+    const optMatch = raw.match(/OptanteSimplesNacional\s*=\s*(\d)/i);
+    const optInfo = optMatch
+      ? `Enviado OptanteSimplesNacional=${optMatch[1]} (1=Simples, 2=Não).`
+      : '';
+    const retryFail = /já tentou invertido|retry Optante/i.test(raw);
     return [
       'X327 — Optante Simples no XML ≠ cadastro deste CNPJ na TipLan/prefeitura.',
-      detail.includes('OptanteSimplesNacional=') ? detail : '',
-      'No Azoup (Emitente 2): Regime Normal + "Opção Simples na NFS-e" = Não optante → Salvar → redeploy → Reemitir (nova tentativa).',
-      'Se o XML já for OptanteSimplesNacional=2 e continuar X327: no portal nfse.americana.sp.gov.br este CNPJ ainda está como Simples — atualize para Tributação Normal na prefeitura (ou teste temporariamente Optante ME/EPP no Azoup).',
+      optInfo,
+      retryFail
+        ? 'O Azoup já tentou o valor invertido e TipLan rejeitou de novo — atualize o regime deste CNPJ em nfse.americana.sp.gov.br (Tributação Normal vs Simples).'
+        : 'Após redeploy o sistema tenta 1x o Optante invertido. Se ainda falhar: alinhe o portal Americana ou use "Optante ME/EPP" no Emitente 2.',
     ]
       .filter(Boolean)
       .join(' ');
