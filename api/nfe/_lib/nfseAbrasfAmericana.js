@@ -216,11 +216,12 @@ function buildEnviarLoteRpsSincronoXml({
   const tomadorNome =
     cliente.nome_fantasia || cliente.nome_cliente || cliente.nome || 'Tomador';
   // ABRASF OptanteSimplesNacional: 1=Sim (optante), 2=Não.
-  // Usa op_simp_nac do emitente (1=não optante → XML 2). Não forçar só pelo CRT:
-  // o portal TipLan pode ainda estar Simples mesmo com CRT Normal no Azoup.
+  // CRT 3 (Regime Normal) → sempre XML 2. op_simp_nac=1 também → 2.
+  const regime = Number(config.regime_tributario ?? 0);
   const opSimp = Number(config.op_simp_nac ?? 3);
-  const naoOptante = opSimp === 1;
+  const naoOptante = regime === 3 || opSimp === 1;
   const optante = naoOptante ? '2' : '1';
+  const regEsp = Number(config.reg_esp_trib ?? 0);
   // ABRASF: IssRetido 1=Sim, 2=Não. tp_ret_issqn: 1=não retido, 2/3=retido.
   const issRetido = Number(config.tp_ret_issqn ?? 1) === 1 ? '2' : '1';
   const situacaoPisCofins = String(config.situacao_pis_cofins ?? '00')
@@ -229,6 +230,32 @@ function buildEnviarLoteRpsSincronoXml({
     .slice(0, 2);
   const situacaoPisEnvio = situacaoPisCofins === '00' && naoOptante ? '01' : situacaoPisCofins;
   const incluirSitPis = situacaoPisEnvio !== '00';
+  // Regime Normal: informar PIS/COFINS/ISS (ex. consulta InfNfse). Simples: sem ValorIss (A14 TipLan).
+  const aliqIss = Math.max(0, Number(config.aliquota_iss ?? 0) || 0);
+  const aliqPis = Math.max(0, Number(config.aliquota_pis ?? 0) || 0);
+  const aliqCofins = Math.max(0, Number(config.aliquota_cofins ?? 0) || 0);
+  const vPis = money2((valorNum * aliqPis) / 100);
+  const vCofins = money2((valorNum * aliqCofins) / 100);
+  const vIss = money2((valorNum * aliqIss) / 100);
+  // TipLan exemplo Normal: 5% → Aliquota 0.05 (fração).
+  const aliquotaIssFrac = (aliqIss / 100).toFixed(4);
+  const valoresXml = naoOptante
+    ? `<Valores>` +
+      `<ValorServicos>${valor}</ValorServicos>` +
+      `<ValorPis>${vPis}</ValorPis>` +
+      `<ValorCofins>${vCofins}</ValorCofins>` +
+      `<ValorIss>${vIss}</ValorIss>` +
+      `<Aliquota>${aliquotaIssFrac}</Aliquota>` +
+      (incluirSitPis
+        ? `<SituacaoTributariaPISCOFINS>${escapeXml(situacaoPisEnvio)}</SituacaoTributariaPISCOFINS>`
+        : '') +
+      `</Valores>`
+    : `<Valores>` +
+      `<ValorServicos>${valor}</ValorServicos>` +
+      (incluirSitPis
+        ? `<SituacaoTributariaPISCOFINS>${escapeXml(situacaoPisEnvio)}</SituacaoTributariaPISCOFINS>`
+        : '') +
+      `</Valores>`;
   // TipLan XSD (reforma 2026): IBSCBS obrigatório em Servico (IndOp / CST / cClassTrib).
   const opDigits = onlyDigits(config.ind_op ?? config.codigo_operacao_ibscbs);
   const operacao = opDigits ? opDigits.slice(-6).padStart(6, '0') : '100501';
@@ -273,12 +300,7 @@ function buildEnviarLoteRpsSincronoXml({
     `</Rps>` +
     `<Competencia>${competencia}</Competencia>` +
     `<Servico>` +
-    `<Valores>` +
-    `<ValorServicos>${valor}</ValorServicos>` +
-    (incluirSitPis
-      ? `<SituacaoTributariaPISCOFINS>${escapeXml(situacaoPisEnvio)}</SituacaoTributariaPISCOFINS>`
-      : '') +
-    `</Valores>` +
+    valoresXml +
     `<IssRetido>${issRetido}</IssRetido>` +
     `<ItemListaServico>${escapeXml(itemLista)}</ItemListaServico>` +
     `<CodigoCnae>${escapeXml(cnae)}</CodigoCnae>` +
@@ -317,6 +339,8 @@ function buildEnviarLoteRpsSincronoXml({
     `</Endereco>` +
     (email ? `<Contato><Email>${escapeXml(email)}</Email></Contato>` : '') +
     `</Tomador>` +
+    // ABRASF: RegimeEspecial antes de Optante (omitir se 0 = nenhum).
+    (regEsp > 0 ? `<RegimeEspecialTributacao>${regEsp}</RegimeEspecialTributacao>` : '') +
     `<OptanteSimplesNacional>${optante}</OptanteSimplesNacional>` +
     `<IncentivoFiscal>2</IncentivoFiscal>` +
     `</InfDeclaracaoPrestacaoServico>` +

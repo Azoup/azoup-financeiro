@@ -5,12 +5,15 @@ function humanizeNfseRejection(message, ibge) {
   if (!raw) return 'NFS-e rejeitada pela SEFIN.';
 
   if (/L327|X327/i.test(raw)) {
+    const detail = raw.replace(/\s+/g, ' ').trim().slice(0, 400);
     return [
-      'X327 — A tributação na NFS-e não confere com o perfil do prestador na prefeitura.',
-      '1) Portal nfse.americana.sp.gov.br: confira se o CNPJ está como Simples ou Tributação Normal.',
-      '2) No Azoup › Configurações › NFS-e › Emitente 2: se o portal é Normal → Regime Normal + Situação "Não optante" (1); se o portal é Simples → Regime Simples + opção 3 (ME/EPP).',
-      '3) Salve, redeploy da API e reemitir. O certificado (.pfx) deve ser deste mesmo CNPJ.',
-    ].join(' ');
+      'X327 — Optante Simples no XML ≠ cadastro deste CNPJ na TipLan/prefeitura.',
+      detail.includes('OptanteSimplesNacional=') ? detail : '',
+      'No Azoup (Emitente 2): Regime Normal + "Opção Simples na NFS-e" = Não optante → Salvar → redeploy → Reemitir (nova tentativa).',
+      'Se o XML já for OptanteSimplesNacional=2 e continuar X327: no portal nfse.americana.sp.gov.br este CNPJ ainda está como Simples — atualize para Tributação Normal na prefeitura (ou teste temporariamente Optante ME/EPP no Azoup).',
+    ]
+      .filter(Boolean)
+      .join(' ');
   }
 
   if (/X345|Inscrição Municipal.*não está vinculada|Inscricao Municipal.*nao esta vinculada/i.test(raw)) {
