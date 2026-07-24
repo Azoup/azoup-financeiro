@@ -688,11 +688,15 @@ async function emitirNfseAbrasfAmericana({
 
   if (!parsed.sucesso) {
     let msg = parsed.erros.join(' | ') || 'Rejeitada pelo WebService ABRASF de Americana.';
-    msg += ` | XML OptanteSimplesNacional=${optanteXml} (1=Simples, 2=Não). op_simp_nac=${config.op_simp_nac}`;
-    if (retryOptante) {
-      msg += `. Já tentou invertido (${retryOptante}) e TipLan ainda rejeitou — alinhe o cadastro em nfse.americana.sp.gov.br.`;
-    } else {
-      msg += '. Ajuste "Opção Simples na NFS-e" no Azoup ou o cadastro na prefeitura.';
+    const joined = parsed.erros.join(' ');
+    if (/X327|L327/i.test(joined)) {
+      msg += ` | XML OptanteSimplesNacional=${optanteXml} (1=Simples, 2=Não). op_simp_nac=${config.op_simp_nac}`;
+      if (retryOptante) {
+        msg += `. Já tentou invertido (${retryOptante}) e TipLan ainda rejeitou — alinhe o cadastro em nfse.americana.sp.gov.br.`;
+      }
+    }
+    if (/X345/i.test(joined)) {
+      msg += ` | XML InscricaoMunicipal=${im} CNPJ=${cnpj}. A IM tem que ser a deste CNPJ no portal Americana (não a do outro emitente).`;
     }
     return { success: false, status: 'ERR', message: msg, xml_autorizado: parsed.xml };
   }

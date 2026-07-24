@@ -22,11 +22,16 @@ function humanizeNfseRejection(message, ibge) {
   }
 
   if (/X345|Inscrição Municipal.*não está vinculada|Inscricao Municipal.*nao esta vinculada/i.test(raw)) {
+    const imMatch = raw.match(/InscricaoMunicipal[=:>\s]*(\d+)/i) || raw.match(/\bIM[=:\s]+(\d+)/i);
+    const imInfo = imMatch ? ` IM enviada=${imMatch[1]}.` : '';
     return [
-      'X345 — A Inscrição Municipal informada não está vinculada a este CNPJ na prefeitura.',
-      'Em Configurações › NFS-e › Emitente 2, use a IM do CNPJ 66.639.480/0001-43 (não a do outro CNPJ/Simples).',
-      'Confira no portal nfse.americana.sp.gov.br o CCM/IM cadastrado para esse CNPJ.',
-    ].join(' ');
+      'X345 — A Inscrição Municipal do XML não está vinculada a este CNPJ na TipLan.',
+      imInfo,
+      'Cada CNPJ tem a própria IM em Americana. No Emitente 2 use a IM do 66.639.480/0001-43 (não a 69842 do outro CNPJ/Simples, se for o caso).',
+      'No portal nfse.americana.sp.gov.br → login com esse CNPJ → anote o CCM/IM e cole em Configurações › NFS-e › Emitente 2 › Inscrição municipal → Salvar → Reemitir.',
+    ]
+      .filter(Boolean)
+      .join(' ');
   }
 
   if (/X138|não autorizado a realizar o serviço|nao autorizado a realizar o serviço/i.test(raw)) {

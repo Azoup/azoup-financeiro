@@ -687,10 +687,15 @@ export default function NfeConfigScreen() {
               </View>
             ) : null}
             <FormTextInput
-              label="Inscrição municipal"
+              label="Inscrição municipal (IM / CCM)"
               value={form.inscricao_municipal}
               onChangeText={(t) => patch({ inscricao_municipal: t })}
+              placeholder="Ex.: só a IM deste CNPJ no portal"
             />
+            <Text style={styles.sub}>
+              Cada CNPJ tem a própria IM em Americana. No Emitente 2 use a IM do
+              66.639.480/0001-43 (não copie a do Emitente 1 / Simples — erro X345).
+            </Text>
           </Card>
 
           <Card style={styles.card}>
