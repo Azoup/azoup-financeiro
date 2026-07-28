@@ -162,8 +162,10 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint) {
     });
     throw new Error(msg);
   } finally {
-    cleanupTemp(creds.certPath);
-    cleanupTemp(creds.keyPath);
+    if (!creds.bundled) {
+      cleanupTemp(creds.certPath);
+      cleanupTemp(creds.keyPath);
+    }
   }
 }
 

@@ -37,7 +37,12 @@ export function EnviarMensalidadeModal({
       .then((list) => {
         if (cancelled) return;
         setEmitentes(list);
-        setSelectedId((list.find((e) => e.padrao) ?? list[0])?.id ?? null);
+        const preferred =
+          list.find((e) => e.banco_cobranca === 'c6') ??
+          list.find((e) => !e.padrao) ??
+          list.find((e) => e.padrao) ??
+          list[0];
+        setSelectedId(preferred?.id ?? null);
       })
       .catch(() => {
         if (!cancelled) {

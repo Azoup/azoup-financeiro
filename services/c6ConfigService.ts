@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import type { C6Config, C6ConfigInput } from '@/types/c6';
+import { C6_SANDBOX_DEFAULTS } from '@/services/c6SandboxDefaults';
 import * as DocumentPicker from 'expo-document-picker';
 import { Platform } from 'react-native';
 
@@ -13,11 +14,11 @@ export type C6CertFilePick = {
 export function c6ConfigDefaults(emitenteId: string): C6ConfigInput {
   return {
     emitente_id: emitenteId,
-    ativo: false,
-    ambiente: 'sandbox',
-    client_id: '',
-    client_secret: '',
-    billing_scheme: '21',
+    ativo: C6_SANDBOX_DEFAULTS.ativo,
+    ambiente: C6_SANDBOX_DEFAULTS.ambiente,
+    client_id: C6_SANDBOX_DEFAULTS.client_id,
+    client_secret: C6_SANDBOX_DEFAULTS.client_secret,
+    billing_scheme: C6_SANDBOX_DEFAULTS.billing_scheme,
     webhook_token: null,
   };
 }
@@ -59,8 +60,9 @@ export async function upsertC6Config(userId: string, input: C6ConfigInput): Prom
     emitente_id: input.emitente_id,
     ativo: input.ativo,
     ambiente,
-    client_id: input.client_id.trim(),
-    client_secret: input.client_secret.trim() || existing?.client_secret || '',
+    client_id: input.client_id.trim() || C6_SANDBOX_DEFAULTS.client_id,
+    client_secret:
+      input.client_secret.trim() || existing?.client_secret || C6_SANDBOX_DEFAULTS.client_secret,
     billing_scheme: billing,
     webhook_token: input.webhook_token?.trim() || null,
   };
@@ -85,7 +87,22 @@ export async function upsertC6Config(userId: string, input: C6ConfigInput): Prom
 
 export async function ensureC6Config(userId: string, emitenteId: string): Promise<C6Config> {
   const existing = await fetchC6Config(userId, emitenteId);
-  if (existing) return existing;
+  if (existing) {
+    if (!existing.client_id?.trim() || !existing.client_secret?.trim()) {
+      await upsertC6Config(userId, {
+        emitente_id: emitenteId,
+        ativo: existing.ativo || C6_SANDBOX_DEFAULTS.ativo,
+        ambiente: existing.ambiente || C6_SANDBOX_DEFAULTS.ambiente,
+        client_id: existing.client_id || C6_SANDBOX_DEFAULTS.client_id,
+        client_secret: existing.client_secret || C6_SANDBOX_DEFAULTS.client_secret,
+        billing_scheme: existing.billing_scheme || C6_SANDBOX_DEFAULTS.billing_scheme,
+        webhook_token: existing.webhook_token,
+      });
+      const refreshed = await fetchC6Config(userId, emitenteId);
+      if (refreshed) return refreshed;
+    }
+    return existing;
+  }
   await upsertC6Config(userId, c6ConfigDefaults(emitenteId));
   const created = await fetchC6Config(userId, emitenteId);
   if (!created) throw new Error('Não foi possível criar configuração C6.');
@@ -149,4 +166,17 @@ export async function uploadC6CertPair(
   if (e2) throw new Error(e2.message);
 
   return { cert_crt_storage_path: crtPath, cert_key_storage_path: keyPath };
+}
+
+/** Preferência: emitente 2 (não padrão) = C6. */
+export function pickEmitenteC6<T extends { id: string; padrao: boolean; banco_cobranca?: string }>(
+  list: T[],
+): T | null {
+  if (!list.length) return null;
+  return (
+    list.find((e) => e.banco_cobranca === 'c6') ??
+    list.find((e) => !e.padrao) ??
+    (list.length > 1 ? list[1] : null) ??
+    null
+  );
 }

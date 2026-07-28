@@ -4,6 +4,7 @@ import { fetchNotasFiscaisPorMensalidadeIds, fetchNotasFiscaisPorVendaIds } from
 import { emitirBoletosC6Lote } from '@/services/c6BoletoService';
 import { emitirBoletosSicoobLote } from '@/services/sicoobBoletoService';
 import { ensureEmitentes } from '@/services/nfseEmitenteService';
+import { pickEmitenteC6 } from '@/services/c6ConfigService';
 import type { BoletoParcelaVendaRow, ContaReceberListRow, PerfilCobranca } from '@/types/contasReceber';
 import type { NfseEmitente } from '@/types/notaFiscal';
 import { situacaoCobrancaDeStatus } from '@/utils/contaReceberCobranca';
@@ -219,7 +220,8 @@ async function resolveEmitenteCobranca(
       const found = list.find((e) => e.id === emitenteId);
       if (found) return found;
     }
-    return list.find((e) => e.padrao) ?? list[0] ?? null;
+    // Sem seleção: C6 = emitente 2; senão o padrão (Sicoob).
+    return pickEmitenteC6(list) ?? list.find((e) => e.padrao) ?? list[0] ?? null;
   } catch {
     return null;
   }

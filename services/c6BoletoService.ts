@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { nfeApiBaseUrl } from '@/services/nfeConfigService';
-import { fetchC6Config } from '@/services/c6ConfigService';
+import { ensureC6Config } from '@/services/c6ConfigService';
 import type { EmitirBoletoC6Result } from '@/types/c6';
 import type { EmitirBoletoLoteResult } from '@/types/sicoob';
 
@@ -17,8 +17,8 @@ export async function emitirBoletosC6Lote(
     return { success: true, emitidos: 0, erros: [], resultados: [] };
   }
 
-  const config = await fetchC6Config(userId, emitenteId);
-  if (!config?.ativo) {
+  const config = await ensureC6Config(userId, emitenteId);
+  if (!config.ativo) {
     return { success: true, emitidos: 0, erros: [], resultados: [] };
   }
 

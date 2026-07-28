@@ -18,6 +18,10 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# C6 sandbox certs (API)
+!api/boleto/_lib/certs/
+!api/boleto/_lib/certs/**
+
 # Metro
 .metro-health-check*
 

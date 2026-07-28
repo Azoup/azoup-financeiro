@@ -291,8 +291,10 @@ async function consultarEBaixarBoletoC6(admin, userId, boleto, origem = 'POLLING
       payload: consulta.resultado,
     });
   } finally {
-    cleanupTemp(creds.certPath);
-    cleanupTemp(creds.keyPath);
+    if (!creds.bundled) {
+      cleanupTemp(creds.certPath);
+      cleanupTemp(creds.keyPath);
+    }
   }
 }
 
