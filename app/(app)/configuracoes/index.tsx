@@ -85,7 +85,22 @@ export default function ConfiguracoesIndexScreen() {
           <View style={styles.rowBody}>
             <Text style={styles.rowTitle}>Boleto Sicoob (API V3)</Text>
             <Text style={styles.rowSub}>
-              Emissão automática ao gerar parcelas de venda ou mensalidades — com ou sem NFS-e.
+              CNPJ antigo — emissão automática ao gerar mensalidades/vendas.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.gray400} />
+        </Pressable>
+      </Card>
+
+      <Card style={styles.card}>
+        <Pressable style={styles.row} onPress={() => router.push('/(app)/configuracoes/c6')}>
+          <View style={styles.rowIcon}>
+            <Ionicons name="card-outline" size={22} color={colors.orange} />
+          </View>
+          <View style={styles.rowBody}>
+            <Text style={styles.rowTitle}>Boleto C6 Bank</Text>
+            <Text style={styles.rowSub}>
+              CNPJ novo — API boleto com mTLS, webhook e baixa automática.
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.gray400} />

@@ -60,7 +60,7 @@ async function emitirUmBoleto(admin, userId, boletoId) {
     throw new Error('Configure Client ID e número do cliente (convênio) em Configurações › Sicoob.');
   }
 
-  const cert = await resolveCertificadoAtivo(admin, userId);
+  const cert = await resolveCertificadoAtivo(admin, userId, boleto.emitente_id);
   if (!cert) throw new Error('Cadastre o certificado A1 em Configurações › NFS-e (reutilizado pelo Sicoob).');
 
   const { data: sec } = await admin

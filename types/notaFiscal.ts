@@ -97,6 +97,8 @@ export type NfseEmitente = {
   aliquota_ibs_mun: number;
   aliquota_cbs: number;
   padrao: boolean;
+  /** Banco de boleto deste CNPJ: sicoob (antigo) ou c6 (novo). */
+  banco_cobranca: 'sicoob' | 'c6';
   created_at: string;
   updated_at: string;
 };

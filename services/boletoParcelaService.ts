@@ -1,8 +1,11 @@
 import { supabase } from '@/lib/supabase';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
 import { fetchNotasFiscaisPorMensalidadeIds, fetchNotasFiscaisPorVendaIds } from '@/services/notaFiscalService';
+import { emitirBoletosC6Lote } from '@/services/c6BoletoService';
 import { emitirBoletosSicoobLote } from '@/services/sicoobBoletoService';
+import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import type { BoletoParcelaVendaRow, ContaReceberListRow, PerfilCobranca } from '@/types/contasReceber';
+import type { NfseEmitente } from '@/types/notaFiscal';
 import { situacaoCobrancaDeStatus } from '@/utils/contaReceberCobranca';
 import { CLIENTE_EMBED_SELECT, mapClienteEnderecoFiscal, type ClienteDbRow } from '@/utils/clientesDbMapping';
 import { clienteDocFiscal } from '@/utils/cnpj';
@@ -143,27 +146,44 @@ async function fetchClienteAddr(userId: string, clienteId: string): Promise<Clie
 async function buildSnapshotBenefPag(
   userId: string,
   clienteId: string,
+  emitente?: Pick<
+    NfseEmitente,
+    'razao_social' | 'documento' | 'logradouro' | 'numero' | 'complemento' | 'bairro' | 'cidade' | 'uf' | 'cep'
+  > | null,
 ): Promise<SnapshotBenefPag> {
   const cli = await fetchClienteAddr(userId, clienteId);
   const perfil = await fetchPerfilCobranca(userId).catch(() => null);
   const hoje = toISODate(new Date());
 
-  const benefRazao = (perfil?.razao_social ?? '').trim() || PLACEHOLDER_BENEF;
-  const benefDoc = (perfil?.documento ?? '').trim() || '—';
+  const benefRazao =
+    (emitente?.razao_social ?? '').trim() ||
+    (perfil?.razao_social ?? '').trim() ||
+    PLACEHOLDER_BENEF;
+  const benefDoc =
+    (emitente?.documento ?? '').trim() || (perfil?.documento ?? '').trim() || '—';
   const benefEnd =
-    perfil && (perfil.logradouro.trim() || perfil.numero.trim())
-      ? linhaEnderecoBenef(perfil)
-      : '—';
-  const benefBairro = (perfil?.bairro ?? '').trim() || '—';
+    emitente && (emitente.logradouro.trim() || emitente.numero.trim())
+      ? linhaEnderecoBenef(emitente)
+      : perfil && (perfil.logradouro.trim() || perfil.numero.trim())
+        ? linhaEnderecoBenef(perfil)
+        : '—';
+  const benefBairro = (emitente?.bairro ?? perfil?.bairro ?? '').trim() || '—';
   const benefCidade =
-    perfil && (perfil.cidade.trim() || perfil.uf.trim())
+    emitente && (emitente.cidade.trim() || emitente.uf.trim())
       ? cidadeUfCepBenef({
-          cidade: perfil.cidade,
-          uf: perfil.uf,
-          cep: perfil.cep,
-          bairro: perfil.bairro,
+          cidade: emitente.cidade,
+          uf: emitente.uf,
+          cep: emitente.cep,
+          bairro: emitente.bairro,
         })
-      : '—';
+      : perfil && (perfil.cidade.trim() || perfil.uf.trim())
+        ? cidadeUfCepBenef({
+            cidade: perfil.cidade,
+            uf: perfil.uf,
+            cep: perfil.cep,
+            bairro: perfil.bairro,
+          })
+        : '—';
 
   const pagNome = trimJoin(
     [cli.nome_cliente, cli.nome_empresa ? `(${cli.nome_empresa})` : ''],
@@ -186,6 +206,23 @@ async function buildSnapshotBenefPag(
     cooperativa_rodape: (perfil?.cooperativa_nome ?? '').trim() || null,
     data_documento: hoje,
   };
+}
+
+async function resolveEmitenteCobranca(
+  userId: string,
+  emitenteId?: string | null,
+): Promise<NfseEmitente | null> {
+  try {
+    const list = await ensureEmitentes(userId);
+    if (!list.length) return null;
+    if (emitenteId) {
+      const found = list.find((e) => e.id === emitenteId);
+      if (found) return found;
+    }
+    return list.find((e) => e.padrao) ?? list[0] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Chamado logo após inserir parcelas da venda. */
@@ -269,9 +306,12 @@ export type MensalidadeParaBoleto = {
 export async function gerarBoletosParaMensalidades(
   userId: string,
   mensalidades: MensalidadeParaBoleto[],
-): Promise<{ avisoSicoob?: string }> {
+  opts?: { emitenteId?: string | null },
+): Promise<{ avisoSicoob?: string; avisoBoleto?: string }> {
   if (!mensalidades.length) return {};
 
+  const emitente = await resolveEmitenteCobranca(userId, opts?.emitenteId);
+  const banco = emitente?.banco_cobranca === 'c6' ? 'c6' : 'sicoob';
   const perfil = await fetchPerfilCobranca(userId).catch(() => null);
   const snapCache = new Map<string, SnapshotBenefPag>();
   const rows: Record<string, unknown>[] = [];
@@ -279,7 +319,7 @@ export async function gerarBoletosParaMensalidades(
   for (const m of mensalidades) {
     let snap = snapCache.get(m.cliente_id);
     if (!snap) {
-      snap = await buildSnapshotBenefPag(userId, m.cliente_id);
+      snap = await buildSnapshotBenefPag(userId, m.cliente_id, emitente);
       snapCache.set(m.cliente_id, snap);
     }
     const comp = m.competencia?.trim() || null;
@@ -302,22 +342,33 @@ export async function gerarBoletosParaMensalidades(
       nosso_numero: nossoNumeroDeId(m.id),
       numero_documento: numeroDocumentoMensalidade(m.id, comp),
       instrucoes: montarInstrucoesMensalidade(perfil, comp).slice(0, 4000),
+      emitente_id: emitente?.id ?? null,
     });
   }
 
   const { data: inserted, error } = await supabase.from('boletos_parcela_venda').insert(rows).select('id');
-  if (error) throw wrapBoletoDbError(error);
+  if (error) {
+    if (/emitente_id|c6_|column|schema cache/i.test(error.message)) {
+      throw new Error(
+        'Rode a migration 045_c6_boleto.sql no SQL Editor do Supabase.\n\n' + error.message,
+      );
+    }
+    throw wrapBoletoDbError(error);
+  }
 
   const boletoIds = ((inserted ?? []) as { id: string }[]).map((r) => r.id);
   if (boletoIds.length) {
     try {
-      await emitirBoletosSicoobLote(userId, boletoIds);
+      if (banco === 'c6' && emitente?.id) {
+        await emitirBoletosC6Lote(userId, emitente.id, boletoIds);
+      } else {
+        await emitirBoletosSicoobLote(userId, boletoIds);
+      }
     } catch (e) {
-      return {
-        avisoSicoob:
-          (e as Error).message ??
-          'Carnê informativo criado em A receber; registro bancário Sicoob não concluído.',
-      };
+      const msg =
+        (e as Error).message ??
+        `Carnê informativo criado em A receber; registro bancário ${banco === 'c6' ? 'C6' : 'Sicoob'} não concluído.`;
+      return { avisoSicoob: msg, avisoBoleto: msg };
     }
   }
   return {};
@@ -591,4 +642,26 @@ export async function fetchBoletoParcelaById(
     .maybeSingle();
   if (error) throw new Error(error.message);
   return (data as BoletoParcelaVendaRow | null) ?? null;
+}
+
+/** Mapa mensalidade_id → boleto (primeiro encontrado). */
+export async function fetchBoletosPorMensalidadeIds(
+  userId: string,
+  mensalidadeIds: string[],
+): Promise<Record<string, BoletoParcelaVendaRow>> {
+  const ids = [...new Set(mensalidadeIds.filter(Boolean))];
+  if (!ids.length) return {};
+  const { data, error } = await supabase
+    .from('boletos_parcela_venda')
+    .select('*')
+    .eq('user_id', userId)
+    .in('mensalidade_id', ids);
+  if (error) throw new Error(error.message);
+  const map: Record<string, BoletoParcelaVendaRow> = {};
+  for (const row of (data ?? []) as BoletoParcelaVendaRow[]) {
+    if (row.mensalidade_id && !map[row.mensalidade_id]) {
+      map[row.mensalidade_id] = row;
+    }
+  }
+  return map;
 }

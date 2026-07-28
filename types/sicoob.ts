@@ -39,7 +39,7 @@ export type BoletoStatusRegistro =
   | 'baixado'
   | 'pago';
 
-export type BoletoTipoEmissao = 'informativo' | 'sicoob';
+export type BoletoTipoEmissao = 'informativo' | 'sicoob' | 'c6';
 
 export type EmitirBoletoSicoobResult = {
   success: boolean;

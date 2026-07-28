@@ -53,6 +53,7 @@ const DEFAULT_FISCAL: Pick<
   | 'aliquota_ibs_uf'
   | 'aliquota_ibs_mun'
   | 'aliquota_cbs'
+  | 'banco_cobranca'
 > = {
   serie: '1',
   proximo_numero: 1,
@@ -86,6 +87,7 @@ const DEFAULT_FISCAL: Pick<
   aliquota_ibs_uf: 0.1,
   aliquota_ibs_mun: 0,
   aliquota_cbs: 0.9,
+  banco_cobranca: 'sicoob' as const,
 };
 
 function onlyDigits(s: string | undefined | null): string {
@@ -154,6 +156,7 @@ function normalizeEmitentePatch(input: Partial<NfseEmitenteInput>): Partial<Nfse
     aliquota_ibs_uf: Math.max(0, Number(input.aliquota_ibs_uf ?? 0.1) || 0),
     aliquota_ibs_mun: Math.max(0, Number(input.aliquota_ibs_mun ?? 0) || 0),
     aliquota_cbs: Math.max(0, Number(input.aliquota_cbs ?? 0.9) || 0),
+    banco_cobranca: input.banco_cobranca === 'c6' ? 'c6' : 'sicoob',
   };
 }
 
@@ -194,9 +197,20 @@ export async function fetchEmitentes(userId: string): Promise<NfseEmitente[]> {
     if (/nfse_emitente|relation|does not exist|42P01/i.test(error.message)) {
       return [];
     }
+    if (/banco_cobranca|column|schema cache/i.test(error.message)) {
+      throw new Error('Rode a migration 045_c6_boleto.sql no SQL Editor do Supabase.');
+    }
     throw new Error(error.message);
   }
-  return (data as NfseEmitente[]) ?? [];
+  return ((data as NfseEmitente[]) ?? []).map((e, idx) => ({
+    ...e,
+    banco_cobranca:
+      e.banco_cobranca === 'c6' || e.banco_cobranca === 'sicoob'
+        ? e.banco_cobranca
+        : e.padrao || idx === 0
+          ? 'sicoob'
+          : 'c6',
+  }));
 }
 
 export async function fetchEmitenteById(userId: string, emitenteId: string): Promise<NfseEmitente | null> {
@@ -282,6 +296,7 @@ export async function createEmitente(
     ...input,
     nome: input.nome || (existing.length ? 'Emitente 2' : 'Emitente 1'),
     padrao: existing.length === 0 ? true : Boolean(input.padrao),
+    banco_cobranca: input.banco_cobranca ?? (existing.length === 0 ? 'sicoob' : 'c6'),
   });
 
   if (!patch.documento || (patch.documento.length !== 11 && patch.documento.length !== 14)) {
@@ -433,6 +448,7 @@ export function emitenteLabel(
   e: Pick<NfseEmitente, 'nome' | 'documento' | 'razao_social'> & {
     regime_tributario?: number | null;
     tipo_apuracao?: TipoApuracaoNormal | null;
+    banco_cobranca?: 'sicoob' | 'c6' | null;
   },
 ): string {
   const doc = onlyDigits(e.documento);
@@ -453,7 +469,27 @@ export function emitenteLabel(
       regime = ' · Simples';
     }
   }
-  return `${nome} · ${docFmt}${regime}`;
+  const banco =
+    e.banco_cobranca === 'c6' ? ' · C6' : e.banco_cobranca === 'sicoob' ? ' · Sicoob' : '';
+  return `${nome} · ${docFmt}${regime}${banco}`;
+}
+
+export async function updateEmitenteBancoCobranca(
+  userId: string,
+  emitenteId: string,
+  banco: 'sicoob' | 'c6',
+): Promise<void> {
+  const { error } = await supabase
+    .from('nfse_emitente')
+    .update({ banco_cobranca: banco })
+    .eq('id', emitenteId)
+    .eq('user_id', userId);
+  if (error) {
+    if (/banco_cobranca|column|schema cache/i.test(error.message)) {
+      throw new Error('Rode a migration 045_c6_boleto.sql no SQL Editor do Supabase.');
+    }
+    throw new Error(error.message);
+  }
 }
 
 export { nfeApiBaseUrl };

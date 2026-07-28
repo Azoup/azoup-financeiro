@@ -284,7 +284,7 @@ export async function criarMensalidadesGeradasLote(params: {
   competencia?: string | null;
   /** Gera NF-e (SEFAZ) para clientes com emite_nf após criar mensalidades. */
   gerarNotaFiscal?: boolean;
-  /** CNPJ/emitente da NFS-e (quando há 2 cadastrados). */
+  /** CNPJ/emitente cobrador (boleto Sicoob ou C6) e NFS-e quando solicitada. */
   emitenteId?: string | null;
   /**
    * 1º dia do mês (ISO) — agenda quando o cliente volta a aparecer em Gerar mensalidades.
@@ -489,8 +489,9 @@ export async function criarMensalidadesGeradasLote(params: {
           data_vencimento: m.data_vencimento,
           competencia: m.competencia,
         })),
+        { emitenteId: params.emitenteId },
       );
-      avisoBoleto = boletoRes.avisoSicoob;
+      avisoBoleto = boletoRes.avisoBoleto ?? boletoRes.avisoSicoob;
     } catch (eb) {
       const ids = criadosRows.map((m) => m.id);
       await supabase.from('mensalidades').delete().in('id', ids).eq('user_id', params.userId);

@@ -6,7 +6,10 @@ import { MarcarPagamentoMensalidadeGeradaModal } from '@/components/mensalidades
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
 import { useDebounce } from '@/hooks/useDebounce';
-import { sincronizarCarnesMensalidadesFaltantes } from '@/services/boletoParcelaService';
+import { sincronizarCarnesMensalidadesFaltantes, fetchBoletosPorMensalidadeIds, fetchBoletoParcelaById } from '@/services/boletoParcelaService';
+import { buildBoletoCobrancaHtml } from '@/utils/boletoCobrancaHtml';
+import type { BoletoParcelaVendaRow } from '@/types/contasReceber';
+import * as Print from 'expo-print';
 import {
   fetchMensalidadesGeradasHistorico,
   fetchPagamentosMensalidadesPorIds,
@@ -35,6 +38,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Linking,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -147,6 +152,10 @@ export default function HistoricoMensalidadesGeradasScreen() {
   const [nfEmitindoPosPagamento, setNfEmitindoPosPagamento] = useState(false);
   const [nfConfirmMensalidade, setNfConfirmMensalidade] = useState<MensalidadeGerada | null>(null);
   const [nfEmitidas, setNfEmitidas] = useState<Record<string, { numero: number | null }>>({});
+  const [boletosPorMensalidade, setBoletosPorMensalidade] = useState<
+    Record<string, BoletoParcelaVendaRow>
+  >({});
+  const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
   const [pagina, setPagina] = useState(1);
   const [lotesExpandidos, setLotesExpandidos] = useState<Set<string>>(new Set());
 
@@ -229,16 +238,19 @@ export default function HistoricoMensalidadesGeradasScreen() {
     if (!user?.id || !ids.length) {
       setPagamentos({});
       setNfEmitidas({});
+      setBoletosPorMensalidade({});
       return;
     }
     (async () => {
       try {
-        const [paysMap, nfMap] = await Promise.all([
+        const [paysMap, nfMap, boletosMap] = await Promise.all([
           fetchPagamentosMensalidadesPorIds(ids),
           fetchNotasFiscaisPorMensalidadeIds(user.id, ids),
+          fetchBoletosPorMensalidadeIds(user.id, ids),
         ]);
         if (!alive) return;
         setPagamentos(paysMap);
+        setBoletosPorMensalidade(boletosMap);
         const emitidas: Record<string, { numero: number | null }> = {};
         for (const [mid, nf] of nfMap) {
           if (nf.status === 'autorizada') {
@@ -250,6 +262,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
         if (alive) {
           setPagamentos({});
           setNfEmitidas({});
+          setBoletosPorMensalidade({});
           showAppError((e as Error).message);
         }
       }
@@ -258,6 +271,42 @@ export default function HistoricoMensalidadesGeradasScreen() {
       alive = false;
     };
   }, [itemsPagina, user?.id]);
+
+  const abrirPdfBoleto = async (mensalidadeId: string) => {
+    if (!user?.id) return;
+    const boleto = boletosPorMensalidade[mensalidadeId];
+    if (!boleto) {
+      showAppInfo('Boleto ainda não gerado para esta mensalidade.');
+      return;
+    }
+    setPdfBusyId(mensalidadeId);
+    try {
+      const row = (await fetchBoletoParcelaById(user.id, boleto.id)) ?? boleto;
+      if (row.pdf_url && (row.status_registro === 'registrado' || row.status_registro === 'pago')) {
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.open(row.pdf_url, '_blank', 'noopener,noreferrer');
+        } else {
+          const ok = await Linking.canOpenURL(row.pdf_url);
+          if (ok) await Linking.openURL(row.pdf_url);
+          else showAppError('Não foi possível abrir o PDF do boleto.');
+        }
+        return;
+      }
+      const html = buildBoletoCobrancaHtml(row);
+      const { uri } = await Print.printToFileAsync({ html });
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.open(uri, '_blank', 'noopener,noreferrer');
+      } else {
+        const ok = await Linking.canOpenURL(uri);
+        if (ok) await Linking.openURL(uri);
+        else showAppError('Não foi possível abrir o PDF.');
+      }
+    } catch (e) {
+      showAppError((e as Error).message);
+    } finally {
+      setPdfBusyId(null);
+    }
+  };
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -424,6 +473,18 @@ export default function HistoricoMensalidadesGeradasScreen() {
         ) : null}
 
         <View style={styles.btnRow}>
+          {boletosPorMensalidade[m.id] ? (
+            <Pressable
+              style={styles.btnSmBoleto}
+              onPress={() => void abrirPdfBoleto(m.id)}
+              disabled={pdfBusyId === m.id}
+            >
+              <Ionicons name="download-outline" size={13} color={colors.white} />
+              <Text style={styles.btnSmPagoTxt} numberOfLines={1}>
+                {pdfBusyId === m.id ? 'Abrindo…' : 'Baixar boleto'}
+              </Text>
+            </Pressable>
+          ) : null}
           {showPay ? (
             <Pressable style={styles.btnSmLancar} onPress={() => setRegistroPagamento(m)}>
               <Ionicons name="cash-outline" size={13} color={colors.white} />
@@ -905,6 +966,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
     backgroundColor: colors.orange,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.sm,
+    minHeight: 30,
+  },
+  btnSmBoleto: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    backgroundColor: colors.petroleum,
     paddingVertical: 6,
     paddingHorizontal: spacing.xs,
     borderRadius: radius.sm,

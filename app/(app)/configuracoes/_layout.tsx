@@ -10,6 +10,7 @@ export default function ConfiguracoesLayout() {
       <Stack.Screen name="perfil-cobranca" options={{ title: 'Dados do beneficiário' }} />
       <Stack.Screen name="nfe" options={{ title: 'Configurar NFS-e' }} />
       <Stack.Screen name="sicoob" options={{ title: 'Boleto Sicoob' }} />
+      <Stack.Screen name="c6" options={{ title: 'Boleto C6 Bank' }} />
       <Stack.Screen name="segmentos" options={{ title: 'Segmentos' }} />
     </Stack>
   );

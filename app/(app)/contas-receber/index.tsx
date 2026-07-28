@@ -88,16 +88,20 @@ function origemStyle(origem: ContaReceberOrigem): { bg: string; fg: string } {
     : { bg: '#e3f2fd', fg: colors.petroleum };
 }
 
-function boletoRegistroLabel(status?: ContaReceberListRow['status_registro']): string {
+function boletoRegistroLabel(
+  status?: ContaReceberListRow['status_registro'],
+  tipo?: ContaReceberListRow['tipo_emissao'],
+): string {
+  const banco = tipo === 'c6' ? 'C6' : tipo === 'sicoob' ? 'Sicoob' : null;
   switch (status ?? 'informativo') {
     case 'registrado':
-      return 'Sicoob';
+      return banco ?? 'Registrado';
     case 'pendente':
       return 'Registrando…';
     case 'erro':
-      return 'Erro Sicoob';
+      return banco ? `Erro ${banco}` : 'Erro registro';
     case 'pago':
-      return 'Pago (Sicoob)';
+      return banco ? `Pago (${banco})` : 'Pago';
     case 'baixado':
       return 'Baixado';
     default:
@@ -346,7 +350,7 @@ export default function ContasReceberScreen() {
         } else {
           const ok = await Linking.canOpenURL(row.pdf_url);
           if (ok) await Linking.openURL(row.pdf_url);
-          else Toast.show({ type: 'error', text1: 'Não foi possível abrir o PDF do Sicoob.' });
+          else Toast.show({ type: 'error', text1: 'Não foi possível abrir o PDF do boleto.' });
         }
         return;
       }
@@ -620,7 +624,7 @@ export default function ContasReceberScreen() {
                 },
               ]}
             >
-              {boletoRegistroLabel(item.status_registro ?? 'informativo')}
+              {boletoRegistroLabel(item.status_registro ?? 'informativo', item.tipo_emissao)}
             </Text>
           </View>
           <Text style={styles.colVenc}>{venc}</Text>

@@ -77,6 +77,9 @@ export type BoletoParcelaVendaRow = {
   codigo_barras: string | null;
   nosso_numero_banco: string | null;
   sicoob_seu_numero: string | null;
+  emitente_id: string | null;
+  c6_boleto_id: string | null;
+  c6_external_id: string | null;
   pdf_storage_path: string | null;
   pdf_url: string | null;
   mensagem_erro_registro: string | null;

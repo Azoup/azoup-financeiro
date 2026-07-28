@@ -11,16 +11,18 @@ type Props = {
   visible: boolean;
   loading?: boolean;
   onClose: () => void;
-  onSomenteMensalidade: () => void;
-  onMensalidadeComNf: (emitenteId: string) => void;
+  /** Mensalidade + boleto bancário (Sicoob ou C6 conforme CNPJ). */
+  onMensalidadeComBoleto: (emitenteId: string) => void;
+  /** Mensalidade + boleto + NFS-e no mesmo CNPJ. */
+  onMensalidadeComBoletoENf: (emitenteId: string) => void;
 };
 
 export function EnviarMensalidadeModal({
   visible,
   loading,
   onClose,
-  onSomenteMensalidade,
-  onMensalidadeComNf,
+  onMensalidadeComBoleto,
+  onMensalidadeComBoletoENf,
 }: Props) {
   const { user } = useAuth();
   const [emitentes, setEmitentes] = useState<NfseEmitente[]>([]);
@@ -51,61 +53,77 @@ export function EnviarMensalidadeModal({
     };
   }, [visible, user?.id]);
 
+  const selected = emitentes.find((e) => e.id === selectedId) ?? null;
+  const bancoLabel = selected?.banco_cobranca === 'c6' ? 'C6 Bank' : 'Sicoob';
+  const emitenteId = selectedId || emitentes[0]?.id || '';
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.bg} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <Text style={styles.title}>Como deseja enviar?</Text>
           <Text style={styles.hint}>
-            Escolha se deseja gerar apenas as mensalidades e carnês, ou também emitir NFS-e de serviço (clientes com
-            NF no cadastro).
+            Escolha o CNPJ cobrador (define o banco do boleto) e se deseja emitir também a NFS-e.
           </Text>
 
           {loadingEmit ? (
             <ActivityIndicator color={colors.orange} />
-          ) : emitentes.length > 1 ? (
+          ) : emitentes.length > 0 ? (
             <View style={styles.emitBox}>
-              <Text style={styles.emitLabel}>CNPJ da NFS-e (lote)</Text>
+              <Text style={styles.emitLabel}>CNPJ cobrador / emitente</Text>
               {emitentes.map((e) => {
-                const selected = e.id === selectedId;
+                const selectedOpt = e.id === selectedId;
                 return (
                   <Pressable
                     key={e.id}
-                    style={[styles.emitOpt, selected && styles.emitOptOn]}
+                    style={[styles.emitOpt, selectedOpt && styles.emitOptOn]}
                     onPress={() => setSelectedId(e.id)}
                   >
                     <Ionicons
-                      name={selected ? 'radio-button-on' : 'radio-button-off'}
+                      name={selectedOpt ? 'radio-button-on' : 'radio-button-off'}
                       size={20}
-                      color={selected ? colors.orange : colors.gray400}
+                      color={selectedOpt ? colors.orange : colors.gray400}
                     />
                     <Text style={styles.emitOptTxt}>{emitenteLabel(e)}</Text>
                   </Pressable>
                 );
               })}
+              {selected ? (
+                <Text style={styles.bancoHint}>Boleto será registrado no {bancoLabel}.</Text>
+              ) : null}
             </View>
-          ) : null}
+          ) : (
+            <Text style={styles.hint}>
+              Cadastre o emitente em Configurações › NFS-e. Sem CNPJ, o carnê fica informativo.
+            </Text>
+          )}
 
           <Pressable
             style={[styles.option, styles.optionPrimary]}
-            onPress={() => onMensalidadeComNf(selectedId || emitentes[0]?.id || '')}
+            onPress={() => onMensalidadeComBoletoENf(emitenteId)}
             disabled={loading || loadingEmit}
           >
             <Ionicons name="document-text" size={22} color={colors.white} />
             <View style={styles.optionBody}>
-              <Text style={styles.optionTitleLight}>Gerar mensalidade + NFS-e</Text>
+              <Text style={styles.optionTitleLight}>Gerar mensalidade + boleto + NFS-e</Text>
               <Text style={styles.optionSubLight}>
-                Mensalidade, carnê em A receber e nota fiscal de serviço (produção). Cliente precisa estar com
-                &quot;Com NF&quot; no cadastro e certificado A1 do CNPJ escolhido.
+                Mensalidade, boleto bancário ({bancoLabel}) em A receber e nota fiscal. Cliente precisa estar
+                com &quot;Com NF&quot; e certificado A1 do CNPJ escolhido.
               </Text>
             </View>
           </Pressable>
 
-          <Pressable style={styles.option} onPress={onSomenteMensalidade} disabled={loading}>
+          <Pressable
+            style={styles.option}
+            onPress={() => onMensalidadeComBoleto(emitenteId)}
+            disabled={loading || loadingEmit}
+          >
             <Ionicons name="receipt-outline" size={22} color={colors.petroleum} />
             <View style={styles.optionBody}>
-              <Text style={styles.optionTitle}>Somente mensalidade</Text>
-              <Text style={styles.optionSub}>Sem nota fiscal — apenas mensalidade e carnê.</Text>
+              <Text style={styles.optionTitle}>Gerar mensalidade + boleto</Text>
+              <Text style={styles.optionSub}>
+                Sem nota fiscal — mensalidade e boleto {bancoLabel} para pagamento.
+              </Text>
             </View>
           </Pressable>
 
@@ -133,6 +151,7 @@ const styles = StyleSheet.create({
   hint: { fontSize: 13, color: colors.gray600, lineHeight: 18 },
   emitBox: { gap: spacing.sm },
   emitLabel: { fontSize: 13, fontWeight: '700', color: colors.petroleum },
+  bancoHint: { fontSize: 12, color: colors.orange, fontWeight: '700' },
   emitOpt: {
     flexDirection: 'row',
     alignItems: 'center',

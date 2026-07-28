@@ -482,7 +482,7 @@ export default function GerarMensalidadeScreen() {
         dataVencimentoOverride: null,
         competencia: competencia.trim() || null,
         gerarNotaFiscal,
-        emitenteId: gerarNotaFiscal ? emitenteId || null : null,
+        emitenteId: emitenteId || null,
         proximaGeracaoMes,
       });
       const extras: string[] = [];
@@ -496,7 +496,7 @@ export default function GerarMensalidadeScreen() {
       if (avisoBoleto) {
         Toast.show({
           type: 'info',
-          text1: 'Carnê informativo em A receber',
+          text1: 'Boleto bancário pendente',
           text2: avisoBoleto,
           visibilityTime: 9000,
         });
@@ -1032,15 +1032,15 @@ export default function GerarMensalidadeScreen() {
         </Text>
         <PrimaryButton title="Enviar" size="compact" loading={busy} onPress={onAbrirEnviar} style={styles.enviar} />
         <Text style={styles.footerHint}>
-          Escolha gerar só mensalidade ou com NFS-e. Carnês em A receber.
+          Escolha o CNPJ (Sicoob ou C6) e gere mensalidade + boleto, com ou sem NFS-e.
         </Text>
       </ScrollView>
       <EnviarMensalidadeModal
         visible={enviarModalOpen}
         loading={busy}
         onClose={() => setEnviarModalOpen(false)}
-        onSomenteMensalidade={() => void executarEnvio(false)}
-        onMensalidadeComNf={(emitenteId) => void executarEnvio(true, emitenteId)}
+        onMensalidadeComBoleto={(emitenteId) => void executarEnvio(false, emitenteId)}
+        onMensalidadeComBoletoENf={(emitenteId) => void executarEnvio(true, emitenteId)}
       />
     </View>
   );

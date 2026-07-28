@@ -6,6 +6,14 @@ const {
   extractValorPago,
 } = require('./sicoobClient');
 const { loadSicoobCredentials } = require('./sicoobCredentials');
+const {
+  cleanupTemp,
+  consultarBoletoC6Api,
+  extractC6DataPagamento,
+  extractC6ValorPago,
+  isC6BoletoLiquidado,
+} = require('./c6Client');
+const { loadC6CredentialsForBoleto } = require('./c6Credentials');
 
 function reaisParaCentavos(n) {
   return Math.round(Number(n) * 100);
@@ -25,6 +33,11 @@ function nextParcelaStatus(valor, valorPago) {
 
 function nextMensalidadeStatus(valor, valorPago) {
   return nextParcelaStatus(valor, valorPago);
+}
+
+function formaPagamentoBanco(origemLabel) {
+  if (String(origemLabel).toUpperCase().includes('C6')) return 'Boleto C6';
+  return 'Boleto Sicoob';
 }
 
 async function atualizarStatusVenda(admin, vendaId, userId) {
@@ -59,6 +72,7 @@ async function registrarBaixaMensalidade(admin, userId, boleto, { dataPagamento,
   const { data: mens, error } = await admin.from('mensalidades').select('*').eq('id', boleto.mensalidade_id).eq('user_id', userId).single();
   if (error || !mens) throw new Error('Mensalidade não encontrada para baixa automática.');
 
+  const forma = formaPagamentoBanco(origem);
   const valorCent = reaisParaCentavos(mens.valor);
   const pagoCent = reaisParaCentavos(mens.valor_pago);
   if (pagoCent >= valorCent) {
@@ -73,8 +87,8 @@ async function registrarBaixaMensalidade(admin, userId, boleto, { dataPagamento,
     mensalidade_id: mens.id,
     valor_pago: valorAplicarReais,
     data_pagamento: dataPagamento,
-    forma_pagamento: 'Boleto Sicoob',
-    observacao: `Baixa automática Sicoob (${origem})`,
+    forma_pagamento: forma,
+    observacao: `Baixa automática ${forma} (${origem})`,
     usuario_id: userId,
   });
   if (payErr) throw new Error(payErr.message);
@@ -85,8 +99,8 @@ async function registrarBaixaMensalidade(admin, userId, boleto, { dataPagamento,
   await admin.from('mensalidades').update({
     valor_pago: novoPago,
     data_pagamento: dataPagamento,
-    forma_pagamento: 'Boleto Sicoob',
-    observacao_pagamento: `Baixa automática Sicoob (${origem})`,
+    forma_pagamento: forma,
+    observacao_pagamento: `Baixa automática ${forma} (${origem})`,
     status,
   }).eq('id', mens.id);
 
@@ -100,7 +114,7 @@ async function registrarBaixaMensalidade(admin, userId, boleto, { dataPagamento,
     boleto_id: boleto.id,
     acao: 'BAIXA_AUTOMATICA',
     usuario_id: userId,
-    detalhes: `Mensalidade quitada via ${origem}.`,
+    detalhes: `Mensalidade quitada via ${origem} (${forma}).`,
     payload_resposta: payload ?? null,
   });
 
@@ -112,6 +126,7 @@ async function registrarBaixaVenda(admin, userId, boleto, { dataPagamento, valor
     throw new Error('Boleto de venda sem parcela vinculada.');
   }
 
+  const forma = formaPagamentoBanco(origem);
   const { data: parcela, error: pErr } = await admin
     .from('parcelas_venda')
     .select('*')
@@ -137,7 +152,7 @@ async function registrarBaixaVenda(admin, userId, boleto, { dataPagamento, valor
       user_id: userId,
       data_pagamento: dataPagamento,
       valor_pago: valorAplicarReais,
-      observacao: `Baixa automática Sicoob (${origem})`,
+      observacao: `Baixa automática ${forma} (${origem})`,
     })
     .select('id')
     .single();
@@ -162,7 +177,12 @@ async function registrarBaixaVenda(admin, userId, boleto, { dataPagamento, valor
     venda_id: boleto.venda_id,
     user_id: userId,
     tipo: 'pagamento_registrado',
-    detalhe: { pagamento_id: payIns.id, valor: valorAplicarReais, origem: `sicoob_${origem}`, parcela_id: boleto.parcela_id },
+    detalhe: {
+      pagamento_id: payIns.id,
+      valor: valorAplicarReais,
+      origem: String(origem).toLowerCase(),
+      parcela_id: boleto.parcela_id,
+    },
   });
 
   await admin.from('boletos_parcela_venda').update({
@@ -175,7 +195,7 @@ async function registrarBaixaVenda(admin, userId, boleto, { dataPagamento, valor
     boleto_id: boleto.id,
     acao: 'BAIXA_AUTOMATICA',
     usuario_id: userId,
-    detalhes: `Parcela de venda quitada via ${origem}.`,
+    detalhes: `Parcela de venda quitada via ${origem} (${forma}).`,
     payload_resposta: payload ?? null,
   });
 
@@ -206,21 +226,9 @@ async function aplicarBaixaBoleto(admin, userId, boleto, dadosPagamento) {
   return registrarBaixaVenda(admin, userId, boleto, ctx);
 }
 
-async function consultarEBaixarBoleto(admin, userId, boletoId, origem = 'POLLING') {
-  const { data: boleto, error } = await admin
-    .from('boletos_parcela_venda')
-    .select('*')
-    .eq('id', boletoId)
-    .eq('user_id', userId)
-    .single();
-  if (error || !boleto) throw new Error('Boleto não encontrado.');
-
-  if (boleto.tipo_emissao !== 'sicoob' || boleto.status_registro !== 'registrado') {
-    return { baixado: false, motivo: 'nao_elegivel', boletoId };
-  }
-
-  const creds = await loadSicoobCredentials(admin, userId);
-  if (!creds) return { baixado: false, motivo: 'sicoob_inativo', boletoId };
+async function consultarEBaixarBoletoSicoob(admin, userId, boleto, origem = 'POLLING') {
+  const creds = await loadSicoobCredentials(admin, userId, boleto.emitente_id);
+  if (!creds) return { baixado: false, motivo: 'sicoob_inativo', boletoId: boleto.id };
 
   try {
     const consulta = await consultarBoletoSicoobApi({
@@ -233,10 +241,10 @@ async function consultarEBaixarBoleto(admin, userId, boletoId, origem = 'POLLING
     await admin
       .from('boletos_parcela_venda')
       .update({ ultima_consulta_sicoob: new Date().toISOString() })
-      .eq('id', boletoId);
+      .eq('id', boleto.id);
 
     if (!consulta.liquidado) {
-      return { baixado: false, motivo: 'em_aberto', boletoId, situacao: consulta.resultado?.situacaoBoleto ?? null };
+      return { baixado: false, motivo: 'em_aberto', boletoId: boleto.id, situacao: consulta.resultado?.situacaoBoleto ?? null };
     }
 
     return aplicarBaixaBoleto(admin, userId, boleto, {
@@ -248,6 +256,66 @@ async function consultarEBaixarBoleto(admin, userId, boletoId, origem = 'POLLING
   } finally {
     cleanupCert(creds.certPath);
   }
+}
+
+async function consultarEBaixarBoletoC6(admin, userId, boleto, origem = 'POLLING_C6') {
+  const creds = await loadC6CredentialsForBoleto(admin, boleto);
+  if (!creds) return { baixado: false, motivo: 'c6_inativo', boletoId: boleto.id };
+
+  try {
+    const consulta = await consultarBoletoC6Api({
+      config: creds.config,
+      certPath: creds.certPath,
+      keyPath: creds.keyPath,
+      c6BoletoId: boleto.c6_boleto_id,
+    });
+
+    await admin
+      .from('boletos_parcela_venda')
+      .update({ ultima_consulta_sicoob: new Date().toISOString() })
+      .eq('id', boleto.id);
+
+    if (!consulta.liquidado) {
+      return {
+        baixado: false,
+        motivo: 'em_aberto',
+        boletoId: boleto.id,
+        situacao: consulta.resultado?.status ?? null,
+      };
+    }
+
+    return aplicarBaixaBoleto(admin, userId, boleto, {
+      dataPagamento: consulta.dataPagamento,
+      valorPago: consulta.valorPago ?? boleto.valor_documento,
+      origem,
+      payload: consulta.resultado,
+    });
+  } finally {
+    cleanupTemp(creds.certPath);
+    cleanupTemp(creds.keyPath);
+  }
+}
+
+async function consultarEBaixarBoleto(admin, userId, boletoId, origem = 'POLLING') {
+  const { data: boleto, error } = await admin
+    .from('boletos_parcela_venda')
+    .select('*')
+    .eq('id', boletoId)
+    .eq('user_id', userId)
+    .single();
+  if (error || !boleto) throw new Error('Boleto não encontrado.');
+
+  if (boleto.status_registro !== 'registrado') {
+    return { baixado: false, motivo: 'nao_elegivel', boletoId };
+  }
+
+  if (boleto.tipo_emissao === 'c6') {
+    return consultarEBaixarBoletoC6(admin, userId, boleto, origem.includes('C6') ? origem : 'POLLING_C6');
+  }
+  if (boleto.tipo_emissao === 'sicoob') {
+    return consultarEBaixarBoletoSicoob(admin, userId, boleto, origem);
+  }
+  return { baixado: false, motivo: 'nao_elegivel', boletoId };
 }
 
 async function baixarPorWebhookPayload(admin, payload) {
@@ -296,12 +364,68 @@ async function baixarPorWebhookPayload(admin, payload) {
   });
 }
 
+async function baixarPorWebhookPayloadC6(admin, payload) {
+  const c6Id = String(
+    payload?.id ??
+      payload?.bank_slip_id ??
+      payload?.bankSlipId ??
+      payload?.boleto_id ??
+      payload?.data?.id ??
+      '',
+  ).trim();
+  const externalId = String(
+    payload?.external_reference_id ?? payload?.externalReferenceId ?? payload?.data?.external_reference_id ?? '',
+  ).trim();
+
+  if (!c6Id && !externalId) {
+    throw new Error('Webhook C6 sem id do boleto.');
+  }
+
+  const statusObj = payload?.data ?? payload;
+  if (!isC6BoletoLiquidado(statusObj) && !isC6BoletoLiquidado(payload)) {
+    const paidHint = Number(statusObj?.amount_paid ?? statusObj?.paid_amount ?? 0);
+    if (!(paidHint > 0) && !String(payload?.event ?? payload?.type ?? '').toLowerCase().includes('paid')) {
+      return { baixado: false, motivo: 'situacao_nao_liquidada' };
+    }
+  }
+
+  let query = admin.from('boletos_parcela_venda').select('*').eq('tipo_emissao', 'c6');
+  if (c6Id) query = query.eq('c6_boleto_id', c6Id);
+  else query = query.eq('c6_external_id', externalId);
+
+  const { data: boletos, error } = await query.limit(1);
+  if (error) throw new Error(error.message);
+  const boleto = boletos?.[0];
+  if (!boleto) {
+    return { baixado: false, motivo: 'boleto_nao_encontrado' };
+  }
+
+  if (payload._webhookToken) {
+    const { data: cfg } = await admin
+      .from('config_c6')
+      .select('webhook_token')
+      .eq('user_id', boleto.user_id)
+      .eq('ativo', true)
+      .maybeSingle();
+    if (cfg?.webhook_token && cfg.webhook_token !== payload._webhookToken) {
+      throw new Error('Token do webhook C6 inválido.');
+    }
+  }
+
+  return aplicarBaixaBoleto(admin, boleto.user_id, boleto, {
+    dataPagamento: extractC6DataPagamento(statusObj),
+    valorPago: extractC6ValorPago(statusObj, boleto.valor_documento),
+    origem: 'WEBHOOK_C6',
+    payload,
+  });
+}
+
 async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 30) {
   const { data: boletos, error } = await admin
     .from('boletos_parcela_venda')
     .select('id')
     .eq('user_id', userId)
-    .eq('tipo_emissao', 'sicoob')
+    .in('tipo_emissao', ['sicoob', 'c6'])
     .eq('status_registro', 'registrado')
     .order('data_vencimento', { ascending: true })
     .limit(limit);
@@ -322,18 +446,23 @@ async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 30) {
 }
 
 async function sincronizarBoletosPendentesGlobal(admin, limitPorUsuario = 20) {
-  const { data: configs } = await admin.from('config_sicoob').select('user_id').eq('ativo', true);
+  const userIds = new Set();
+  const { data: sicoobCfgs } = await admin.from('config_sicoob').select('user_id').eq('ativo', true);
+  for (const c of sicoobCfgs ?? []) userIds.add(c.user_id);
+  const { data: c6Cfgs } = await admin.from('config_c6').select('user_id').eq('ativo', true);
+  for (const c of c6Cfgs ?? []) userIds.add(c.user_id);
+
   let consultados = 0;
   let baixados = 0;
   const erros = [];
 
-  for (const cfg of configs ?? []) {
+  for (const userId of userIds) {
     try {
-      const r = await sincronizarBoletosPendentesUsuario(admin, cfg.user_id, limitPorUsuario);
+      const r = await sincronizarBoletosPendentesUsuario(admin, userId, limitPorUsuario);
       consultados += r.consultados;
       baixados += r.baixados;
     } catch (e) {
-      erros.push(`${cfg.user_id}: ${e.message}`);
+      erros.push(`${userId}: ${e.message}`);
     }
   }
 
@@ -343,6 +472,7 @@ async function sincronizarBoletosPendentesGlobal(admin, limitPorUsuario = 20) {
 module.exports = {
   aplicarBaixaBoleto,
   baixarPorWebhookPayload,
+  baixarPorWebhookPayloadC6,
   consultarEBaixarBoleto,
   sincronizarBoletosPendentesGlobal,
   sincronizarBoletosPendentesUsuario,

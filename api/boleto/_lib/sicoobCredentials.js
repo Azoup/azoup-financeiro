@@ -3,9 +3,9 @@ const { cleanupCert, downloadCertToTemp } = require('./sicoobClient');
 
 /**
  * Escolhe um certificado A1 ativo para Sicoob quando há vários (multi-emitente NFS-e).
- * Preferência: emitente padrão → cert sem emitente (legado) → mais recente.
+ * Preferência: emitenteId informado → emitente padrão → cert sem emitente (legado) → mais recente.
  */
-async function resolveCertificadoAtivo(admin, userId) {
+async function resolveCertificadoAtivo(admin, userId, emitenteIdPreferido) {
   const { data: certs, error } = await admin
     .from('empresa_certificado')
     .select('*')
@@ -16,6 +16,11 @@ async function resolveCertificadoAtivo(admin, userId) {
   const rows = certs ?? [];
   if (!rows.length) return null;
   if (rows.length === 1) return rows[0];
+
+  if (emitenteIdPreferido) {
+    const byEmitente = rows.find((c) => c.emitente_id === emitenteIdPreferido);
+    if (byEmitente) return byEmitente;
+  }
 
   const emitenteIds = [...new Set(rows.map((c) => c.emitente_id).filter(Boolean))];
   let padraoId = null;
@@ -40,7 +45,7 @@ async function resolveCertificadoAtivo(admin, userId) {
   return rows[0];
 }
 
-async function loadSicoobCredentials(admin, userId) {
+async function loadSicoobCredentials(admin, userId, emitenteId) {
   const { data: config, error: cErr } = await admin
     .from('config_sicoob')
     .select('*')
@@ -49,7 +54,7 @@ async function loadSicoobCredentials(admin, userId) {
   if (cErr) throw new Error(cErr.message);
   if (!config?.ativo) return null;
 
-  const cert = await resolveCertificadoAtivo(admin, userId);
+  const cert = await resolveCertificadoAtivo(admin, userId, emitenteId);
   if (!cert) throw new Error('Certificado A1 não encontrado.');
 
   const { data: sec } = await admin
