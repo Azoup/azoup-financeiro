@@ -31,13 +31,13 @@ export async function emitirBoletosC6Lote(
     throw new Error('URL da API não configurada (use a mesma origem web ou EXPO_PUBLIC_NFE_API_URL).');
   }
 
-  const res = await fetch(`${base}/api/boleto/emitir-lote-c6`, {
+  const res = await fetch(`${base}/api/boleto/emitir-lote`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ boletoIds, emitenteId }),
+    body: JSON.stringify({ boletoIds, emitenteId, banco: 'c6' }),
   });
 
   const body = (await res.json().catch(() => ({}))) as EmitirBoletoLoteResult & {

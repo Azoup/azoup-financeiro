@@ -1,5 +1,6 @@
 const { getAdmin, getUserFromBearer } = require('../nfe/_lib/supabaseAdmin');
 const { emitirUmBoleto } = require('./_lib/emitirBoleto');
+const { emitirUmBoletoC6 } = require('./_lib/emitirBoletoC6');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -9,10 +10,15 @@ module.exports = async function handler(req, res) {
   try {
     const user = await getUserFromBearer(req);
     const admin = getAdmin();
-    const { boletoIds } = req.body ?? {};
+    const { boletoIds, emitenteId, banco } = req.body ?? {};
     const ids = Array.isArray(boletoIds) ? boletoIds.filter(Boolean) : [];
     if (!ids.length) {
       return res.status(400).json({ success: false, message: 'Informe boletoIds.' });
+    }
+
+    const usarC6 = banco === 'c6' || Boolean(emitenteId);
+    if (usarC6 && !emitenteId) {
+      return res.status(400).json({ success: false, message: 'Informe emitenteId para emissão C6.' });
     }
 
     const resultados = [];
@@ -21,7 +27,9 @@ module.exports = async function handler(req, res) {
 
     for (const boletoId of ids) {
       try {
-        const result = await emitirUmBoleto(admin, user.id, boletoId);
+        const result = usarC6
+          ? await emitirUmBoletoC6(admin, user.id, boletoId, emitenteId)
+          : await emitirUmBoleto(admin, user.id, boletoId);
         resultados.push(result);
         if (result.status_registro === 'registrado') emitidos += 1;
       } catch (error) {

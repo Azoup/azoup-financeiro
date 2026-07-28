@@ -21,10 +21,10 @@ export default function C6ConfigScreen() {
 
   const webhookUrl = useMemo(() => {
     if (typeof window !== 'undefined' && window.location?.origin) {
-      return `${window.location.origin}/api/boleto/webhook-c6`;
+      return `${window.location.origin}/api/boleto/webhook-sicoob?banco=c6`;
     }
     const base = process.env.EXPO_PUBLIC_NFE_API_URL ?? '';
-    return base ? `${base}/api/boleto/webhook-c6` : '/api/boleto/webhook-c6';
+    return base ? `${base}/api/boleto/webhook-sicoob?banco=c6` : '/api/boleto/webhook-sicoob?banco=c6';
   }, []);
 
   const load = useCallback(async () => {
