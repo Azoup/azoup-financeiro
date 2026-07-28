@@ -22,12 +22,17 @@ import { colors, radius, spacing } from '@/theme/colors';
 import type { ClienteListItem, SegmentoClienteRow } from '@/types/models';
 import { formatBRL } from '@/utils/currency';
 import {
+  addMonthsMesAno,
+  clienteEstaCongelado,
   formatBRDate,
+  formatMesAnoBR,
   isoRangeMesCalendario,
   labelMesAnoBR,
   mesAnoAtualBR,
+  mesAnoFromISO,
   parseISODate,
   parseMesAnoBR,
+  primeiroDiaDoMes,
 } from '@/utils/date';
 import { calcProximoVencimentoMensalidade, labelDiaVencimento } from '@/utils/mensalidadeVencimento';
 import {
@@ -75,6 +80,13 @@ export default function GerarMensalidadeScreen() {
   const [incluirCancelados, setIncluirCancelados] = useState(false);
   const [mesReajusteStr, setMesReajusteStr] = useState(mesAnoAtualBR);
   const [filtrarPorMesReajuste, setFiltrarPorMesReajuste] = useState(false);
+  /** Só clientes cujo mês de próxima geração já chegou (ou sem data). */
+  const [somenteProntosParaGerar, setSomenteProntosParaGerar] = useState(true);
+  const [incluirCongelados, setIncluirCongelados] = useState(false);
+  const [proximaGeracaoStr, setProximaGeracaoStr] = useState(() => {
+    const n = addMonthsMesAno(new Date().getFullYear(), new Date().getMonth() + 1, 1);
+    return formatMesAnoBR(n.year, n.month);
+  });
   const [segmentos, setSegmentos] = useState<SegmentoClienteRow[]>([]);
   const [rows, setRows] = useState<ClienteListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,8 +124,18 @@ export default function GerarMensalidadeScreen() {
       nfse: filtroNfse,
       mesReajusteDe: mesReajusteRange?.de ?? null,
       mesReajusteAte: mesReajusteRange?.ate ?? null,
+      somenteProntosParaGerar,
+      incluirCongelados,
     }),
-    [debouncedSearch, segmento, incluirCancelados, filtroNfse, mesReajusteRange],
+    [
+      debouncedSearch,
+      segmento,
+      incluirCancelados,
+      filtroNfse,
+      mesReajusteRange,
+      somenteProntosParaGerar,
+      incluirCongelados,
+    ],
   );
 
   const load = useCallback(async () => {
@@ -387,6 +409,17 @@ export default function GerarMensalidadeScreen() {
       return;
     }
 
+    const proxParsed = parseMesAnoBR(proximaGeracaoStr);
+    if (!proxParsed) {
+      Toast.show({
+        type: 'error',
+        text1: 'Informe a próxima geração (MM/AAAA)',
+        text2: 'Ex.: 07/2027 — quando o cliente volta a aparecer nesta tela.',
+      });
+      return;
+    }
+    const proximaGeracaoMes = primeiroDiaDoMes(proxParsed.year, proxParsed.month);
+
     const clientesSelecionados = clientesSelecionadosResolvidos(ids);
     if (gerarNotaFiscal) {
       const semNf = clientesSelecionados.filter((r) => !r.emite_nf);
@@ -450,6 +483,7 @@ export default function GerarMensalidadeScreen() {
         competencia: competencia.trim() || null,
         gerarNotaFiscal,
         emitenteId: gerarNotaFiscal ? emitenteId || null : null,
+        proximaGeracaoMes,
       });
       const extras: string[] = [];
       if (ignorados > 0) extras.push(`${ignorados} sem valor de mensalidade`);
@@ -498,9 +532,32 @@ export default function GerarMensalidadeScreen() {
     }
   };
 
+  const sugerirProximaGeracao = () => {
+    const ids = selected.size > 0 ? [...selected] : targetIds;
+    const byId = new Map<string, ClienteListItem>();
+    for (const r of rows) byId.set(r.id, r);
+    for (const [id, r] of selectedCache) byId.set(id, r);
+    const tipos = ids
+      .map((id) => byId.get(id))
+      .filter((r): r is ClienteListItem => Boolean(r))
+      .map((r) => normalizeTipoFaturamento(r.tipo_faturamento));
+    const soAnual = tipos.length > 0 && tipos.every((t) => t === 'anual');
+    const agora = new Date();
+    const sug = addMonthsMesAno(agora.getFullYear(), agora.getMonth() + 1, soAnual ? 12 : 1);
+    setProximaGeracaoStr(formatMesAnoBR(sug.year, sug.month));
+  };
+
   const onAbrirEnviar = () => {
     if (!targetIds.length) {
       Toast.show({ type: 'error', text1: 'Não há clientes na lista para gerar mensalidade.' });
+      return;
+    }
+    if (!parseMesAnoBR(proximaGeracaoStr)) {
+      Toast.show({
+        type: 'error',
+        text1: 'Informe a próxima geração (MM/AAAA)',
+        text2: 'Ex.: 07/2027 — quando o cliente volta a aparecer nesta tela.',
+      });
       return;
     }
     setEnviarModalOpen(true);
@@ -658,6 +715,27 @@ export default function GerarMensalidadeScreen() {
               <Switch value={incluirCancelados} onValueChange={setIncluirCancelados} />
             </View>
           </View>
+          <View style={styles.switchRow}>
+            <Text style={[styles.label, { flex: 1 }]}>
+              Só quem está na data de gerar
+            </Text>
+            <View style={styles.switchScale}>
+              <Switch value={somenteProntosParaGerar} onValueChange={setSomenteProntosParaGerar} />
+            </View>
+          </View>
+          <Text style={styles.hint}>
+            Com o filtro ligado, clientes com próxima geração no futuro ficam ocultos até o mês
+            chegar. Desligue para antecipar.
+          </Text>
+          <View style={styles.switchRow}>
+            <Text style={[styles.label, { flex: 1 }]}>Incluir paralisados</Text>
+            <View style={styles.switchScale}>
+              <Switch value={incluirCongelados} onValueChange={setIncluirCongelados} />
+            </View>
+          </View>
+          <Text style={styles.hint}>
+            Paralisados (cadastro › Paralisado até) ficam fora da lista até a data passar.
+          </Text>
           {filtrarPorMesReajuste ? (
             <Pressable
               onPress={() => setFiltrarPorMesReajuste(false)}
@@ -714,7 +792,9 @@ export default function GerarMensalidadeScreen() {
           <Text style={styles.empty}>
             {filtrarPorMesReajuste
               ? 'Nenhum cliente com reajuste neste mês. Desative o filtro por mês ou altere MM/AAAA.'
-              : 'Nenhum cliente com os filtros atuais.'}
+              : somenteProntosParaGerar
+                ? 'Nenhum cliente na data de gerar. Desligue “Só quem está na data de gerar” para ver todos, ou aguarde o mês agendado.'
+                : 'Nenhum cliente com os filtros atuais.'}
           </Text>
         ) : (
           rowsPagina.map((r) => {
@@ -749,7 +829,16 @@ export default function GerarMensalidadeScreen() {
                     Reaj. {r.data_reajuste ? formatBRDate(parseISODate(r.data_reajuste)) || r.data_reajuste : '—'}
                     {' · '}Venc. {labelDiaVencimento(r.dia_vencimento)}
                   </Text>
-                  <Text style={styles.metaProx} numberOfLines={1}>Próx. {proxLabel}</Text>
+                  <Text style={styles.metaProx} numberOfLines={1}>Próx. venc. {proxLabel}</Text>
+                  {(() => {
+                    const pg = mesAnoFromISO(r.proxima_geracao_mes);
+                    return (
+                      <Text style={styles.metaProx} numberOfLines={1}>
+                        Próx. geração{' '}
+                        {pg ? labelMesAnoBR(pg.year, pg.month) : '— (sempre na lista)'}
+                      </Text>
+                    );
+                  })()}
                   {normalizeTipoFaturamento(r.tipo_faturamento) === 'anual' ? (
                     <Text style={styles.metaAnual} numberOfLines={1}>
                       Anual · {normalizeParcelasAnuais(r.parcelas_anuais) ?? 12} parcelas
@@ -771,6 +860,17 @@ export default function GerarMensalidadeScreen() {
                     {r.emite_nf ? 'Com NFS-e' : 'Sem NFS-e'}
                   </Text>
                   {r.cancelado ? <Text style={styles.cancel}>Cancelado</Text> : null}
+                  {clienteEstaCongelado(r.congelado_ate) ? (
+                    <Text style={styles.cancel}>
+                      Paralisado até{' '}
+                      {formatBRDate(parseISODate(r.congelado_ate)) || r.congelado_ate}
+                    </Text>
+                  ) : r.congelado_ate ? (
+                    <Text style={styles.meta} numberOfLines={1}>
+                      Paralisação até {formatBRDate(parseISODate(r.congelado_ate)) || r.congelado_ate}{' '}
+                      (já liberado)
+                    </Text>
+                  ) : null}
                   <Text style={styles.val}>{formatBRL(valorExibido)}</Text>
                   {valorTemporario != null ? (
                     <Text style={styles.valorOriginal} numberOfLines={1}>
@@ -904,6 +1004,27 @@ export default function GerarMensalidadeScreen() {
             placeholder="Ex.: 05/2026"
             placeholderTextColor={colors.gray400}
           />
+          <Text style={styles.label}>Próxima geração (obrigatório)</Text>
+          <Text style={styles.hint}>
+            Após gerar (1 mensalidade ou as 12 parcelas), o cliente só volta a esta tela no mês
+            informado. Ex.: gerou agora → 07/2027.
+          </Text>
+          <TextInput
+            style={styles.input}
+            value={proximaGeracaoStr}
+            onChangeText={(t) => setProximaGeracaoStr(t.replace(/[^\d/]/g, '').slice(0, 7))}
+            placeholder="MM/AAAA (ex.: 07/2027)"
+            placeholderTextColor={colors.gray400}
+            keyboardType="number-pad"
+          />
+          {!parseMesAnoBR(proximaGeracaoStr) ? (
+            <Text style={styles.warnTxt}>Informe o mês no formato MM/AAAA.</Text>
+          ) : null}
+          <Pressable onPress={sugerirProximaGeracao} style={styles.linkBtnInline}>
+            <Text style={styles.linkTxt}>
+              Sugerir (+1 mês mensal / +12 se só anual na seleção)
+            </Text>
+          </Pressable>
         </Card>
 
         <Text style={styles.hintGerar}>

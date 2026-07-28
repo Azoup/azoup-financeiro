@@ -9,7 +9,7 @@ import { SegmentoClientePicker } from '@/components/SegmentoClientePicker';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { Cliente, ClienteFormValues, ContatoClienteInput } from '@/types/models';
 import { formatBRL } from '@/utils/currency';
-import { formatBRDate, parseISODate, toISODate } from '@/utils/date';
+import { formatBRDate, formatMesAnoBR, mesAnoFromISO, parseISODate, toISODate } from '@/utils/date';
 import {
   PARCELAS_ANUAIS_OPCOES,
   labelTipoFaturamento,
@@ -56,6 +56,8 @@ export function getEmptyClienteForm(): ClienteFormValues {
     emite_nf: false,
     tipo_faturamento: 'mensal',
     parcelas_anuais: '12',
+    proxima_geracao_mes: '',
+    congelado_ate: null,
   };
 }
 
@@ -92,6 +94,11 @@ export function clienteToFormValues(c: Cliente, contatos: ContatoClienteInput[])
     emite_nf: Boolean(c.emite_nf),
     tipo_faturamento: normalizeTipoFaturamento(c.tipo_faturamento),
     parcelas_anuais: c.parcelas_anuais != null ? String(c.parcelas_anuais) : '12',
+    proxima_geracao_mes: (() => {
+      const m = mesAnoFromISO(c.proxima_geracao_mes);
+      return m ? formatMesAnoBR(m.year, m.month) : '';
+    })(),
+    congelado_ate: parseISODate(c.congelado_ate),
   };
 }
 
@@ -482,6 +489,42 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
             </View>
             {previewAnual ? <Text style={styles.previewAnual}>{previewAnual}</Text> : null}
           </>
+        ) : null}
+
+        <Text style={styles.fieldLabel}>Próxima geração (MM/AAAA)</Text>
+        <MaskInput
+          value={values.proxima_geracao_mes}
+          onChangeText={(masked) => setValues((v) => ({ ...v, proxima_geracao_mes: masked }))}
+          mask={[/\d/, /\d/, '/', /\d/, /\d/, /\d/, /\d/]}
+          placeholder="Ex.: 07/2027 — vazio = sempre na lista"
+          keyboardType="number-pad"
+          style={styles.mask}
+          placeholderTextColor={colors.gray400}
+        />
+        <Text style={styles.hint}>
+          Só volta a aparecer em Gerar mensalidades neste mês. Após gerar 1 ou 12 parcelas, informe o
+          próximo ciclo (ex.: daqui a 12 meses).
+        </Text>
+
+        <DateMaskedField
+          compact
+          label="Paralisado até"
+          value={values.congelado_ate}
+          onChange={(d) => setValues((v) => ({ ...v, congelado_ate: d }))}
+        />
+        <Text style={styles.hint}>
+          Enquanto a data não passar, o cliente não aparece para gerar mensalidade (pausa de uso).
+          Deixe vazio se não estiver paralisado. No retorno, chega alerta no sininho.
+        </Text>
+        {values.congelado_ate ? (
+          <Pressable
+            onPress={() => setValues((v) => ({ ...v, congelado_ate: null }))}
+            style={{ marginBottom: 8 }}
+          >
+            <Text style={{ color: colors.petroleum, fontSize: 13, fontWeight: '600' }}>
+              Remover paralisação
+            </Text>
+          </Pressable>
         ) : null}
 
         <View style={styles.row2}>

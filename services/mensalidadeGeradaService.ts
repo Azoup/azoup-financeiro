@@ -286,6 +286,11 @@ export async function criarMensalidadesGeradasLote(params: {
   gerarNotaFiscal?: boolean;
   /** CNPJ/emitente da NFS-e (quando há 2 cadastrados). */
   emitenteId?: string | null;
+  /**
+   * 1º dia do mês (ISO) — agenda quando o cliente volta a aparecer em Gerar mensalidades.
+   * Aplicado só aos clientes que tiveram ao menos uma mensalidade criada neste lote.
+   */
+  proximaGeracaoMes?: string | null;
 }): Promise<{
   criados: number;
   ignorados: number;
@@ -513,6 +518,24 @@ export async function criarMensalidadesGeradasLote(params: {
         ignoradas: 0,
         erros: [(e as Error).message],
       };
+    }
+  }
+
+  const proxMes = params.proximaGeracaoMes?.trim().slice(0, 10) || null;
+  if (proxMes && criadosRows.length) {
+    const idsOk = [...new Set(criadosRows.map((m) => m.cliente_id))];
+    const { error: eProx } = await supabase
+      .from('clientes')
+      .update({ proxima_geracao_mes: proxMes })
+      .eq('user_id', params.userId)
+      .in('id', idsOk);
+    if (eProx) {
+      if (/proxima_geracao_mes|column|schema cache/i.test(eProx.message)) {
+        throw new Error(
+          'Falta a migration da próxima geração. Rode supabase/migrations/042_cliente_proxima_geracao.sql no SQL Editor.',
+        );
+      }
+      throw new Error(eProx.message);
     }
   }
 

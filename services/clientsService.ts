@@ -11,7 +11,7 @@ import type {
 } from '@/types/models';
 import { getSegmentoNomePorCodigo } from '@/services/segmentoClienteService';
 import { parseBRLMasked } from '@/utils/currency';
-import { toISODate } from '@/utils/date';
+import { clienteEstaCongelado, clienteProntoParaGerarMensalidade, toISODate } from '@/utils/date';
 import {
   CLIENTE_DETAIL_SELECT,
   CLIENTE_LIST_SELECT,
@@ -25,7 +25,7 @@ import {
 
 export const PAGE_SIZE = 100;
 
-export type ClienteSituacaoFiltro = 'todos' | 'ativos' | 'cancelados';
+export type ClienteSituacaoFiltro = 'todos' | 'ativos' | 'cancelados' | 'paralisados';
 
 export type ClientesListQuery = {
   search: string;
@@ -34,16 +34,20 @@ export type ClientesListQuery = {
   situacao?: ClienteSituacaoFiltro;
 };
 
-function applyClientesListFilters<T extends { eq: Function; or: Function }>(
+function applyClientesListFilters<T extends { eq: Function; or: Function; not: Function; gte: Function }>(
   q: T,
   params: ClientesListQuery,
 ): T {
   const situacao = params.situacao ?? 'todos';
   let next = q;
+  const hoje = toISODate(new Date());
   if (situacao === 'ativos') {
     next = next.eq('cancelado', false) as T;
   } else if (situacao === 'cancelados') {
     next = next.eq('cancelado', true) as T;
+  } else if (situacao === 'paralisados') {
+    // Paralisados ativos: cancelado=false e congelado_ate >= hoje (ainda no período).
+    next = next.eq('cancelado', false).not('congelado_ate', 'is', null).gte('congelado_ate', hoje) as T;
   }
 
   const term = params.search.trim().replace(/[%_,()]/g, '');
@@ -57,6 +61,9 @@ function applyClientesListFilters<T extends { eq: Function; or: Function }>(
 }
 
 function mapClienteDbError(message: string, code?: string): string {
+  if (/proxima_geracao_mes|congelado_ate|notificacoes/i.test(message) || (/column|schema cache|relation/i.test(message) && /proxima|congelado|notificac/i.test(message))) {
+    return 'Falta migration. Rode 042_cliente_proxima_geracao.sql, 043_cliente_congelado.sql e 044_notificacoes.sql no SQL Editor.';
+  }
   if (code === '23505' || message.includes('duplicate') || message.includes('unique')) {
     if (message.includes('cnpj') || message.includes('ux_clientes_user_cnpj')) {
       return 'Este CNPJ já está cadastrado para outro cliente.';
@@ -503,6 +510,12 @@ export type GerarMensalidadeFiltrosClientes = {
    */
   mesReajusteDe: string | null;
   mesReajusteAte: string | null;
+  /**
+   * Quando true (padrão), só clientes com `proxima_geracao_mes` nula ou já no mês atual/passado.
+   */
+  somenteProntosParaGerar: boolean;
+  /** Quando false (padrão), omite clientes paralisados (congelado_ate >= hoje). */
+  incluirCongelados: boolean;
 };
 
 export async function fetchClientesParaGerarMensalidades(
@@ -540,6 +553,14 @@ export async function fetchClientesParaGerarMensalidades(
         r.data_reajuste >= filters.mesReajusteDe! && r.data_reajuste <= filters.mesReajusteAte!
       );
     });
+  }
+
+  if (filters.somenteProntosParaGerar) {
+    rows = rows.filter((r) => clienteProntoParaGerarMensalidade(r.proxima_geracao_mes));
+  }
+
+  if (!filters.incluirCongelados) {
+    rows = rows.filter((r) => !clienteEstaCongelado(r.congelado_ate));
   }
 
   return rows;

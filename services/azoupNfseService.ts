@@ -138,6 +138,8 @@ function buildFormFromAzoup(
     emite_nf: true,
     tipo_faturamento: 'mensal',
     parcelas_anuais: '12',
+    proxima_geracao_mes: '',
+    congelado_ate: null,
   };
 }
 

@@ -12,7 +12,7 @@ import { buildClientsListExport } from '@/utils/exportReportBuilders';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { ClienteListItem, SortField, SortOrder } from '@/types/models';
 import { formatBRL } from '@/utils/currency';
-import { formatDateTimeBRFromISO } from '@/utils/date';
+import { clienteEstaCongelado, formatDateTimeBRFromISO, formatBRDate, parseISODate } from '@/utils/date';
 import { useDebounce } from '@/hooks/useDebounce';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -35,6 +35,7 @@ import Toast from 'react-native-toast-message';
 const SITUACAO_FILTERS: { label: string; value: ClienteSituacaoFiltro }[] = [
   { label: 'Todos', value: 'todos' },
   { label: 'Ativos', value: 'ativos' },
+  { label: 'Paralisados', value: 'paralisados' },
   { label: 'Cancelados', value: 'cancelados' },
 ];
 
@@ -187,46 +188,66 @@ export default function ClientsListScreen() {
     }
   }, [runFetch]);
 
-  const renderItem = ({ item }: { item: ClienteListItem }) => (
-    <Pressable onPress={() => router.push(`/(app)/clients/${item.id}`)}>
-      <Card style={[styles.row, item.cancelado && styles.rowCancelado]}>
-        <View style={styles.rowTop}>
-          <View style={styles.rowTitleBlock}>
-            <Text style={[styles.nome, item.cancelado && styles.nomeCancelado]}>{item.nome_cliente}</Text>
-            {item.cancelado ? (
-              <View style={styles.badgeCancel}>
-                <Text style={styles.badgeCancelText}>Cancelado</Text>
-              </View>
-            ) : null}
+  const renderItem = ({ item }: { item: ClienteListItem }) => {
+    const paralisado = clienteEstaCongelado(item.congelado_ate);
+    return (
+      <Pressable onPress={() => router.push(`/(app)/clients/${item.id}`)}>
+        <Card
+          style={[
+            styles.row,
+            item.cancelado && styles.rowCancelado,
+            paralisado && !item.cancelado && styles.rowParalisado,
+          ]}
+        >
+          <View style={styles.rowTop}>
+            <View style={styles.rowTitleBlock}>
+              <Text style={[styles.nome, item.cancelado && styles.nomeCancelado]}>
+                {item.nome_cliente}
+              </Text>
+              {item.cancelado ? (
+                <View style={styles.badgeCancel}>
+                  <Text style={styles.badgeCancelText}>Cancelado</Text>
+                </View>
+              ) : paralisado ? (
+                <View style={styles.badgeParalisado}>
+                  <Text style={styles.badgeParalisadoText}>
+                    Paralisado até{' '}
+                    {formatBRDate(parseISODate(item.congelado_ate)) || item.congelado_ate}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={[styles.valor, item.cancelado && styles.valorCancelado]}>
+              {formatBRL(item.valor_mensalidade)}
+            </Text>
           </View>
-          <Text style={[styles.valor, item.cancelado && styles.valorCancelado]}>
-            {formatBRL(item.valor_mensalidade)}
+          <Text style={styles.empresa}>{item.nome_empresa || '—'}</Text>
+          <View style={styles.meta}>
+            <Text style={styles.metaText}>Doc. {item.documento}</Text>
+            {item.cnpj?.trim() ? (
+              <>
+                <Text style={styles.metaDot}>•</Text>
+                <Text style={styles.metaText}>CNPJ {item.cnpj.trim()}</Text>
+              </>
+            ) : null}
+            <Text style={styles.metaDot}>•</Text>
+            <Text style={styles.metaText}>
+              {item.segmento_cliente?.nome ?? item.segmento_cliente_codigo ?? '—'}
+            </Text>
+            <Text style={styles.metaDot}>•</Text>
+            <Text style={styles.metaText}>
+              {(item.contatos_count ?? 0) === 1
+                ? '1 contato'
+                : `${item.contatos_count ?? 0} contatos`}
+            </Text>
+          </View>
+          <Text style={styles.createdAt}>
+            Cadastro: {formatDateTimeBRFromISO(item.created_at) || '—'}
           </Text>
-        </View>
-        <Text style={styles.empresa}>{item.nome_empresa || '—'}</Text>
-        <View style={styles.meta}>
-          <Text style={styles.metaText}>Doc. {item.documento}</Text>
-          {item.cnpj?.trim() ? (
-            <>
-              <Text style={styles.metaDot}>•</Text>
-              <Text style={styles.metaText}>CNPJ {item.cnpj.trim()}</Text>
-            </>
-          ) : null}
-          <Text style={styles.metaDot}>•</Text>
-          <Text style={styles.metaText}>
-            {item.segmento_cliente?.nome ?? item.segmento_cliente_codigo ?? '—'}
-          </Text>
-          <Text style={styles.metaDot}>•</Text>
-          <Text style={styles.metaText}>
-            {(item.contatos_count ?? 0) === 1 ? '1 contato' : `${item.contatos_count ?? 0} contatos`}
-          </Text>
-        </View>
-        <Text style={styles.createdAt}>
-          Cadastro: {formatDateTimeBRFromISO(item.created_at) || '—'}
-        </Text>
-      </Card>
-    </Pressable>
-  );
+        </Card>
+      </Pressable>
+    );
+  };
 
   return (
     <View style={styles.screen}>
@@ -542,6 +563,9 @@ const styles = StyleSheet.create({
     opacity: 0.72,
     borderColor: colors.gray200,
   },
+  rowParalisado: {
+    borderColor: 'rgba(230, 126, 34, 0.45)',
+  },
   rowTitleBlock: {
     flex: 1,
     flexDirection: 'row',
@@ -559,6 +583,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: colors.danger,
+  },
+  badgeParalisado: {
+    backgroundColor: 'rgba(230, 126, 34, 0.15)',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  badgeParalisadoText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.orange,
   },
   nomeCancelado: {
     textDecorationLine: 'line-through',

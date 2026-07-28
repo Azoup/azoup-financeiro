@@ -1,3 +1,4 @@
+import { NotificationBell } from '@/components/notificacoes/NotificationBell';
 import { useTheme } from '@/context/ThemeContext';
 import { fonts } from '@/theme/typography';
 import { useMemo } from 'react';
@@ -19,6 +20,7 @@ export function useThemedStackOptions() {
         color: theme.headerText,
       },
       headerShadowVisible: false,
+      headerRight: () => <NotificationBell />,
     }),
     [theme],
   );

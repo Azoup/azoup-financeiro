@@ -59,6 +59,54 @@ export function isoRangeMesCalendario(year: number, month: number): { de: string
   return { de, ate };
 }
 
+/** 1º dia do mês civil como ISO `yyyy-MM-dd`. */
+export function primeiroDiaDoMes(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-01`;
+}
+
+export function addMonthsMesAno(
+  year: number,
+  month: number,
+  add: number,
+): { year: number; month: number } {
+  const d = new Date(year, month - 1 + add, 1);
+  return { year: d.getFullYear(), month: d.getMonth() + 1 };
+}
+
+export function mesAnoFromISO(iso: string | null | undefined): { year: number; month: number } | null {
+  if (!iso) return null;
+  const [y, m] = String(iso).slice(0, 10).split('-').map(Number);
+  if (!y || !m || m < 1 || m > 12) return null;
+  return { year: y, month: m };
+}
+
+/**
+ * Cliente aparece em Gerar mensalidades se não tem data ou se o mês agendado
+ * já chegou (comparado pelo 1º dia do mês de referência).
+ */
+export function clienteProntoParaGerarMensalidade(
+  proximaGeracaoMes: string | null | undefined,
+  ref: Date = new Date(),
+): boolean {
+  if (!proximaGeracaoMes) return true;
+  const limite = primeiroDiaDoMes(ref.getFullYear(), ref.getMonth() + 1);
+  return String(proximaGeracaoMes).slice(0, 10) <= limite;
+}
+
+/** Paralisado enquanto hoje (calendário local) <= congelado_ate (inclusive). */
+export function clienteEstaCongelado(
+  congeladoAte: string | null | undefined,
+  ref: Date = new Date(),
+): boolean {
+  if (!congeladoAte) return false;
+  const ate = String(congeladoAte).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ate)) return false;
+  return toISODate(ref) <= ate;
+}
+
+/** Alias preferido na UI (paralisado = congelado_ate). */
+export const clienteEstaParalisado = clienteEstaCongelado;
+
 /** Soma dias a uma data ISO `yyyy-MM-dd` (calendário local). */
 export function addDaysToISODate(iso: string, days: number): string {
   const d = parseISODate(iso);

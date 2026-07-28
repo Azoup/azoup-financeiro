@@ -60,6 +60,16 @@ export interface Cliente {
   tipo_faturamento: 'mensal' | 'anual';
   /** Qtd. de parcelas no ano quando tipo_faturamento=anual (1,2,3,4,6,12). */
   parcelas_anuais: number | null;
+  /**
+   * 1º dia do mês (ISO) em que o cliente reaparece em Gerar mensalidades.
+   * Null = sempre elegível.
+   */
+  proxima_geracao_mes: string | null;
+  /**
+   * Último dia (ISO) da paralisação. Enquanto hoje <= esta data, não aparece para gerar.
+   * Null = não paralisado.
+   */
+  congelado_ate: string | null;
   /** Inscrição estadual do cliente (PJ). */
   inscricao_estadual?: string;
   /** Join opcional (lista/detalhe). */
@@ -114,6 +124,10 @@ export interface ClienteFormValues {
   tipo_faturamento: 'mensal' | 'anual';
   /** Texto 1|2|3|4|6|12 quando anual. */
   parcelas_anuais: string;
+  /** MM/AAAA — próxima vez que aparece em Gerar mensalidades. Vazio = sem bloqueio. */
+  proxima_geracao_mes: string;
+  /** Último dia da paralisação; null = ativo. */
+  congelado_ate: Date | null;
 }
 
 export interface SegmentoClienteRow {

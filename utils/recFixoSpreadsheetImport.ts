@@ -171,6 +171,8 @@ function emptyImportForm(): ClienteFormValues {
     emite_nf: false,
     tipo_faturamento: 'mensal',
     parcelas_anuais: '12',
+    proxima_geracao_mes: '',
+    congelado_ate: null,
   };
 }
 

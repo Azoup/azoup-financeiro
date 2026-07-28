@@ -454,6 +454,29 @@ export default function ClientDetailScreen() {
               : 'Mensal'
           }
         />
+        <Row
+          label="Próxima geração"
+          value={
+            (() => {
+              const m = data.proxima_geracao_mes
+                ? (() => {
+                    const [y, mo] = String(data.proxima_geracao_mes).slice(0, 10).split('-').map(Number);
+                    if (!y || !mo) return null;
+                    return `${String(mo).padStart(2, '0')}/${y}`;
+                  })()
+                : null;
+              return m ?? '— (sempre na lista de gerar)';
+            })()
+          }
+        />
+        <Row
+          label="Paralisado até"
+          value={
+            data.congelado_ate
+              ? formatBRDate(parseISODate(data.congelado_ate)) || data.congelado_ate
+              : '—'
+          }
+        />
       </Card>
 
       <Card style={styles.block}>

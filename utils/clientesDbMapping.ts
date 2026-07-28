@@ -1,6 +1,6 @@
 import type { Cliente, ClienteFormValues, ClienteListItem, SortField } from '@/types/models';
 import { parseBRLMasked } from '@/utils/currency';
-import { toISODate } from '@/utils/date';
+import { parseMesAnoBR, primeiroDiaDoMes, toISODate } from '@/utils/date';
 import {
   normalizeParcelasAnuais,
   normalizeTipoFaturamento,
@@ -40,18 +40,20 @@ export type ClienteDbRow = {
   emite_nf?: boolean | null;
   tipo_faturamento?: string | null;
   parcelas_anuais?: number | null;
+  proxima_geracao_mes?: string | null;
+  congelado_ate?: string | null;
   inscricao_estadual?: string | null;
   pdf_path?: string | null;
   cancelado?: boolean | null;
 };
 
 export const CLIENTE_LIST_SELECT =
-  'id, user_id, created_at, updated_at, documento, cnpj, nome, nome_fantasia, mensalidade, data_inicio, dia_vencimento, data_reajuste, ultimo_reajuste, mes_entrada, observacao, cep, logradouro, numero, complemento, bairro, cidade, estado, segmento_cliente_codigo, tipo_cliente, valor_mensalidade_anterior, emite_nf, tipo_faturamento, parcelas_anuais, inscricao_estadual, pdf_path, cancelado, ativo, data_cancelamento, celular, email';
+  'id, user_id, created_at, updated_at, documento, cnpj, nome, nome_fantasia, mensalidade, data_inicio, dia_vencimento, data_reajuste, ultimo_reajuste, mes_entrada, observacao, cep, logradouro, numero, complemento, bairro, cidade, estado, segmento_cliente_codigo, tipo_cliente, valor_mensalidade_anterior, emite_nf, tipo_faturamento, parcelas_anuais, proxima_geracao_mes, congelado_ate, inscricao_estadual, pdf_path, cancelado, ativo, data_cancelamento, celular, email';
 
 export const CLIENTE_DETAIL_SELECT = `${CLIENTE_LIST_SELECT}, contatos_cliente(*)`;
 
 export const CLIENTE_GERAR_MENSALIDADES_SELECT =
-  'id, nome, nome_fantasia, mensalidade, valor_mensalidade_anterior, segmento_cliente_codigo, tipo_cliente, cancelado, ativo, data_cancelamento, data_reajuste, data_inicio, dia_vencimento, tipo_faturamento, parcelas_anuais, emite_nf';
+  'id, nome, nome_fantasia, mensalidade, valor_mensalidade_anterior, segmento_cliente_codigo, tipo_cliente, cancelado, ativo, data_cancelamento, data_reajuste, data_inicio, dia_vencimento, tipo_faturamento, parcelas_anuais, proxima_geracao_mes, congelado_ate, emite_nf';
 
 /** Join embutido em outras tabelas (mensalidades, vendas, NF). */
 export const CLIENTE_EMBED_SELECT = 'nome_fantasia, nome, cnpj, documento, emite_nf, logradouro, numero, bairro, cidade, estado, cep';
@@ -117,6 +119,10 @@ export function mapDbRowToCliente(row: ClienteDbRow): Cliente {
         : row.parcelas_anuais == null
           ? null
           : normalizeParcelasAnuais(row.parcelas_anuais),
+    proxima_geracao_mes: row.proxima_geracao_mes
+      ? String(row.proxima_geracao_mes).slice(0, 10)
+      : null,
+    congelado_ate: row.congelado_ate ? String(row.congelado_ate).slice(0, 10) : null,
     inscricao_estadual: row.inscricao_estadual ?? undefined,
     created_at: row.created_at ?? new Date().toISOString(),
     updated_at: row.updated_at ?? undefined,
@@ -164,6 +170,16 @@ export function mapClienteFormToDbRow(
       ? normalizeParcelasAnuais(values.parcelas_anuais) ?? 12
       : null;
 
+  const proxRaw = (values.proxima_geracao_mes ?? '').trim();
+  let proxima_geracao_mes: string | null = null;
+  if (proxRaw) {
+    const proxParsed = parseMesAnoBR(proxRaw);
+    if (!proxParsed) {
+      throw new Error('Próxima geração inválida. Use MM/AAAA (ex.: 07/2027).');
+    }
+    proxima_geracao_mes = primeiroDiaDoMes(proxParsed.year, proxParsed.month);
+  }
+
   return {
     ...(extras?.user_id ? { user_id: extras.user_id } : {}),
     documento,
@@ -191,6 +207,8 @@ export function mapClienteFormToDbRow(
     emite_nf: values.emite_nf,
     tipo_faturamento,
     parcelas_anuais,
+    proxima_geracao_mes,
+    congelado_ate: values.congelado_ate ? toISODate(values.congelado_ate) : null,
     pdf_path: extras?.pdf_path ?? null,
     ultimo_reajuste: extras?.ultimo_reajuste ?? null,
     valor_mensalidade_anterior: extras?.valor_mensalidade_anterior ?? null,
