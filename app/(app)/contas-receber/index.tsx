@@ -34,7 +34,7 @@ import { colors, radius, spacing } from '@/theme/colors';
 import type { ContaReceberListRow, ContaReceberOrigem } from '@/types/contasReceber';
 import type { ContaReceberSituacao } from '@/utils/contaReceberCobranca';
 import { buildContasReceberExport } from '@/utils/exportReportBuilders';
-import { buildBoletoCobrancaHtml } from '@/utils/boletoCobrancaHtml';
+import { abrirDocumentoBoleto } from '@/utils/openBoletoDocumento';
 import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate, toISODate } from '@/utils/date';
 import { CONSULTA, useHardwareBackToConsulta } from '@/utils/navigationConsulta';
@@ -43,15 +43,12 @@ import {
   formatWhatsAppDisplay,
 } from '@/utils/whatsappCobranca';
 import { Ionicons } from '@expo/vector-icons';
-import * as Print from 'expo-print';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Linking,
   Modal,
-  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -344,25 +341,7 @@ export default function ContasReceberScreen() {
         Toast.show({ type: 'error', text1: 'Registro não encontrado.' });
         return;
       }
-      if (row.pdf_url && row.status_registro === 'registrado') {
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          window.open(row.pdf_url, '_blank', 'noopener,noreferrer');
-        } else {
-          const ok = await Linking.canOpenURL(row.pdf_url);
-          if (ok) await Linking.openURL(row.pdf_url);
-          else Toast.show({ type: 'error', text1: 'Não foi possível abrir o PDF do boleto.' });
-        }
-        return;
-      }
-      const html = buildBoletoCobrancaHtml(row);
-      const { uri } = await Print.printToFileAsync({ html });
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.open(uri, '_blank', 'noopener,noreferrer');
-      } else {
-        const ok = await Linking.canOpenURL(uri);
-        if (ok) await Linking.openURL(uri);
-        else Toast.show({ type: 'error', text1: 'Não foi possível abrir o PDF.' });
-      }
+      await abrirDocumentoBoleto(row);
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {

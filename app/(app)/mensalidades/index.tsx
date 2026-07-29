@@ -7,9 +7,8 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import { sincronizarCarnesMensalidadesFaltantes, fetchBoletosPorMensalidadeIds, fetchBoletoParcelaById } from '@/services/boletoParcelaService';
-import { buildBoletoCobrancaHtml } from '@/utils/boletoCobrancaHtml';
+import { abrirDocumentoBoleto } from '@/utils/openBoletoDocumento';
 import type { BoletoParcelaVendaRow } from '@/types/contasReceber';
-import * as Print from 'expo-print';
 import {
   fetchMensalidadesGeradasHistorico,
   fetchPagamentosMensalidadesPorIds,
@@ -38,8 +37,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Linking,
-  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -282,25 +279,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
     setPdfBusyId(mensalidadeId);
     try {
       const row = (await fetchBoletoParcelaById(user.id, boleto.id)) ?? boleto;
-      if (row.pdf_url && (row.status_registro === 'registrado' || row.status_registro === 'pago')) {
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          window.open(row.pdf_url, '_blank', 'noopener,noreferrer');
-        } else {
-          const ok = await Linking.canOpenURL(row.pdf_url);
-          if (ok) await Linking.openURL(row.pdf_url);
-          else showAppError('Não foi possível abrir o PDF do boleto.');
-        }
-        return;
-      }
-      const html = buildBoletoCobrancaHtml(row);
-      const { uri } = await Print.printToFileAsync({ html });
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.open(uri, '_blank', 'noopener,noreferrer');
-      } else {
-        const ok = await Linking.canOpenURL(uri);
-        if (ok) await Linking.openURL(uri);
-        else showAppError('Não foi possível abrir o PDF.');
-      }
+      await abrirDocumentoBoleto(row);
     } catch (e) {
       showAppError((e as Error).message);
     } finally {

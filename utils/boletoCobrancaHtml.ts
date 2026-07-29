@@ -13,12 +13,14 @@ function brl(n: number): string {
   return esc(formatBRL(n));
 }
 
-/** Carnê no estilo boleto; quando registrado no Sicoob exibe linha digitável e código de barras. */
+/** Carnê no estilo boleto; quando registrado exibe linha digitável e código de barras. */
 export function buildBoletoCobrancaHtml(row: BoletoParcelaVendaRow): string {
-  const registrado = row.status_registro === 'registrado';
+  const registrado = row.status_registro === 'registrado' || row.status_registro === 'pago';
+  const banco =
+    row.tipo_emissao === 'c6' ? 'C6 Bank' : row.tipo_emissao === 'sicoob' ? 'Sicoob' : null;
   const nossoNumero = registrado && row.nosso_numero_banco ? row.nosso_numero_banco : row.nosso_numero;
   const avisoTopo = registrado
-    ? 'Boleto registrado no Sicoob — utilize a linha digitável ou o PDF oficial para pagamento.'
+    ? `Boleto registrado${banco ? ` no ${banco}` : ''} — utilize a linha digitável ou o PDF oficial para pagamento.`
     : 'Documento de cobrança para controle interno — não é boleto registrado em instituição financeira (sem compensação automática).';
   const venc = esc(row.data_vencimento.split('-').reverse().join('/'));
   const doc = esc(row.data_documento.split('-').reverse().join('/'));
