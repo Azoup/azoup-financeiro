@@ -120,14 +120,29 @@ function splitInstrucoes(instrucoes) {
     .slice(0, 4);
 }
 
+function parseAddressNumber(raw) {
+  const digits = onlyDigits(raw);
+  if (digits) {
+    const n = Number(digits.slice(0, 6));
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
+/**
+ * Schema sandbox C6 (v1/bank_slips):
+ * - external_reference_id: ^[a-zA-Z0-9]{1,10}$
+ * - our_number: até 10 dígitos
+ * - payer.address: street, number (número), city, state, zip_code (sem neighborhood)
+ * - interest/fine: { value: number }
+ */
 function buildC6Payload({ boleto, config, cliente }) {
   const taxId = onlyDigits(cliente.cnpj ?? cliente.cpf ?? cliente.documento ?? '');
   if (!taxId) throw new Error('Cliente sem CPF/CNPJ válido para emissão de boleto C6.');
 
   const name = (cliente.nome_fantasia ?? cliente.nome ?? cliente.razao_social ?? 'Pagador').trim();
-  const street = (cliente.logradouro ?? 'Não informado').trim() || 'Não informado';
-  const number = String(cliente.numero ?? 'S/N').trim() || 'S/N';
-  const city = (cliente.cidade ?? 'Não informado').trim() || 'Não informado';
+  const street = (cliente.logradouro ?? 'Nao informado').trim() || 'Nao informado';
+  const city = (cliente.cidade ?? 'Nao informado').trim() || 'Nao informado';
   const state = String(cliente.uf ?? cliente.estado ?? 'SP')
     .trim()
     .toUpperCase()
@@ -135,38 +150,49 @@ function buildC6Payload({ boleto, config, cliente }) {
   const zip = onlyDigits(cliente.cep ?? '00000000').padStart(8, '0').slice(0, 8);
 
   const ourNumber = onlyDigits(boleto.nosso_numero || boleto.id).slice(-10) || '1';
+  // C6 exige no máx. 10 alfanuméricos e únicos por cliente
   const externalId = String(boleto.numero_documento || boleto.id.replace(/-/g, ''))
     .replace(/[^a-zA-Z0-9]/g, '')
-    .slice(0, 26);
+    .slice(-10);
+  if (!externalId) {
+    throw new Error('Não foi possível montar external_reference_id do boleto C6.');
+  }
 
   const billing =
     String(config.billing_scheme || '').trim() ||
     (config.ambiente === 'producao' ? '15' : '21');
 
   const instructions = splitInstrucoes(boleto.instrucoes);
-  if (!instructions.length) instructions.push('Pagamento referente a serviços prestados.');
+  if (!instructions.length) instructions.push('Pagamento referente a servicos prestados.');
 
-  return {
+  const address = {
+    street: street.slice(0, 100),
+    number: parseAddressNumber(cliente.numero),
+    city: city.slice(0, 50),
+    state,
+    zip_code: zip,
+  };
+  const complement = (cliente.complemento ?? '').trim();
+  if (complement) address.complement = complement.slice(0, 50);
+
+  const payload = {
     external_reference_id: externalId,
-    amount: Number(boleto.valor_documento),
+    amount: Number(Number(boleto.valor_documento).toFixed(2)),
     due_date: String(boleto.data_vencimento).slice(0, 10),
     instructions,
     billing_scheme: String(billing),
     our_number: String(ourNumber),
     payer: {
-      name,
+      name: name.slice(0, 100),
       tax_id: taxId,
-      email: (cliente.email ?? cliente.email_contato ?? '').trim() || undefined,
-      address: {
-        street,
-        number,
-        complement: (cliente.complemento ?? '').trim() || undefined,
-        city,
-        state,
-        zip_code: zip,
-      },
+      address,
     },
   };
+
+  const email = (cliente.email ?? cliente.email_contato ?? '').trim();
+  if (email) payload.payer.email = email;
+
+  return payload;
 }
 
 function extractC6BoletoResponse(json) {
@@ -301,18 +327,234 @@ async function obterPdfBoletoC6Api({ config, certPath, keyPath, c6BoletoId }) {
   return res.buffer;
 }
 
+function partnerHeaders(token, withJson = false) {
+  const h = {
+    Authorization: `Bearer ${token}`,
+    'partner-software-name': 'SistemaJessica',
+    'partner-software-version': '1.0.0',
+  };
+  if (withJson) h['Content-Type'] = 'application/json';
+  return h;
+}
+
+/** Txid Pix BACEN: 26–35 alfanuméricos. */
+function makePixTxid(seed) {
+  const raw = `SJ${String(seed || '')}${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
+    .replace(/[^a-zA-Z0-9]/g, '');
+  return (raw + 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX').slice(0, 26);
+}
+
+function formatPixValor(valor) {
+  return Number(Number(valor).toFixed(2)).toFixed(2);
+}
+
+function buildPixDevedor(cliente) {
+  const taxId = onlyDigits(cliente?.cnpj ?? cliente?.cpf ?? cliente?.documento ?? '');
+  const nome = (cliente?.nome_fantasia ?? cliente?.nome ?? cliente?.razao_social ?? 'Pagador').trim();
+  if (!taxId) return { nome };
+  if (taxId.length > 11) return { nome, cnpj: taxId };
+  return { nome, cpf: taxId.padStart(11, '0').slice(0, 11) };
+}
+
+async function c6PixRequest({ config, certPath, keyPath, method, path, body }) {
+  const token = await getC6AccessToken({ config, certPath, keyPath });
+  const agent = createMtlsAgent(certPath, keyPath);
+  const payload = body != null ? JSON.stringify(body) : undefined;
+  const headers = partnerHeaders(token, Boolean(payload));
+  if (payload) headers['Content-Length'] = Buffer.byteLength(payload);
+
+  const res = await httpsRequest(`${apiBaseUrl(config.ambiente)}${path}`, {
+    method,
+    headers,
+    body: payload,
+    agent,
+  });
+  return res;
+}
+
+/** Cobrança Pix imediata (POST /v2/pix/cob ou PUT /v2/pix/cob/{txid}). */
+async function criarPixCobC6Api({ config, certPath, keyPath, valor, chave, txid, expiracao = 3600, cliente, solicitacao }) {
+  const pixChave = (chave || config.pix_chave || '').trim();
+  if (!pixChave) throw new Error('Chave Pix C6 ausente.');
+
+  const body = {
+    calendario: { expiracao },
+    valor: { original: formatPixValor(valor) },
+    chave: pixChave,
+    solicitacaoPagador: (solicitacao || 'Pagamento via Pix').slice(0, 140),
+  };
+  const devedor = buildPixDevedor(cliente || {});
+  if (devedor.cpf || devedor.cnpj) body.devedor = devedor;
+
+  const id = txid || makePixTxid(valor);
+  const res = await c6PixRequest({
+    config,
+    certPath,
+    keyPath,
+    method: 'PUT',
+    path: `/v2/pix/cob/${id}`,
+    body,
+  });
+
+  // Fallback POST sem txid
+  if (res.status >= 400) {
+    const res2 = await c6PixRequest({
+      config,
+      certPath,
+      keyPath,
+      method: 'POST',
+      path: '/v2/pix/cob',
+      body,
+    });
+    if (res2.status < 200 || res2.status >= 300) {
+      const msg = res2.json?.detail || res2.json?.title || res2.raw || `Pix cob falhou (${res2.status}).`;
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    return { ...res2.json, httpStatus: res2.status, txid: res2.json?.txid || id };
+  }
+
+  if (res.status < 200 || res.status >= 300) {
+    const msg = res.json?.detail || res.json?.title || res.raw || `Pix cob falhou (${res.status}).`;
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+  return { ...res.json, httpStatus: res.status, txid: res.json?.txid || id };
+}
+
+/** Cobrança Pix com vencimento (PUT /v2/pix/cobv/{txid}). */
+async function criarPixCobvC6Api({
+  config,
+  certPath,
+  keyPath,
+  valor,
+  chave,
+  dataVencimento,
+  cliente,
+  solicitacao,
+  txid,
+  validadeAposVencimento = 30,
+}) {
+  const pixChave = (chave || config.pix_chave || '').trim();
+  if (!pixChave) throw new Error('Chave Pix C6 ausente.');
+  const id = txid || makePixTxid(dataVencimento);
+  const body = {
+    calendario: {
+      dataDeVencimento: String(dataVencimento).slice(0, 10),
+      validadeAposVencimento,
+    },
+    valor: { original: formatPixValor(valor) },
+    chave: pixChave,
+    solicitacaoPagador: (solicitacao || 'Pagamento via Pix').slice(0, 140),
+    devedor: buildPixDevedor(cliente || {}),
+  };
+
+  const res = await c6PixRequest({
+    config,
+    certPath,
+    keyPath,
+    method: 'PUT',
+    path: `/v2/pix/cobv/${id}`,
+    body,
+  });
+  if (res.status < 200 || res.status >= 300) {
+    const msg = res.json?.detail || res.json?.title || res.raw || `Pix cobv falhou (${res.status}).`;
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+  return { ...res.json, httpStatus: res.status, txid: res.json?.txid || id };
+}
+
+async function consultarPixC6Api({ config, certPath, keyPath, txid, comVencimento = false }) {
+  if (!txid) throw new Error('txid Pix obrigatório.');
+  const path = comVencimento ? `/v2/pix/cobv/${txid}` : `/v2/pix/cob/${txid}`;
+  const res = await c6PixRequest({ config, certPath, keyPath, method: 'GET', path });
+  if (res.status < 200 || res.status >= 300) {
+    const msg = res.json?.detail || res.raw || `Consulta Pix falhou (${res.status}).`;
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+  const status = String(res.json?.status || '').toUpperCase();
+  return {
+    resultado: res.json,
+    liquidado: status === 'CONCLUIDA',
+    txid,
+  };
+}
+
+async function revisarPixCobC6Api({ config, certPath, keyPath, txid, patchBody }) {
+  const res = await c6PixRequest({
+    config,
+    certPath,
+    keyPath,
+    method: 'PATCH',
+    path: `/v2/pix/cob/${txid}`,
+    body: patchBody,
+  });
+  if (res.status < 200 || res.status >= 300) {
+    const msg = res.json?.detail || res.raw || `Revisão Pix falhou (${res.status}).`;
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+  return res.json;
+}
+
+async function listarRecebiveisC6Api({ config, certPath, keyPath, startDate, endDate, page = 1, size = 50 }) {
+  const qs = new URLSearchParams({
+    start_date: startDate,
+    end_date: endDate,
+    page: String(page),
+    size: String(size),
+  });
+  const res = await c6PixRequest({
+    config,
+    certPath,
+    keyPath,
+    method: 'GET',
+    path: `/v1/c6pay/statement/receivables?${qs}`,
+  });
+  if (res.status < 200 || res.status >= 300) {
+    const msg = res.json?.detail || res.raw || `Recebíveis C6 falhou (${res.status}).`;
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+  return res.json;
+}
+
+async function listarTransacoesC6Api({ config, certPath, keyPath, startDate, endDate, page = 1, size = 50 }) {
+  const qs = new URLSearchParams({
+    start_date: startDate,
+    end_date: endDate,
+    page: String(page),
+    size: String(size),
+  });
+  const res = await c6PixRequest({
+    config,
+    certPath,
+    keyPath,
+    method: 'GET',
+    path: `/v1/c6pay/statement/transactions?${qs}`,
+  });
+  if (res.status < 200 || res.status >= 300) {
+    const msg = res.json?.detail || res.raw || `Transações C6 falhou (${res.status}).`;
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+  return res.json;
+}
+
 module.exports = {
   apiBaseUrl,
   buildC6Payload,
   cleanupTemp,
   consultarBoletoC6Api,
+  consultarPixC6Api,
   createMtlsAgent,
+  criarPixCobC6Api,
+  criarPixCobvC6Api,
   downloadC6FileToTemp,
   emitirBoletoC6Api,
   extractC6DataPagamento,
   extractC6ValorPago,
   getC6AccessToken,
   isC6BoletoLiquidado,
+  listarRecebiveisC6Api,
+  listarTransacoesC6Api,
+  makePixTxid,
   obterPdfBoletoC6Api,
   onlyDigits,
+  revisarPixCobC6Api,
 };

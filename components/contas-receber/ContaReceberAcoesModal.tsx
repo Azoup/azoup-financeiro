@@ -14,11 +14,13 @@ type Props = {
   onEmitirNf: () => void;
   onVerNota: () => void;
   onPdf: () => void;
+  onRegistrarC6?: () => void;
   onWhatsApp: () => void;
   onVerOrigem: () => void;
   temNota: boolean;
   nfBusy?: boolean;
   pdfBusy?: boolean;
+  c6Busy?: boolean;
 };
 
 function origemLabel(origem: ContaReceberListRow['origem']): string {
@@ -83,11 +85,13 @@ export function ContaReceberAcoesModal({
   onEmitirNf,
   onVerNota,
   onPdf,
+  onRegistrarC6,
   onWhatsApp,
   onVerOrigem,
   temNota,
   nfBusy,
   pdfBusy,
+  c6Busy,
 }: Props) {
   if (!item) return null;
 
@@ -95,6 +99,12 @@ export function ContaReceberAcoesModal({
   const cancelado = item.situacao_cobranca === 'cancelado';
   const temWhats = Boolean(item.whatsapp?.trim());
   const venc = formatBRDate(parseISODate(item.data_vencimento)) || item.data_vencimento;
+  const precisaC6 =
+    Boolean(onRegistrarC6) &&
+    (item.status_registro === 'erro' ||
+      item.status_registro === 'informativo' ||
+      item.status_registro === 'pendente' ||
+      (item.tipo_emissao === 'c6' && !item.pdf_url && !item.linha_digitavel));
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -138,9 +148,27 @@ export function ContaReceberAcoesModal({
               />
             ) : null}
 
+            {precisaC6 ? (
+              <AcaoRow
+                icon="cloud-upload-outline"
+                label={c6Busy ? 'Registrando no C6…' : 'Registrar boleto real no C6'}
+                sub="Gera PDF e linha digitável via API do banco"
+                onPress={onRegistrarC6!}
+                disabled={c6Busy}
+                busy={c6Busy}
+                accent="#1a1a2e"
+              />
+            ) : null}
+
             <AcaoRow
               icon="document-outline"
-              label={pdfBusy ? 'Abrindo PDF…' : 'Abrir PDF do carnê'}
+              label={
+                pdfBusy
+                  ? 'Abrindo…'
+                  : item.tipo_emissao === 'c6' || item.tipo_emissao === 'sicoob'
+                    ? 'Abrir PDF do boleto'
+                    : 'Abrir PDF do carnê'
+              }
               onPress={onPdf}
               disabled={pdfBusy}
               busy={pdfBusy}

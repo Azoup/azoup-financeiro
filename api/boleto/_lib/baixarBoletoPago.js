@@ -9,6 +9,7 @@ const { loadSicoobCredentials } = require('./sicoobCredentials');
 const {
   cleanupTemp,
   consultarBoletoC6Api,
+  consultarPixC6Api,
   extractC6DataPagamento,
   extractC6ValorPago,
   isC6BoletoLiquidado,
@@ -36,7 +37,9 @@ function nextMensalidadeStatus(valor, valorPago) {
 }
 
 function formaPagamentoBanco(origemLabel) {
-  if (String(origemLabel).toUpperCase().includes('C6')) return 'Boleto C6';
+  const u = String(origemLabel).toUpperCase();
+  if (u.includes('PIX')) return 'Pix C6';
+  if (u.includes('C6')) return 'Boleto C6';
   return 'Boleto Sicoob';
 }
 
@@ -263,6 +266,40 @@ async function consultarEBaixarBoletoC6(admin, userId, boleto, origem = 'POLLING
   if (!creds) return { baixado: false, motivo: 'c6_inativo', boletoId: boleto.id };
 
   try {
+    if (boleto.pix_txid) {
+      try {
+        const pix = await consultarPixC6Api({
+          config: creds.config,
+          certPath: creds.certPath,
+          keyPath: creds.keyPath,
+          txid: boleto.pix_txid,
+          comVencimento: true,
+        });
+        await admin
+          .from('boletos_parcela_venda')
+          .update({
+            ultima_consulta_sicoob: new Date().toISOString(),
+            pix_status: pix.resultado?.status ?? boleto.pix_status,
+          })
+          .eq('id', boleto.id);
+        if (pix.liquidado) {
+          const pago = Array.isArray(pix.resultado?.pix) ? pix.resultado.pix[0] : null;
+          return aplicarBaixaBoleto(admin, userId, boleto, {
+            dataPagamento: String(pago?.horario || new Date().toISOString()).slice(0, 10),
+            valorPago: Number(pago?.valor || boleto.valor_documento),
+            origem: `${origem}_PIX`,
+            payload: pix.resultado,
+          });
+        }
+      } catch (e) {
+        console.warn('[c6] consulta pix:', e.message);
+      }
+    }
+
+    if (!boleto.c6_boleto_id) {
+      return { baixado: false, motivo: 'sem_id_c6', boletoId: boleto.id };
+    }
+
     const consulta = await consultarBoletoC6Api({
       config: creds.config,
       certPath: creds.certPath,

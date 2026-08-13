@@ -1,0 +1,231 @@
+EVIDÊNCIAS C6 — PIX + TRANSAÇÕES E RECEBÍVEIS (roteiro v3.0)
+Software: SistemaJessica | sandbox
+chave Pix: 46bbfecb-540d-457d-abfd-7ef140886d3c
+client_id: 3cbe1db9-ee03-4f3b-aae4-b0ea2e649cee
+
+Marque no formulário: AUTENTICAÇÃO + BOLETO + PIX + TRANSAÇÕES E RECEBÍVEIS
+Cole Status Code e Response Body de cada bloco abaixo no Word.
+Obs.: lista vazia em TR_01/TR_02 no sandbox é normal se não houver movimento C6 Pay.
+
+========================================================================
+P_01 – COBRANÇA PIX IMEDIATA (PUT/POST /v2/pix/cob)
+------------------------------------------------------------------------
+Request enviado (referência):
+{
+  "valor": "10.00",
+  "chave": "46bbfecb-540d-457d-abfd-7ef140886d3c",
+  "calendario": {
+    "expiracao": 3600
+  }
+}
+
+>>> Status Code - Retornado:
+201
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "txid": "SJ10ms7jth2u47pintr2y9hXXX",
+  "status": "ATIVA",
+  "chave": "46bbfecb-540d-457d-abfd-7ef140886d3c",
+  "pixCopiaECola": "00020101021226990014br.gov.bcb.pix2577qrcode-h.c6pix.com/qrs1/v2/01Q7OuTFfmKrG4YAJRhOlRMPpRHpoyoGggYH25ziRhJO2Yuegc520400005303986540510.005802BR5916REGRESSIVO TESTE6009Sao Paulo62070503***630434D5",
+  "calendario": {
+    "criacao": "2026-07-30T13:27:50.012Z",
+    "expiracao": 3600
+  },
+  "valor": {
+    "original": "10.00",
+    "modalidadeAlteracao": 0
+  }
+}
+
+========================================================================
+P_01_04 – CONSULTAR COBRANÇA IMEDIATA (GET /v2/pix/cob/{txid})
+------------------------------------------------------------------------
+Request enviado (referência):
+{
+  "txid": "SJ10ms7jth2u47pintr2y9hXXX"
+}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "calendario": {
+    "criacao": "2026-07-30T13:27:50.000Z",
+    "expiracao": 3600
+  },
+  "devedor": {
+    "nome": "Cliente Homologacao",
+    "cpf": "52998224725"
+  },
+  "chave": "46bbfecb-540d-457d-abfd-7ef140886d3c",
+  "valor": {
+    "original": "10.00",
+    "modalidadeAlteracao": 0
+  },
+  "solicitacaoPagador": "Homologacao P_01 cob imediata",
+  "txid": "SJ10ms7jth2u47pintr2y9hXXX",
+  "revisao": 0,
+  "location": "qrcode-h.c6pix.com/qrs1/v2/01Q7OuTFfmKrG4YAJRhOlRMPpRHpoyoGggYH25ziRhJO2Yuegc",
+  "status": "ATIVA",
+  "pixCopiaECola": "00020101021226990014br.gov.bcb.pix2577qrcode-h.c6pix.com/qrs1/v2/01Q7OuTFfmKrG4YAJRhOlRMPpRHpoyoGggYH25ziRhJO2Yuegc520400005303986540510.005802BR5916REGRESSIVO TESTE6009Sao Paulo62070503***630434D5"
+}
+
+========================================================================
+P_01_03 – REVISAR COBRANÇA IMEDIATA (PATCH /v2/pix/cob/{txid})
+------------------------------------------------------------------------
+Request enviado (referência):
+{
+  "solicitacaoPagador": "Homologacao P_01 revisada"
+}
+
+>>> Status Code - Retornado:
+201
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "chave": "46bbfecb-540d-457d-abfd-7ef140886d3c",
+  "solicitacaoPagador": "Homologacao P_01 revisada",
+  "pixCopiaECola": "00020101021226990014br.gov.bcb.pix2577qrcode-h.c6pix.com/qrs1/v2/01Q7OuTFfmKrG4YAJRhOlRMPpRHpoyoGggYH25ziRhJO2Yuegc520400005303986540510.005802BR5916REGRESSIVO TESTE6009Sao Paulo62070503***630434D5",
+  "calendario": {
+    "criacao": "2026-07-30T13:27:55.088Z",
+    "expiracao": 3600
+  },
+  "txid": "SJ10ms7jth2u47pintr2y9hXXX",
+  "revisao": 1,
+  "devedor": {
+    "nome": "Cliente Homologacao",
+    "cpf": "52998224725"
+  },
+  "location": "qrcode-h.c6pix.com/qrs1/v2/01Q7OuTFfmKrG4YAJRhOlRMPpRHpoyoGggYH25ziRhJO2Yuegc",
+  "status": "ATIVA",
+  "valor": {
+    "original": "10.00",
+    "modalidadeAlteracao": 0
+  }
+}
+
+========================================================================
+P_02 – COBRANÇA PIX COM VENCIMENTO (PUT /v2/pix/cobv/{txid})
+------------------------------------------------------------------------
+Request enviado (referência):
+{
+  "dataDeVencimento": "2026-08-09",
+  "valor": "25.50",
+  "chave": "46bbfecb-540d-457d-abfd-7ef140886d3c"
+}
+
+>>> Status Code - Retornado:
+201
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "txid": "SJ20260809ms7jtna4qc2143kz",
+  "status": "ATIVA",
+  "chave": "46bbfecb-540d-457d-abfd-7ef140886d3c",
+  "pixCopiaECola": "00020101021226990014br.gov.bcb.pix2577qrcode-h.c6pix.com/qrs1/v2/cobv/01P7Dl9WQtDsJPiDFVjBPWDlBOSxLmiAmFFaz05MP050W520400005303986540525.505802BR5916REGRESSIVO TESTE6009Sao Paulo62070503***63041F18",
+  "calendario": {
+    "criacao": "2026-07-30T13:27:56.531Z",
+    "dataDeVencimento": "2026-08-09",
+    "validadeAposVencimento": 30
+  },
+  "valor": {
+    "original": "25.50"
+  },
+  "devedor": {
+    "nome": "Cliente Homologacao",
+    "cpf": "52998224725"
+  }
+}
+
+========================================================================
+P_02 – CONSULTAR COBV (GET /v2/pix/cobv/{txid})
+------------------------------------------------------------------------
+Request enviado (referência):
+{
+  "txid": "SJ20260809ms7jtna4qc2143kz"
+}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "calendario": {
+    "criacao": "2026-07-30T13:27:57.000Z",
+    "dataDeVencimento": "2026-08-09",
+    "validadeAposVencimento": 30
+  },
+  "devedor": {
+    "nome": "Cliente Homologacao",
+    "cpf": "52998224725"
+  },
+  "chave": "46bbfecb-540d-457d-abfd-7ef140886d3c",
+  "loc": {
+    "id": 0,
+    "location": "qrcode-h.c6pix.com/qrs1/v2/cobv/01P7Dl9WQtDsJPiDFVjBPWDlBOSxLmiAmFFaz05MP050W",
+    "tipoCob": "cobv",
+    "criacao": "2026-07-30T13:27:57.000Z"
+  },
+  "valor": {
+    "original": "25.50"
+  },
+  "solicitacaoPagador": "Homologacao P_02 cobv",
+  "txid": "SJ20260809ms7jtna4qc2143kz",
+  "revisao": 0,
+  "recebedor": {
+    "nome": "Regressivo Teste",
+    "cnpj": "26395565000109",
+    "logradouro": "Avenida Nove de Julho 3186",
+    "cidade": "Sao Paulo",
+    "uf": "SP",
+    "cep": "1406000"
+  },
+  "status": "ATIVA",
+  "pixCopiaECola": "00020101021226990014br.gov.bcb.pix2577qrcode-h.c6pix.com/qrs1/v2/cobv/01P7Dl9WQtDsJPiDFVjBPWDlBOSxLmiAmFFaz05MP050W520400005303986540525.505802BR5916REGRESSIVO TESTE6009Sao Paulo62070503***63041F18"
+}
+
+========================================================================
+TR_01 – CONSULTA DE RECEBÍVEIS (GET /v1/c6pay/statement/receivables)
+------------------------------------------------------------------------
+Request enviado (referência):
+{
+  "start_date": "2026-06-30",
+  "end_date": "2026-07-30",
+  "page": 1,
+  "size": 10
+}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "content": [],
+  "page": 1,
+  "last_page": 0,
+  "items": 0
+}
+
+========================================================================
+TR_02 – CONSULTA DE TRANSAÇÕES (GET /v1/c6pay/statement/transactions)
+------------------------------------------------------------------------
+Request enviado (referência):
+{
+  "start_date": "2026-06-30",
+  "end_date": "2026-07-30",
+  "page": 1,
+  "size": 10
+}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "content": [],
+  "page": 1,
+  "last_page": 0,
+  "items": 0
+}

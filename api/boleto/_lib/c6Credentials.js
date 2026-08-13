@@ -3,7 +3,8 @@ const { C6_SANDBOX, bundledCertPaths } = require('./c6SandboxDefaults');
 
 /**
  * Carrega config_c6 + mTLS.
- * Se não houver cadastro/cert no Storage, usa credenciais e certificados sandbox fixos.
+ * Sempre usa credenciais sandbox fixas quando não houver override no banco.
+ * Certificados vêm de api/boleto/_lib/certs/ (obrigatório no deploy).
  */
 async function loadC6Credentials(admin, userId, emitenteId) {
   let config = null;
@@ -15,12 +16,15 @@ async function loadC6Credentials(admin, userId, emitenteId) {
       query = query.order('updated_at', { ascending: false }).limit(1).maybeSingle();
     }
     const { data, error } = await query;
-    if (error) throw new Error(error.message);
+    if (error && !/relation|does not exist|42P01/i.test(error.message)) {
+      throw new Error(error.message);
+    }
     config = data;
   }
 
-  const ativo = config?.ativo !== false;
-  if (config && !ativo) return null;
+  if (config && config.ativo === false) {
+    throw new Error('Integração C6 está inativa em Configurações › Boleto C6. Ative para emitir boleto real.');
+  }
 
   const merged = {
     ...(config ?? {}),
@@ -34,6 +38,10 @@ async function loadC6Credentials(admin, userId, emitenteId) {
     user_id: config?.user_id || userId,
   };
 
+  if (!merged.client_id || !merged.client_secret) {
+    throw new Error('Credenciais C6 ausentes (Client ID / Secret).');
+  }
+
   if (config?.cert_crt_storage_path && config?.cert_key_storage_path) {
     const { downloadC6FileToTemp } = require('./c6Client');
     const certPath = await downloadC6FileToTemp(admin, config.cert_crt_storage_path, 'crt');
@@ -42,12 +50,13 @@ async function loadC6Credentials(admin, userId, emitenteId) {
   }
 
   const bundled = bundledCertPaths();
-  if (!fs.existsSync(bundled.certPath) || !fs.existsSync(bundled.keyPath)) {
-    throw new Error(
-      'Certificados C6 sandbox ausentes em api/boleto/_lib/certs/. Envie .crt/.key em Configurações › Boleto C6.',
-    );
-  }
-  return { config: merged, certPath: bundled.certPath, keyPath: bundled.keyPath, bundled: true };
+  return {
+    config: merged,
+    certPath: bundled.certPath,
+    keyPath: bundled.keyPath,
+    // arquivos versionados no repo — não apagar
+    bundled: true,
+  };
 }
 
 async function loadC6CredentialsForBoleto(admin, boleto) {

@@ -19,7 +19,7 @@
     "api/boleto/**/*.js": {
       "maxDuration": 60,
       "memory": 1024,
-      "includeFiles": "{api/boleto/_lib/**,api/nfe/_lib/**}"
+      "includeFiles": "{api/boleto/_lib/**,api/boleto/_lib/certs/**,api/nfe/_lib/**}"
     },
     "api/externo/**/*.js": {
       "maxDuration": 60,

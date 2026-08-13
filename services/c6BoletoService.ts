@@ -19,7 +19,9 @@ export async function emitirBoletosC6Lote(
 
   const config = await ensureC6Config(userId, emitenteId);
   if (!config.ativo) {
-    return { success: true, emitidos: 0, erros: [], resultados: [] };
+    throw new Error(
+      'Integração C6 inativa em Configurações › Boleto C6. Ative para registrar boleto real.',
+    );
   }
 
   const { data: session } = await supabase.auth.getSession();
@@ -53,4 +55,13 @@ export async function emitirBoletosC6Lote(
   }
 
   return body;
+}
+
+/** Reenvia boleto(s) para registro real no C6 (erro / sem PDF). */
+export async function reemitirBoletosC6(
+  userId: string,
+  emitenteId: string,
+  boletoIds: string[],
+): Promise<EmitirBoletoLoteResult> {
+  return emitirBoletosC6Lote(userId, emitenteId, boletoIds);
 }

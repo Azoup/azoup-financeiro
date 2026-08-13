@@ -4,6 +4,15 @@ function humanizeNfseRejection(message, ibge) {
   const raw = String(message ?? '').trim();
   if (!raw) return 'NFS-e rejeitada pela SEFIN.';
 
+  if (/L928/i.test(raw)) {
+    return [
+      'L928 — Alíquota de ISS fora da faixa do código de serviço (em Americana, 01.05 exige entre 2% e 5%; o valor típico é 2%).',
+      'Em Configurações › NFS-e, no emitente usado na emissão: Alíquota ISS = 2 → Salvar.',
+      'Depois reemita a nota (a rejeitada antiga não se corrige sozinha).',
+      'Se já estava 2% e ainda falhou: faça deploy da correção do XML (Aliquota em percentual 2.00, não 0.02).',
+    ].join(' ');
+  }
+
   if (/L327|X327/i.test(raw)) {
     const optMatch = raw.match(/OptanteSimplesNacional\s*=\s*(\d)/i);
     const optInfo = optMatch

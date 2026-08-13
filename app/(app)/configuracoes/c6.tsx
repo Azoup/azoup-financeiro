@@ -100,8 +100,8 @@ export default function C6ConfigScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.lead}>
-        Credenciais sandbox do C6 já estão fixas no sistema. O CNPJ cobrador é o emitente 2 (empresa que emite
-        NFS-e). Certificados mTLS também já estão embutidos na API.
+        Integração C6 (sandbox): boleto registrado, Pix (cobrança com vencimento + copia e cola) e consulta de
+        transações/recebíveis. O CNPJ cobrador é o emitente 2. Credenciais e certificados mTLS já estão embutidos.
       </Text>
 
       <Text style={styles.sectionTitle}>CNPJ emitente (empresa 2)</Text>

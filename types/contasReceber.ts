@@ -80,6 +80,11 @@ export type BoletoParcelaVendaRow = {
   emitente_id: string | null;
   c6_boleto_id: string | null;
   c6_external_id: string | null;
+  pix_txid: string | null;
+  pix_copia_cola: string | null;
+  pix_location: string | null;
+  pix_status: string | null;
+  pix_criado_em: string | null;
   pdf_storage_path: string | null;
   pdf_url: string | null;
   mensagem_erro_registro: string | null;

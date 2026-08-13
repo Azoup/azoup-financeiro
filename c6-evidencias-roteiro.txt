@@ -1,0 +1,289 @@
+EVIDÊNCIAS C6 DEVELOPERS — ROTEIRO v3.0
+Ambiente: sandbox | Host: https://baas-api-sandbox.c6bank.info
+
+========== FORMULÁRIO INICIAL (cole no Word) ==========
+1. CNPJ / IDENTIFICADOR DA ORGANIZAÇÃO:
+   (use o CNPJ da conta PJ / emitente 2 no C6 — o sandbox retornou originator_id 000006738687)
+2. NOME DA EMPRESA CLIENTE / PARCEIRA:
+   (razão social da empresa no C6)
+3. NOME DO SOFTWARE:
+   SistemaJessica
+4. RESPONSÁVEL PELA EMPRESA:
+   (seu nome)
+5. E-MAIL:
+   (seu e-mail de contato com o C6)
+6. TELEFONE:
+   (seu telefone)
+
+APIs MARCADAS NO CHECKBOX:
+   [X] 1 AUTENTICAÇÃO
+   [ ] 2 AGENDAMENTO DE PAGAMENTOS
+   [X] 3 BOLETO
+   [ ] 4 CHECKOUT
+   [ ] 5 EXTRATO
+   [ ] 6 PIX
+   [ ] 7 TRANSAÇÕES E RECEBÍVEIS
+   [ ] 8 PIX AUTOMÁTICO
+   [ ] 9 BOLEPIX
+
+========== CREDENCIAIS SANDBOX USADAS ==========
+client_id: 3cbe1db9-ee03-4f3b-aae4-b0ea2e649cee
+client_secret: jHM5711Cz2O6RHVpD79QKlqyhJipDyGf
+pix_chave: 46bbfecb-540d-457d-abfd-7ef140886d3c
+billing_scheme: 21
+certificado: api/boleto/_lib/certs/sandbox-crt.txt
+chave: api/boleto/_lib/certs/sandbox-key.txt
+partner-software-name: SistemaJessica
+partner-software-version: 1.0.0
+
+========== COMO USAR ==========
+Em cada teste abaixo, copie APENAS as duas linhas marcadas:
+  >>> Status Code - Retornado
+  >>> Response Body - Retornado
+e cole nos campos correspondentes do Word.
+
+========================================================================
+AT_01 – GERAÇÃO DO TOKEN DE SESSÃO
+------------------------------------------------------------------------
+COMO PEGAR: POST /v1/auth | Content-Type application/x-www-form-urlencoded | body grant_type + client_id + client_secret | mTLS (.crt+.key)
+
+Request enviado (referência):
+{
+  "grant_type": "client_credentials",
+  "client_id": "3cbe1db9-ee03-4f3b-aae4-b0ea2e649cee",
+  "client_secret": "jHM5711Cz2O6RHVpD79QKlqyhJipDyGf"
+}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "access_token": "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",
+  "expires_in": 600,
+  "token_type": "Bearer",
+  "scope": "payloadlocationrec.write payloadlocationrec.read receivable.read checkout.read cobv.write schedulepayments.write cobr.read webhook.read pix.read bankslip.write v2.bankslip.write solicrec.write cobr.write solicrec.read statement.read lotecobv.write bankslip.read recpayload.read checkout.write payloadlocation.write v2.bankslip.pix.write schedulepayments.read lotecobv.read rec.read webhook.write cob.read v2.bankslip.read pix.write cob.write checkout.cancel cobv.read rec.write checkout.keys.read payloadlocation.read"
+}
+
+========================================================================
+B_01 – EMISSÃO DE BOLETO SIMPLES
+------------------------------------------------------------------------
+COMO PEGAR: POST /v1/bank_slips com external_reference_id (máx 10), amount, due_date, payer (address sem neighborhood; number numérico)
+
+Request enviado (referência):
+{
+  "external_reference_id": "T412160344",
+  "amount": 10.5,
+  "due_date": "2026-08-09",
+  "payer": {
+    "name": "Cliente Homologacao",
+    "tax_id": "52998224725",
+    "address": {
+      "street": "Rua Teste",
+      "number": 100,
+      "city": "Sao Paulo",
+      "state": "SP",
+      "zip_code": "01310100"
+    }
+  }
+}
+
+>>> Status Code - Retornado:
+201
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "amount": 10.5,
+  "due_date": "2026-08-09",
+  "originator_id": "000006738687",
+  "our_number": "10311879",
+  "billing_scheme": "21",
+  "billing_type": "3",
+  "id": "01KYSDQ73P7X60V9X1NKYWF8KC",
+  "bar_code": "33697153300000010500000067386870010311879213",
+  "digitable_line": "33690.00009   67386.870017   03118.792138   7   15330000001050"
+}
+
+========================================================================
+B_02 – EMISSÃO COM JUROS E MULTA
+------------------------------------------------------------------------
+COMO PEGAR: POST /v1/bank_slips + interest:{value:0.033} + fine:{value:2}
+
+Request enviado (referência):
+{
+  "external_reference_id": "T412164428",
+  "amount": 20,
+  "due_date": "2026-08-09",
+  "payer": {
+    "name": "Cliente Homologacao",
+    "tax_id": "52998224725",
+    "address": {
+      "street": "Rua Teste",
+      "number": 100,
+      "city": "Sao Paulo",
+      "state": "SP",
+      "zip_code": "01310100"
+    }
+  },
+  "interest": {
+    "value": 0.033
+  },
+  "fine": {
+    "value": 2
+  }
+}
+
+>>> Status Code - Retornado:
+201
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "amount": 20,
+  "due_date": "2026-08-09",
+  "originator_id": "000006738687",
+  "our_number": "10311880",
+  "billing_scheme": "21",
+  "billing_type": "3",
+  "id": "01KYSDQA4J8FTAAEMPH0PGW8EK",
+  "bar_code": "33695153300000020000000067386870010311880213",
+  "digitable_line": "33690.00009   67386.870017   03118.802135   5   15330000002000"
+}
+
+========================================================================
+B_03 – EMISSÃO COM DESCONTO
+------------------------------------------------------------------------
+COMO PEGAR: POST /v1/bank_slips + discount:{first:{value:1.5}}
+
+>>> Status Code - Retornado:
+201
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "amount": 30,
+  "due_date": "2026-08-09",
+  "originator_id": "000006738687",
+  "our_number": "10311881",
+  "billing_scheme": "21",
+  "billing_type": "3",
+  "id": "01KYSDQDMTZDYKVQ0S5XWFXSMY",
+  "bar_code": "33695153300000030000000067386870010311881213",
+  "digitable_line": "33690.00009   67386.870017   03118.812134   5   15330000003000"
+}
+
+========================================================================
+B_04 – ALTERAÇÃO DE DADOS DO BOLETO
+------------------------------------------------------------------------
+COMO PEGAR: PUT /v1/bank_slips/{id} body {"due_date":"AAAA-MM-DD"} — aguarde 1–2 min após emitir (CIP)
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "id": "01KYSDQA4J8FTAAEMPH0PGW8EK",
+  "external_reference_id": "T412164428",
+  "amount": 20,
+  "status": "CREATED",
+  "emission_date": "2026-07-30",
+  "due_date": "2026-08-19",
+  "instructions": [],
+  "internal_id": "10311880",
+  "digitable_line": "33690.00009   67386.870017   03118.802135   5   15330000002000",
+  "bar_code": "33695153300000020000000067386870010311880213",
+  "payer": {
+    "name": "CLIENTE HOMOLOGACAO",
+    "tax_id": "52998224725",
+    "address": {
+      "street": "RUA TESTE",
+      "number": 100,
+      "complement": "Sem complemento",
+      "city": "Sao Paulo",
+      "state": "SP",
+      "zip_code": "01310100"
+    }
+  },
+  "our_number": "10311880"
+}
+
+========================================================================
+B_05 – CONSULTA DE BOLETO
+------------------------------------------------------------------------
+COMO PEGAR: GET /v1/bank_slips/{id}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "amount": 20,
+  "due_date": "2026-08-19",
+  "originator_id": "000006738687",
+  "our_number": "10311880",
+  "billing_scheme": "21",
+  "billing_type": "3",
+  "id": "01KYSDQA4J8FTAAEMPH0PGW8EK",
+  "external_reference_id": "T412164428",
+  "status": "CREATED",
+  "emission_date": "2026-07-30",
+  "instructions": [],
+  "internal_id": "10311880",
+  "digitable_line": "33690.00009   67386.870017   03118.802135   5   15330000002000",
+  "bar_code": "33695153300000020000000067386870010311880213",
+  "payer": {
+    "name": "CLIENTE HOMOLOGACAO",
+    "tax_id": "52998224725",
+    "address": {
+      "street": "RUA TESTE",
+      "number": 100,
+      "complement": "Sem complemento",
+      "city": "Sao Paulo",
+      "state": "SP",
+      "zip_code": "01310100"
+    }
+  },
+  "base64_pdf_file": "(PDF base64 omitido — evidência em B_06)"
+}
+
+========================================================================
+B_06 – GERAÇÃO DO PDF DO BOLETO
+------------------------------------------------------------------------
+COMO PEGAR: GET /v1/bank_slips/{id}/pdf — no Postman: Save Response > Save to a file (.pdf)
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "content_type": "application/pdf",
+  "bytes": 13049,
+  "observacao": "HTTP 200 com Content-Type application/pdf. No body do roteiro: PDF gerado com sucesso (application/pdf)."
+}
+
+========================================================================
+B_07 – CADASTRO DO WEBHOOK
+------------------------------------------------------------------------
+COMO PEGAR: POST /v1/webhooks/ body {"url":"https://SEU-DOMINIO/api/boleto/webhook-sicoob?banco=c6","service":"BANK_SLIP"}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "service": "BANK_SLIP",
+  "url": "https://sistema-jessica.vercel.app/api/boleto/webhook-sicoob?banco=c6",
+  "client_id": "3cbe1db9-ee03-4f3b-aae4-b0ea2e649cee",
+  "created_at": "2026-07-30T11:50:52.528623368Z"
+}
+
+========================================================================
+B_08 – BAIXA/CANCELAMENTO
+------------------------------------------------------------------------
+COMO PEGAR: PUT /v1/bank_slips/{id}/cancel — se 400 CIP, espere e tente de novo
+
+>>> Status Code - Retornado:
+204
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "observacao": "HTTP 204 No Content (sem body) = sucesso"
+}

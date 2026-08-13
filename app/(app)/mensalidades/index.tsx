@@ -8,6 +8,9 @@ import { useAuth } from '@/context/AuthContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import { sincronizarCarnesMensalidadesFaltantes, fetchBoletosPorMensalidadeIds, fetchBoletoParcelaById } from '@/services/boletoParcelaService';
 import { abrirDocumentoBoleto } from '@/utils/openBoletoDocumento';
+import { reemitirBoletosC6 } from '@/services/c6BoletoService';
+import { pickEmitenteC6 } from '@/services/c6ConfigService';
+import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import type { BoletoParcelaVendaRow } from '@/types/contasReceber';
 import {
   fetchMensalidadesGeradasHistorico,
@@ -153,6 +156,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
     Record<string, BoletoParcelaVendaRow>
   >({});
   const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
+  const [c6BusyId, setC6BusyId] = useState<string | null>(null);
   const [pagina, setPagina] = useState(1);
   const [lotesExpandidos, setLotesExpandidos] = useState<Set<string>>(new Set());
 
@@ -279,11 +283,56 @@ export default function HistoricoMensalidadesGeradasScreen() {
     setPdfBusyId(mensalidadeId);
     try {
       const row = (await fetchBoletoParcelaById(user.id, boleto.id)) ?? boleto;
+      if (
+        row.tipo_emissao !== 'c6' &&
+        row.tipo_emissao !== 'sicoob' &&
+        row.status_registro === 'informativo'
+      ) {
+        showAppInfo(
+          'Este ainda é só um carnê interno.',
+          'Gere de novo escolhendo o CNPJ do C6, ou use “Registrar no C6”.',
+        );
+      }
+      if (row.status_registro === 'erro') {
+        showAppError(
+          row.mensagem_erro_registro ?? 'Falha ao registrar no banco.',
+          'Use “Registrar no C6” para tentar de novo.',
+        );
+      }
       await abrirDocumentoBoleto(row);
     } catch (e) {
       showAppError((e as Error).message);
     } finally {
       setPdfBusyId(null);
+    }
+  };
+
+  const registrarNoC6 = async (mensalidadeId: string) => {
+    if (!user?.id) return;
+    const boleto = boletosPorMensalidade[mensalidadeId];
+    if (!boleto) {
+      showAppInfo('Boleto não encontrado para registrar.');
+      return;
+    }
+    setC6BusyId(mensalidadeId);
+    try {
+      const list = await ensureEmitentes(user.id);
+      const emitente =
+        (boleto.emitente_id ? list.find((e) => e.id === boleto.emitente_id) : null) ??
+        pickEmitenteC6(list);
+      if (!emitente?.id) {
+        throw new Error('Cadastre o emitente 2 (CNPJ C6) em Configurações › NFS-e.');
+      }
+      await reemitirBoletosC6(user.id, emitente.id, [boleto.id]);
+      const map = await fetchBoletosPorMensalidadeIds(user.id, [mensalidadeId]);
+      setBoletosPorMensalidade((prev) => ({ ...prev, ...map }));
+      showAppSuccess('Boleto real registrado no C6.');
+      const updated = map[mensalidadeId];
+      if (updated) await abrirDocumentoBoleto(updated);
+    } catch (e) {
+      showAppError((e as Error).message);
+    } finally {
+      setC6BusyId(null);
     }
   };
 
@@ -464,6 +513,28 @@ export default function HistoricoMensalidadesGeradasScreen() {
               </Text>
             </Pressable>
           ) : null}
+          {(() => {
+            const b = boletosPorMensalidade[m.id];
+            if (!b) return null;
+            const precisaC6 =
+              b.status_registro === 'erro' ||
+              b.status_registro === 'informativo' ||
+              b.status_registro === 'pendente' ||
+              (b.tipo_emissao === 'c6' && !b.pdf_url && !b.linha_digitavel);
+            if (!precisaC6) return null;
+            return (
+              <Pressable
+                style={styles.btnSmC6}
+                onPress={() => void registrarNoC6(m.id)}
+                disabled={c6BusyId === m.id}
+              >
+                <Ionicons name="cloud-upload-outline" size={13} color={colors.white} />
+                <Text style={styles.btnSmPagoTxt} numberOfLines={1}>
+                  {c6BusyId === m.id ? 'Registrando…' : 'Registrar no C6'}
+                </Text>
+              </Pressable>
+            );
+          })()}
           {showPay ? (
             <Pressable style={styles.btnSmLancar} onPress={() => setRegistroPagamento(m)}>
               <Ionicons name="cash-outline" size={13} color={colors.white} />
@@ -960,6 +1031,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xs,
     borderRadius: radius.sm,
     minHeight: 30,
+  },
+  btnSmC6: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    backgroundColor: '#1a1a2e',
+    paddingVertical: 6,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.sm,
+    minHeight: 30,
+    borderWidth: 1,
+    borderColor: colors.orange,
   },
   btnSmPago: {
     flexDirection: 'row',

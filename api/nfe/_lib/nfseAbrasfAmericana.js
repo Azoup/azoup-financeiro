@@ -240,15 +240,16 @@ function buildEnviarLoteRpsSincronoXml({
   const vPis = money2((valorNum * aliqPis) / 100);
   const vCofins = money2((valorNum * aliqCofins) / 100);
   const vIss = money2((valorNum * aliqIss) / 100);
-  // TipLan exemplo Normal: 5% → Aliquota 0.05 (fração).
-  const aliquotaIssFrac = (aliqIss / 100).toFixed(4);
+  // TipLan/ABRASF Americana: Aliquota em percentual (2% → 2.00), NÃO fração 0.02.
+  // L928: para serviço 01.05 a alíquota deve ficar entre 2,00% e 5,00%.
+  const aliquotaIssXml = Number(aliqIss).toFixed(2);
   const valoresXml = naoOptante
     ? `<Valores>` +
       `<ValorServicos>${valor}</ValorServicos>` +
       `<ValorPis>${vPis}</ValorPis>` +
       `<ValorCofins>${vCofins}</ValorCofins>` +
       `<ValorIss>${vIss}</ValorIss>` +
-      `<Aliquota>${aliquotaIssFrac}</Aliquota>` +
+      `<Aliquota>${aliquotaIssXml}</Aliquota>` +
       (incluirSitPis
         ? `<SituacaoTributariaPISCOFINS>${escapeXml(situacaoPisEnvio)}</SituacaoTributariaPISCOFINS>`
         : '') +

@@ -12,6 +12,9 @@ import {
   sincronizarCarnesMensalidadesFaltantes,
   sincronizarCarnesVendasFaltantes,
 } from '@/services/boletoParcelaService';
+import { reemitirBoletosC6 } from '@/services/c6BoletoService';
+import { pickEmitenteC6 } from '@/services/c6ConfigService';
+import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import {
   fetchMensalidadeGeradaById,
   registrarPagamentoMensalidadeGerada,
@@ -126,6 +129,7 @@ export default function ContasReceberScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [pdfId, setPdfId] = useState<string | null>(null);
+  const [c6BusyId, setC6BusyId] = useState<string | null>(null);
   const [nomeBeneficiario, setNomeBeneficiario] = useState<string | null>(null);
   const [acoesItem, setAcoesItem] = useState<ContaReceberListRow | null>(null);
   const [payMensalidade, setPayMensalidade] = useState<MensalidadeGerada | null>(null);
@@ -346,6 +350,31 @@ export default function ContasReceberScreen() {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setPdfId(null);
+    }
+  };
+
+  const registrarNoC6 = async (boletoId: string) => {
+    if (!user?.id) return;
+    setC6BusyId(boletoId);
+    try {
+      const row = await fetchBoletoParcelaById(user.id, boletoId);
+      if (!row) throw new Error('Boleto não encontrado.');
+      const list = await ensureEmitentes(user.id);
+      const emitente =
+        (row.emitente_id ? list.find((e) => e.id === row.emitente_id) : null) ??
+        pickEmitenteC6(list);
+      if (!emitente?.id) {
+        throw new Error('Cadastre o emitente 2 (CNPJ C6) em Configurações › NFS-e.');
+      }
+      await reemitirBoletosC6(user.id, emitente.id, [boletoId]);
+      await refreshLista();
+      Toast.show({ type: 'success', text1: 'Boleto real registrado no C6.' });
+      const updated = await fetchBoletoParcelaById(user.id, boletoId);
+      if (updated) await abrirDocumentoBoleto(updated);
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setC6BusyId(null);
     }
   };
 
@@ -792,6 +821,9 @@ export default function ContasReceberScreen() {
         onPdf={() => {
           if (acoesItem) void abrirPdf(acoesItem.id);
         }}
+        onRegistrarC6={() => {
+          if (acoesItem) void registrarNoC6(acoesItem.id);
+        }}
         onWhatsApp={() => {
           if (acoesItem) enviarWhatsApp(acoesItem);
         }}
@@ -799,6 +831,7 @@ export default function ContasReceberScreen() {
         temNota={Boolean(acoesItem?.nota_fiscal_id)}
         nfBusy={nfBusy}
         pdfBusy={acoesItem != null && pdfId === acoesItem.id}
+        c6Busy={acoesItem != null && c6BusyId === acoesItem.id}
       />
 
       <MarcarPagamentoMensalidadeGeradaModal

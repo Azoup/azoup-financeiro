@@ -57,12 +57,24 @@ async function openExternalUrl(url: string): Promise<void> {
 /**
  * Abre PDF oficial do banco ou carnê HTML.
  * No web, NÃO usa Print.printToFileAsync (imprime a tela do app).
+ * Boleto C6 sem registro: não abre carnê HTML (não é boleto bancário pagável).
  */
 export async function abrirDocumentoBoleto(row: BoletoParcelaVendaRow): Promise<void> {
   const pdfUrl = await resolveBoletoPdfUrl(row);
   if (pdfUrl) {
     await openExternalUrl(pdfUrl);
     return;
+  }
+
+  if (row.tipo_emissao === 'c6') {
+    if (row.linha_digitavel && row.status_registro === 'registrado') {
+      // PDF ainda não disponível no CIP — mostra carnê com linha digitável real
+    } else {
+      throw new Error(
+        row.mensagem_erro_registro?.trim() ||
+          'Boleto C6 ainda não registrado no banco. Use “Registrar no C6” para gerar o boleto real (PDF/linha digitável).',
+      );
+    }
   }
 
   const html = buildBoletoCobrancaHtml(row);

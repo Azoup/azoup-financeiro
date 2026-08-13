@@ -45,7 +45,13 @@ export function formatWhatsAppDisplay(raw: string): string {
 export function buildMensagemCobrancaWhatsapp(
   row: Pick<
     ContaReceberListRow,
-    'nome_cliente' | 'referencia_label' | 'valor_documento' | 'data_vencimento' | 'numero_documento'
+    | 'nome_cliente'
+    | 'referencia_label'
+    | 'valor_documento'
+    | 'data_vencimento'
+    | 'numero_documento'
+    | 'linha_digitavel'
+    | 'pix_copia_cola'
   >,
   opts?: { nomeBeneficiario?: string; incluirTelefone?: boolean },
 ): string {
@@ -65,6 +71,8 @@ export function buildMensagemCobrancaWhatsapp(
     `• Valor: *${formatBRL(row.valor_documento)}*`,
     `• Vencimento: *${venc}*`,
     row.numero_documento ? `• Documento: ${row.numero_documento}` : null,
+    row.linha_digitavel ? `\n*Linha digitável do boleto:*\n${row.linha_digitavel}` : null,
+    row.pix_copia_cola ? `\n*Pix Copia e Cola:*\n${row.pix_copia_cola}` : null,
     '',
     'Por favor, confirme o pagamento ou entre em contato em caso de dúvidas.',
     'Obrigado!',

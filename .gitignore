@@ -18,9 +18,12 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
-# C6 sandbox certs (API)
+# C6 sandbox certs (API) — incluir no deploy Vercel
 !api/boleto/_lib/certs/
 !api/boleto/_lib/certs/**
+!api/boleto/_lib/certs/*.txt
+!api/boleto/_lib/certs/*.crt
+!api/boleto/_lib/certs/*.key
 
 # Metro
 .metro-health-check*

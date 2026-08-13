@@ -360,17 +360,18 @@ export async function gerarBoletosParaMensalidades(
 
   const boletoIds = ((inserted ?? []) as { id: string }[]).map((r) => r.id);
   if (boletoIds.length) {
-    try {
-      if (banco === 'c6' && emitente?.id) {
-        await emitirBoletosC6Lote(userId, emitente.id, boletoIds);
-      } else {
+    if (banco === 'c6' && emitente?.id) {
+      // C6: falha = erro real (não deixa carnê HTML fingindo boleto bancário)
+      await emitirBoletosC6Lote(userId, emitente.id, boletoIds);
+    } else {
+      try {
         await emitirBoletosSicoobLote(userId, boletoIds);
+      } catch (e) {
+        const msg =
+          (e as Error).message ??
+          'Carnê informativo criado em A receber; registro bancário Sicoob não concluído.';
+        return { avisoSicoob: msg, avisoBoleto: msg };
       }
-    } catch (e) {
-      const msg =
-        (e as Error).message ??
-        `Carnê informativo criado em A receber; registro bancário ${banco === 'c6' ? 'C6' : 'Sicoob'} não concluído.`;
-      return { avisoSicoob: msg, avisoBoleto: msg };
     }
   }
   return {};
