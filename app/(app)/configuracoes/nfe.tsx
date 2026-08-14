@@ -701,8 +701,8 @@ export default function NfeConfigScreen() {
           <Card style={styles.card}>
             <Text style={styles.h}>4. Regime tributário</Text>
             <Text style={styles.sub}>
-              No Regime Normal escolha Lucro Presumido ou Lucro Real e preencha IE, CNAE, ISS e
-              PIS/COFINS — necessários para a NFS-e do 2º CNPJ.
+              No Regime Normal escolha Lucro Presumido ou Lucro Real e preencha IE, CNAE e ISS.
+              PIS/COFINS/CSLL são tratados como não retidos pelo tomador.
             </Text>
             <NfseEnumField
               label="Regime do emitente (CRT)"
@@ -780,7 +780,7 @@ export default function NfeConfigScreen() {
                 />
                 <NfseEnumField
                   label="Situação tributária PIS/COFINS (NFS-e)"
-                  hint="Regime Normal: use 01 (alíquota básica). Evite 00 — a TipLan pode rejeitar no schema (X160)."
+                  hint="Regime Normal: 01 indica apuração própria. O XML não envia valores de PIS/COFINS/CSLL como retenção."
                   value={form.situacaoPisCofins}
                   options={SITUACAO_PIS_COFINS_OPCOES}
                   showValuePrefix={false}
@@ -797,7 +797,7 @@ export default function NfeConfigScreen() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <FormTextInput
-                      label="Alíquota PIS (%)"
+                      label="PIS apuração própria (%) — não retido"
                       value={form.aliquotaPis}
                       onChangeText={(t) => patch({ aliquotaPis: t })}
                       keyboardType="decimal-pad"
@@ -805,7 +805,7 @@ export default function NfeConfigScreen() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <FormTextInput
-                      label="Alíquota COFINS (%)"
+                      label="COFINS apuração própria (%) — não retido"
                       value={form.aliquotaCofins}
                       onChangeText={(t) => patch({ aliquotaCofins: t })}
                       keyboardType="decimal-pad"

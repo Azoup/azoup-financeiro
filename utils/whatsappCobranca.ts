@@ -50,6 +50,7 @@ export function buildMensagemCobrancaWhatsapp(
     | 'valor_documento'
     | 'data_vencimento'
     | 'numero_documento'
+    | 'whatsapp'
     | 'linha_digitavel'
     | 'pix_copia_cola'
   >,

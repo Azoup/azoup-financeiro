@@ -233,12 +233,10 @@ function buildEnviarLoteRpsSincronoXml({
     .slice(0, 2);
   const situacaoPisEnvio = situacaoPisCofins === '00' && naoOptante ? '01' : situacaoPisCofins;
   const incluirSitPis = situacaoPisEnvio !== '00';
-  // Regime Normal: informar PIS/COFINS/ISS (ex. consulta InfNfse). Simples: sem ValorIss (A14 TipLan).
+  // Regime Normal: PIS/COFINS são apuração própria e NÃO retenções do tomador.
+  // No ABRASF, ValorPis/ValorCofins/ValorCsll compõem as retenções/deduções da nota;
+  // portanto não os enviamos. A situação tributária identifica a apuração própria.
   const aliqIss = Math.max(0, Number(config.aliquota_iss ?? 0) || 0);
-  const aliqPis = Math.max(0, Number(config.aliquota_pis ?? 0) || 0);
-  const aliqCofins = Math.max(0, Number(config.aliquota_cofins ?? 0) || 0);
-  const vPis = money2((valorNum * aliqPis) / 100);
-  const vCofins = money2((valorNum * aliqCofins) / 100);
   const vIss = money2((valorNum * aliqIss) / 100);
   // TipLan/ABRASF Americana: Aliquota em percentual (2% → 2.00), NÃO fração 0.02.
   // L928: para serviço 01.05 a alíquota deve ficar entre 2,00% e 5,00%.
@@ -246,8 +244,6 @@ function buildEnviarLoteRpsSincronoXml({
   const valoresXml = naoOptante
     ? `<Valores>` +
       `<ValorServicos>${valor}</ValorServicos>` +
-      `<ValorPis>${vPis}</ValorPis>` +
-      `<ValorCofins>${vCofins}</ValorCofins>` +
       `<ValorIss>${vIss}</ValorIss>` +
       `<Aliquota>${aliquotaIssXml}</Aliquota>` +
       (incluirSitPis
