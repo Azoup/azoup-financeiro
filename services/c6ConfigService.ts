@@ -1,6 +1,10 @@
 import { supabase } from '@/lib/supabase';
 import type { C6Config, C6ConfigInput } from '@/types/c6';
-import { C6_SANDBOX_DEFAULTS } from '@/services/c6SandboxDefaults';
+import {
+  C6_SANDBOX_DEFAULTS,
+  isC6CobradorCnpj,
+  onlyDigitsCnpj,
+} from '@/services/c6SandboxDefaults';
 import * as DocumentPicker from 'expo-document-picker';
 import { Platform } from 'react-native';
 
@@ -168,13 +172,18 @@ export async function uploadC6CertPair(
   return { cert_crt_storage_path: crtPath, cert_key_storage_path: keyPath };
 }
 
-/** Preferência: emitente 2 (não padrão) = C6. */
-export function pickEmitenteC6<T extends { id: string; padrao: boolean; banco_cobranca?: string }>(
-  list: T[],
-): T | null {
+/**
+ * Preferência C6: CNPJ 05.320.214/0001-69 (cadastrado no portal C6),
+ * depois banco_cobranca=c6, depois fallback legado.
+ */
+export function pickEmitenteC6<
+  T extends { id: string; padrao: boolean; banco_cobranca?: string; documento?: string },
+>(list: T[]): T | null {
   if (!list.length) return null;
   return (
+    list.find((e) => isC6CobradorCnpj(e.documento)) ??
     list.find((e) => e.banco_cobranca === 'c6') ??
+    list.find((e) => onlyDigitsCnpj(e.documento).length === 14 && e.banco_cobranca === 'c6') ??
     list.find((e) => !e.padrao) ??
     (list.length > 1 ? list[1] : null) ??
     null

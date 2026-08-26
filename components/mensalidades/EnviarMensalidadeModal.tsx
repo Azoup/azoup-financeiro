@@ -1,5 +1,6 @@
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
+import { pickEmitenteC6 } from '@/services/c6ConfigService';
 import { emitenteLabel, ensureEmitentes } from '@/services/nfseEmitenteService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { NfseEmitente } from '@/types/notaFiscal';
@@ -38,8 +39,8 @@ export function EnviarMensalidadeModal({
         if (cancelled) return;
         setEmitentes(list);
         const preferred =
+          pickEmitenteC6(list) ??
           list.find((e) => e.banco_cobranca === 'c6') ??
-          list.find((e) => !e.padrao) ??
           list.find((e) => e.padrao) ??
           list[0];
         setSelectedId(preferred?.id ?? null);

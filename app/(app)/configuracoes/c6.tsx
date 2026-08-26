@@ -1,7 +1,7 @@
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
 import { ensureC6Config, pickEmitenteC6, upsertC6Config } from '@/services/c6ConfigService';
-import { C6_SANDBOX_DEFAULTS } from '@/services/c6SandboxDefaults';
+import { C6_CNPJ_COBRADOR, C6_SANDBOX_DEFAULTS } from '@/services/c6SandboxDefaults';
 import { emitenteLabel, ensureEmitentes, updateEmitenteBancoCobranca } from '@/services/nfseEmitenteService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { NfseEmitente } from '@/types/notaFiscal';
@@ -9,6 +9,12 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Toast from 'react-native-toast-message';
+
+function formatCnpj(digits: string) {
+  const d = digits.replace(/\D/g, '');
+  if (d.length !== 14) return digits;
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+}
 
 export default function C6ConfigScreen() {
   const { user } = useAuth();
@@ -26,6 +32,8 @@ export default function C6ConfigScreen() {
     const base = process.env.EXPO_PUBLIC_NFE_API_URL ?? '';
     return base ? `${base}/api/boleto/webhook-sicoob?banco=c6` : '/api/boleto/webhook-sicoob?banco=c6';
   }, []);
+
+  const cnpjFmt = formatCnpj(C6_CNPJ_COBRADOR);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -69,7 +77,7 @@ export default function C6ConfigScreen() {
         webhook_token: null,
       });
       await updateEmitenteBancoCobranca(user.id, emitente.id, 'c6');
-      Toast.show({ type: 'success', text1: 'C6 ativo no emitente 2 (sandbox).' });
+      Toast.show({ type: 'success', text1: `C6 ativo no CNPJ ${cnpjFmt} (sandbox).` });
       router.back();
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
@@ -90,7 +98,7 @@ export default function C6ConfigScreen() {
     return (
       <View style={styles.center}>
         <Text style={styles.lead}>
-          Cadastre o 2º CNPJ (emitente) em Configurações › NFS-e. O C6 usa esse cadastro automaticamente.
+          Cadastre o CNPJ {cnpjFmt} como emitente em Configurações › NFS-e. Esse é o CNPJ liberado no C6.
         </Text>
         <PrimaryButton title="Voltar" variant="ghost" onPress={() => router.back()} />
       </View>
@@ -100,16 +108,15 @@ export default function C6ConfigScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.lead}>
-        Integração C6 (sandbox): boleto registrado, Pix (cobrança com vencimento + copia e cola) e consulta de
-        transações/recebíveis. O CNPJ cobrador é o emitente 2. Credenciais e certificados mTLS já estão embutidos.
+        Integração C6 (sandbox): boleto registrado, Pix e consulta de transações/recebíveis. CNPJ cobrador
+        liberado no portal: {cnpjFmt}. Credenciais e certificados mTLS já estão embutidos.
       </Text>
 
-      <Text style={styles.sectionTitle}>CNPJ emitente (empresa 2)</Text>
+      <Text style={styles.sectionTitle}>CNPJ cobrador C6</Text>
       <View style={styles.box}>
         <Text style={styles.boxValue}>{emitenteLabel(emitente)}</Text>
-        {emitentes.length < 2 ? (
-          <Text style={styles.warn}>Só há 1 emitente. Cadastre o 2º CNPJ na NFS-e para usar o C6.</Text>
-        ) : null}
+        <Text style={styles.boxLabel}>Esperado no portal C6</Text>
+        <Text style={styles.boxValue}>{cnpjFmt}</Text>
       </View>
 
       <Text style={styles.sectionTitle}>Credenciais sandbox (fixas)</Text>

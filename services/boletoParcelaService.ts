@@ -220,7 +220,7 @@ async function resolveEmitenteCobranca(
       const found = list.find((e) => e.id === emitenteId);
       if (found) return found;
     }
-    // Sem seleção: C6 = emitente 2; senão o padrão (Sicoob).
+    // Sem seleção: CNPJ C6 (05.320.214/0001-69); senão o padrão (Sicoob).
     return pickEmitenteC6(list) ?? list.find((e) => e.padrao) ?? list[0] ?? null;
   } catch {
     return null;

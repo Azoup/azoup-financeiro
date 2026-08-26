@@ -364,7 +364,7 @@ export default function ContasReceberScreen() {
         (row.emitente_id ? list.find((e) => e.id === row.emitente_id) : null) ??
         pickEmitenteC6(list);
       if (!emitente?.id) {
-        throw new Error('Cadastre o emitente 2 (CNPJ C6) em Configurações › NFS-e.');
+        throw new Error('Cadastre o CNPJ 05.320.214/0001-69 (C6) em Configurações › NFS-e.');
       }
       await reemitirBoletosC6(user.id, emitente.id, [boletoId]);
       await refreshLista();

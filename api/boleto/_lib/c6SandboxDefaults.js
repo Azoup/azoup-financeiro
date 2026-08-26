@@ -3,8 +3,10 @@ const fs = require('fs');
 
 /**
  * Credenciais sandbox C6 Developers (homologação).
- * CNPJ cobrador = emitente 2 (não padrão) da NFS-e.
+ * CNPJ cobrador configurado no portal C6: 05.320.214/0001-69
  */
+const C6_CNPJ_COBRADOR = '05320214000169';
+
 const C6_SANDBOX = {
   client_id: '3cbe1db9-ee03-4f3b-aae4-b0ea2e649cee',
   client_secret: 'jHM5711Cz2O6RHVpD79QKlqyhJipDyGf',
@@ -38,4 +40,4 @@ function bundledCertPaths() {
   );
 }
 
-module.exports = { C6_SANDBOX, bundledCertPaths };
+module.exports = { C6_SANDBOX, C6_CNPJ_COBRADOR, bundledCertPaths };
