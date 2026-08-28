@@ -1,9 +1,12 @@
 const {
+  assertC6Amount,
   buildC6Payload,
+  C6_AMOUNT_MIN,
   cleanupTemp,
   consultarBoletoC6Api,
   criarPixCobvC6Api,
   emitirBoletoC6Api,
+  normalizeC6Amount,
   obterPdfBoletoC6Api,
 } = require('./c6Client');
 const { loadC6Credentials } = require('./c6Credentials');
@@ -22,6 +25,46 @@ async function resolveClienteId(admin, boleto) {
     return data?.cliente_id ?? null;
   }
   return null;
+}
+
+/** Valor do boleto: usa valor_documento ou busca na mensalidade/parcela vinculada. */
+async function resolveValorDocumentoC6(admin, boleto) {
+  const direto = normalizeC6Amount(boleto.valor_documento);
+  if (Number.isFinite(direto) && direto >= C6_AMOUNT_MIN) {
+    return assertC6Amount(direto);
+  }
+
+  if (boleto.mensalidade_id) {
+    const { data } = await admin
+      .from('mensalidades')
+      .select('valor')
+      .eq('id', boleto.mensalidade_id)
+      .maybeSingle();
+    const v = normalizeC6Amount(data?.valor);
+    if (Number.isFinite(v) && v >= C6_AMOUNT_MIN) {
+      return assertC6Amount(v);
+    }
+  }
+
+  if (boleto.parcela_id) {
+    const { data } = await admin
+      .from('parcelas_venda')
+      .select('valor')
+      .eq('id', boleto.parcela_id)
+      .maybeSingle();
+    const v = normalizeC6Amount(data?.valor);
+    if (Number.isFinite(v) && v >= C6_AMOUNT_MIN) {
+      return assertC6Amount(v);
+    }
+  }
+
+  if (Number.isFinite(direto) && direto > 0) {
+    return assertC6Amount(direto);
+  }
+
+  throw new Error(
+    'Valor do boleto inválido ou abaixo do mínimo C6 (R$ 5,00). Confira a mensalidade/parcela vinculada.',
+  );
 }
 
 async function baixarESalvarPdfC6(admin, userId, boletoId, creds, c6Id, consultaRaw) {
@@ -115,6 +158,15 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint) {
   const { data: cliente, error: cliErr } = await admin.from('clientes').select('*').eq('id', clienteId).single();
   if (cliErr || !cliente) throw new Error(cliErr?.message ?? 'Cliente não encontrado.');
 
+  const valorDocumento = await resolveValorDocumentoC6(admin, boleto);
+  const boletoComValor = { ...boleto, valor_documento: valorDocumento };
+  if (normalizeC6Amount(boleto.valor_documento) !== valorDocumento) {
+    await admin
+      .from('boletos_parcela_venda')
+      .update({ valor_documento: valorDocumento })
+      .eq('id', boletoId);
+  }
+
   await admin
     .from('boletos_parcela_venda')
     .update({
@@ -148,7 +200,7 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint) {
       };
       payload = { external_reference_id: boleto.c6_external_id };
     } else {
-      payload = buildC6Payload({ boleto, config: creds.config, cliente });
+      payload = buildC6Payload({ boleto: boletoComValor, config: creds.config, cliente });
       let lastErr = null;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
@@ -241,7 +293,7 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint) {
         config: creds.config,
         certPath: creds.certPath,
         keyPath: creds.keyPath,
-        valor: boleto.valor_documento,
+        valor: valorDocumento,
         dataVencimento: boleto.data_vencimento,
         cliente,
         solicitacao: `Doc ${boleto.numero_documento || boletoId}`.slice(0, 140),

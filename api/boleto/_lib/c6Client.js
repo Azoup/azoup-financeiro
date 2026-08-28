@@ -120,6 +120,58 @@ function splitInstrucoes(instrucoes) {
     .slice(0, 4);
 }
 
+/** C6: amount em reais (ex.: 150.50), mín. R$ 5,00, máx. R$ 500.000,00. */
+const C6_AMOUNT_MIN = 5;
+const C6_AMOUNT_MAX = 500000;
+
+function normalizeC6Amount(raw) {
+  if (raw == null || raw === '') return NaN;
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) ? Math.round(raw * 100) / 100 : NaN;
+  }
+  let s = String(raw).trim();
+  if (!s) return NaN;
+  if (/^R\$\s*/i.test(s)) s = s.replace(/^R\$\s*/i, '').trim();
+  if (/^\d{1,3}(\.\d{3})*,\d{1,2}$/.test(s) || /^\d+,\d{1,2}$/.test(s)) {
+    s = s.replace(/\./g, '').replace(',', '.');
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : NaN;
+}
+
+function assertC6Amount(amount) {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error(
+      'Valor do boleto inválido ou zerado. Confira o valor da mensalidade/parcela antes de registrar no C6.',
+    );
+  }
+  if (amount < C6_AMOUNT_MIN) {
+    throw new Error(
+      `O C6 Bank exige valor mínimo de R$ 5,00 por boleto. Valor informado: R$ ${amount.toFixed(2).replace('.', ',')}.`,
+    );
+  }
+  if (amount > C6_AMOUNT_MAX) {
+    throw new Error(`Valor máximo do boleto C6: R$ ${C6_AMOUNT_MAX.toFixed(2).replace('.', ',')}.`);
+  }
+  return amount;
+}
+
+function resolveC6AmountFromBoleto(boleto) {
+  return assertC6Amount(normalizeC6Amount(boleto?.valor_documento));
+}
+
+function extractC6ApiError(res) {
+  const j = res.json;
+  if (j?.detail && typeof j.detail === 'string') return j.detail;
+  if (j?.title && j?.detail) return `${j.title} ${j.detail}`;
+  if (j?.message) return j.message;
+  if (j?.error_description) return j.error_description;
+  if (j?.error) return typeof j.error === 'string' ? j.error : JSON.stringify(j.error);
+  if (Array.isArray(j?.errors)) return JSON.stringify(j.errors);
+  if (typeof j === 'string') return j;
+  return res.raw ?? `C6 rejeitou a requisição (${res.status}).`;
+}
+
 function parseAddressNumber(raw) {
   const digits = onlyDigits(raw);
   if (digits) {
@@ -142,7 +194,8 @@ function buildC6Payload({ boleto, config, cliente }) {
 
   const name = (cliente.nome_fantasia ?? cliente.nome ?? cliente.razao_social ?? 'Pagador').trim();
   const street = (cliente.logradouro ?? 'Nao informado').trim() || 'Nao informado';
-  const city = (cliente.cidade ?? 'Nao informado').trim() || 'Nao informado';
+  let city = (cliente.cidade ?? 'Nao informado').trim() || 'Nao informado';
+  if (city.length < 3) city = 'Nao informado';
   const state = String(cliente.uf ?? cliente.estado ?? 'SP')
     .trim()
     .toUpperCase()
@@ -177,7 +230,7 @@ function buildC6Payload({ boleto, config, cliente }) {
 
   const payload = {
     external_reference_id: externalId,
-    amount: Number(Number(boleto.valor_documento).toFixed(2)),
+    amount: resolveC6AmountFromBoleto(boleto),
     due_date: String(boleto.data_vencimento).slice(0, 10),
     instructions,
     billing_scheme: String(billing),
@@ -262,14 +315,7 @@ async function emitirBoletoC6Api({ config, certPath, keyPath, payload }) {
   });
 
   if (res.status < 200 || res.status >= 300) {
-    const msg =
-      res.json?.message ??
-      res.json?.error_description ??
-      res.json?.error ??
-      (Array.isArray(res.json?.errors) ? JSON.stringify(res.json.errors) : null) ??
-      res.raw ??
-      `C6 rejeitou a emissão (${res.status}).`;
-    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    throw new Error(extractC6ApiError(res));
   }
 
   return extractC6BoletoResponse(res.json);
@@ -538,7 +584,10 @@ async function listarTransacoesC6Api({ config, certPath, keyPath, startDate, end
 
 module.exports = {
   apiBaseUrl,
+  assertC6Amount,
   buildC6Payload,
+  C6_AMOUNT_MIN,
+  C6_AMOUNT_MAX,
   cleanupTemp,
   consultarBoletoC6Api,
   consultarPixC6Api,
@@ -547,6 +596,7 @@ module.exports = {
   criarPixCobvC6Api,
   downloadC6FileToTemp,
   emitirBoletoC6Api,
+  extractC6ApiError,
   extractC6DataPagamento,
   extractC6ValorPago,
   getC6AccessToken,
@@ -554,6 +604,7 @@ module.exports = {
   listarRecebiveisC6Api,
   listarTransacoesC6Api,
   makePixTxid,
+  normalizeC6Amount,
   obterPdfBoletoC6Api,
   onlyDigits,
   revisarPixCobC6Api,
