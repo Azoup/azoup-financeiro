@@ -1,7 +1,13 @@
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
-import { ensureC6Config, pickEmitenteC6, upsertC6Config } from '@/services/c6ConfigService';
-import { C6_CNPJ_COBRADOR, C6_SANDBOX_DEFAULTS } from '@/services/c6SandboxDefaults';
+import {
+  ensureC6Config,
+  pickC6CertFile,
+  pickEmitenteC6,
+  uploadC6CertPair,
+  upsertC6Config,
+} from '@/services/c6ConfigService';
+import { C6_ACTIVE_DEFAULTS, C6_CNPJ_COBRADOR } from '@/services/c6SandboxDefaults';
 import { emitenteLabel, ensureEmitentes, updateEmitenteBancoCobranca } from '@/services/nfseEmitenteService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { NfseEmitente } from '@/types/notaFiscal';
@@ -23,7 +29,9 @@ export default function C6ConfigScreen() {
   const [emitente, setEmitente] = useState<NfseEmitente | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingCert, setUploadingCert] = useState(false);
   const [ativo, setAtivo] = useState(true);
+  const [temCertUpload, setTemCertUpload] = useState(false);
 
   const webhookUrl = useMemo(() => {
     if (typeof window !== 'undefined' && window.location?.origin) {
@@ -49,6 +57,7 @@ export default function C6ConfigScreen() {
       setEmitente(preferred);
       const cfg = await ensureC6Config(user.id, preferred.id);
       setAtivo(cfg.ativo !== false);
+      setTemCertUpload(Boolean(cfg.cert_crt_storage_path && cfg.cert_key_storage_path));
       if (preferred.banco_cobranca !== 'c6') {
         await updateEmitenteBancoCobranca(user.id, preferred.id, 'c6').catch(() => undefined);
       }
@@ -70,19 +79,51 @@ export default function C6ConfigScreen() {
       await upsertC6Config(user.id, {
         emitente_id: emitente.id,
         ativo,
-        ambiente: C6_SANDBOX_DEFAULTS.ambiente,
-        client_id: C6_SANDBOX_DEFAULTS.client_id,
-        client_secret: C6_SANDBOX_DEFAULTS.client_secret,
-        billing_scheme: C6_SANDBOX_DEFAULTS.billing_scheme,
+        ambiente: C6_ACTIVE_DEFAULTS.ambiente,
+        client_id: C6_ACTIVE_DEFAULTS.client_id,
+        client_secret: C6_ACTIVE_DEFAULTS.client_secret,
+        billing_scheme: C6_ACTIVE_DEFAULTS.billing_scheme,
         webhook_token: null,
       });
       await updateEmitenteBancoCobranca(user.id, emitente.id, 'c6');
-      Toast.show({ type: 'success', text1: `C6 ativo no CNPJ ${cnpjFmt} (sandbox).` });
+      Toast.show({ type: 'success', text1: `C6 PRODUÇÃO ativo no CNPJ ${cnpjFmt}.` });
       router.back();
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const uploadCerts = async () => {
+    if (!user?.id || !emitente) return;
+    try {
+      const crt = await pickC6CertFile('crt');
+      if (!crt) return;
+      const key = await pickC6CertFile('key');
+      if (!key) {
+        Toast.show({ type: 'info', text1: 'Selecione também o arquivo da chave (.key).' });
+        return;
+      }
+      setUploadingCert(true);
+      const paths = await uploadC6CertPair(user.id, emitente.id, crt, key);
+      await upsertC6Config(user.id, {
+        emitente_id: emitente.id,
+        ativo: true,
+        ambiente: C6_ACTIVE_DEFAULTS.ambiente,
+        client_id: C6_ACTIVE_DEFAULTS.client_id,
+        client_secret: C6_ACTIVE_DEFAULTS.client_secret,
+        billing_scheme: C6_ACTIVE_DEFAULTS.billing_scheme,
+        webhook_token: null,
+        cert_crt_storage_path: paths.cert_crt_storage_path,
+        cert_key_storage_path: paths.cert_key_storage_path,
+      });
+      setTemCertUpload(true);
+      Toast.show({ type: 'success', text1: 'Certificados mTLS de produção enviados.' });
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setUploadingCert(false);
     }
   };
 
@@ -108,8 +149,8 @@ export default function C6ConfigScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.lead}>
-        Integração C6 (sandbox): boleto registrado, Pix e consulta de transações/recebíveis. CNPJ cobrador
-        liberado no portal: {cnpjFmt}. Credenciais e certificados mTLS já estão embutidos.
+        Integração C6 em PRODUÇÃO: boletos entram na base centralizada (CIP) e podem ser pagos em qualquer
+        banco. CNPJ cobrador: {cnpjFmt}.
       </Text>
 
       <Text style={styles.sectionTitle}>CNPJ cobrador C6</Text>
@@ -119,25 +160,38 @@ export default function C6ConfigScreen() {
         <Text style={styles.boxValue}>{cnpjFmt}</Text>
       </View>
 
-      <Text style={styles.sectionTitle}>Credenciais sandbox (fixas)</Text>
+      <Text style={styles.sectionTitle}>Credenciais produção</Text>
       <View style={styles.box}>
         <Text style={styles.boxLabel}>Client ID</Text>
         <Text selectable style={styles.boxValue}>
-          {C6_SANDBOX_DEFAULTS.client_id}
+          {C6_ACTIVE_DEFAULTS.client_id}
         </Text>
         <Text style={styles.boxLabel}>Client Secret</Text>
-        <Text selectable style={styles.boxValue}>
-          {C6_SANDBOX_DEFAULTS.client_secret}
-        </Text>
-        <Text style={styles.boxLabel}>Chave PIX</Text>
-        <Text selectable style={styles.boxValue}>
-          {C6_SANDBOX_DEFAULTS.pix_chave}
-        </Text>
+        <Text style={styles.boxValue}>•••••••• (configurado)</Text>
         <Text style={styles.boxLabel}>Ambiente</Text>
-        <Text style={styles.boxValue}>Sandbox · billing scheme 21</Text>
-        <Text style={styles.boxLabel}>Certificados</Text>
-        <Text style={styles.boxValue}>sandbox.crt + sandbox.key (API)</Text>
+        <Text style={styles.boxValue}>Produção · billing scheme 15</Text>
+        <Text style={styles.boxLabel}>Certificados mTLS</Text>
+        <Text style={styles.boxValue}>
+          {temCertUpload
+            ? 'Enviados (Storage) ✓'
+            : 'Obrigatório: baixe .crt + .key no portal C6 Developers e envie abaixo'}
+        </Text>
       </View>
+
+      <PrimaryButton
+        title={temCertUpload ? 'Trocar certificados mTLS' : 'Enviar certificados mTLS (.crt + .key)'}
+        variant="secondary"
+        onPress={() => void uploadCerts()}
+        loading={uploadingCert}
+        disabled={saving}
+      />
+
+      {!temCertUpload ? (
+        <Text style={styles.warn}>
+          Sem o certificado de produção o boleto não registra na CIP. Use os arquivos do portal C6
+          (não use os de sandbox).
+        </Text>
+      ) : null}
 
       <Text style={styles.sectionTitle}>Webhook (baixa automática)</Text>
       <View style={styles.box}>
@@ -147,7 +201,7 @@ export default function C6ConfigScreen() {
       </View>
 
       <PrimaryButton
-        title={ativo ? 'Manter ativo e salvar' : 'Ativar C6 neste CNPJ'}
+        title={ativo ? 'Salvar produção e ativar' : 'Ativar C6 produção neste CNPJ'}
         onPress={() => {
           setAtivo(true);
           void save();
@@ -182,5 +236,5 @@ const styles = StyleSheet.create({
   },
   boxLabel: { fontSize: 11, fontWeight: '700', color: colors.gray600, marginTop: 6, textTransform: 'uppercase' },
   boxValue: { fontSize: 13, color: colors.petroleum, fontWeight: '600' },
-  warn: { fontSize: 12, color: colors.orange, marginTop: 6, fontWeight: '600' },
+  warn: { fontSize: 12, color: colors.orange, marginTop: 6, fontWeight: '600', lineHeight: 17 },
 });

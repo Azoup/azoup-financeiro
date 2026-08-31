@@ -1,10 +1,9 @@
-const fs = require('fs');
-const { C6_SANDBOX, bundledCertPaths } = require('./c6SandboxDefaults');
+const { C6_ACTIVE, C6_SANDBOX, bundledCertPaths } = require('./c6SandboxDefaults');
 
 /**
  * Carrega config_c6 + mTLS.
- * Sempre usa credenciais sandbox fixas quando não houver override no banco.
- * Certificados vêm de api/boleto/_lib/certs/ (obrigatório no deploy).
+ * Preferência: banco → defaults ativos (produção).
+ * Migra automaticamente config antiga de sandbox para produção.
  */
 async function loadC6Credentials(admin, userId, emitenteId) {
   let config = null;
@@ -26,14 +25,30 @@ async function loadC6Credentials(admin, userId, emitenteId) {
     throw new Error('Integração C6 está inativa em Configurações › Boleto C6. Ative para emitir boleto real.');
   }
 
+  let ambiente = (config?.ambiente || C6_ACTIVE.ambiente).trim();
+  let client_id = (config?.client_id || '').trim() || C6_ACTIVE.client_id;
+  let client_secret = (config?.client_secret || '').trim() || C6_ACTIVE.client_secret;
+  let billing_scheme = (config?.billing_scheme || '').trim() || C6_ACTIVE.billing_scheme;
+
+  // Migra sandbox legado → produção (defaults ativos)
+  if (
+    C6_ACTIVE.ambiente === 'producao' &&
+    (ambiente === 'sandbox' || client_id === C6_SANDBOX.client_id)
+  ) {
+    ambiente = C6_ACTIVE.ambiente;
+    client_id = C6_ACTIVE.client_id;
+    client_secret = C6_ACTIVE.client_secret;
+    billing_scheme = C6_ACTIVE.billing_scheme;
+  }
+
   const merged = {
     ...(config ?? {}),
     ativo: true,
-    ambiente: config?.ambiente || C6_SANDBOX.ambiente,
-    client_id: (config?.client_id || '').trim() || C6_SANDBOX.client_id,
-    client_secret: (config?.client_secret || '').trim() || C6_SANDBOX.client_secret,
-    billing_scheme: (config?.billing_scheme || '').trim() || C6_SANDBOX.billing_scheme,
-    pix_chave: C6_SANDBOX.pix_chave,
+    ambiente,
+    client_id,
+    client_secret,
+    billing_scheme,
+    pix_chave: (config?.pix_chave || '').trim() || C6_ACTIVE.pix_chave || '',
     emitente_id: config?.emitente_id || emitenteId || null,
     user_id: config?.user_id || userId,
   };
@@ -49,12 +64,11 @@ async function loadC6Credentials(admin, userId, emitenteId) {
     return { config: merged, certPath, keyPath, bundled: false };
   }
 
-  const bundled = bundledCertPaths();
+  const bundled = bundledCertPaths(merged.ambiente);
   return {
     config: merged,
     certPath: bundled.certPath,
     keyPath: bundled.keyPath,
-    // arquivos versionados no repo — não apagar
     bundled: true,
   };
 }

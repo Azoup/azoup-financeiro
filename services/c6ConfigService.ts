@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import type { C6Config, C6ConfigInput } from '@/types/c6';
 import {
-  C6_SANDBOX_DEFAULTS,
+  C6_ACTIVE_DEFAULTS,
   isC6CobradorCnpj,
   onlyDigitsCnpj,
 } from '@/services/c6SandboxDefaults';
@@ -18,11 +18,11 @@ export type C6CertFilePick = {
 export function c6ConfigDefaults(emitenteId: string): C6ConfigInput {
   return {
     emitente_id: emitenteId,
-    ativo: C6_SANDBOX_DEFAULTS.ativo,
-    ambiente: C6_SANDBOX_DEFAULTS.ambiente,
-    client_id: C6_SANDBOX_DEFAULTS.client_id,
-    client_secret: C6_SANDBOX_DEFAULTS.client_secret,
-    billing_scheme: C6_SANDBOX_DEFAULTS.billing_scheme,
+    ativo: C6_ACTIVE_DEFAULTS.ativo,
+    ambiente: C6_ACTIVE_DEFAULTS.ambiente,
+    client_id: C6_ACTIVE_DEFAULTS.client_id,
+    client_secret: C6_ACTIVE_DEFAULTS.client_secret,
+    billing_scheme: C6_ACTIVE_DEFAULTS.billing_scheme,
     webhook_token: null,
   };
 }
@@ -64,9 +64,9 @@ export async function upsertC6Config(userId: string, input: C6ConfigInput): Prom
     emitente_id: input.emitente_id,
     ativo: input.ativo,
     ambiente,
-    client_id: input.client_id.trim() || C6_SANDBOX_DEFAULTS.client_id,
+    client_id: input.client_id.trim() || C6_ACTIVE_DEFAULTS.client_id,
     client_secret:
-      input.client_secret.trim() || existing?.client_secret || C6_SANDBOX_DEFAULTS.client_secret,
+      input.client_secret.trim() || existing?.client_secret || C6_ACTIVE_DEFAULTS.client_secret,
     billing_scheme: billing,
     webhook_token: input.webhook_token?.trim() || null,
   };
@@ -92,15 +92,22 @@ export async function upsertC6Config(userId: string, input: C6ConfigInput): Prom
 export async function ensureC6Config(userId: string, emitenteId: string): Promise<C6Config> {
   const existing = await fetchC6Config(userId, emitenteId);
   if (existing) {
-    if (!existing.client_id?.trim() || !existing.client_secret?.trim()) {
+    const precisaMigrar =
+      existing.ambiente === 'sandbox' ||
+      !existing.client_id?.trim() ||
+      !existing.client_secret?.trim() ||
+      existing.client_id === '3cbe1db9-ee03-4f3b-aae4-b0ea2e649cee';
+    if (precisaMigrar) {
       await upsertC6Config(userId, {
         emitente_id: emitenteId,
-        ativo: existing.ativo || C6_SANDBOX_DEFAULTS.ativo,
-        ambiente: existing.ambiente || C6_SANDBOX_DEFAULTS.ambiente,
-        client_id: existing.client_id || C6_SANDBOX_DEFAULTS.client_id,
-        client_secret: existing.client_secret || C6_SANDBOX_DEFAULTS.client_secret,
-        billing_scheme: existing.billing_scheme || C6_SANDBOX_DEFAULTS.billing_scheme,
+        ativo: existing.ativo !== false,
+        ambiente: C6_ACTIVE_DEFAULTS.ambiente,
+        client_id: C6_ACTIVE_DEFAULTS.client_id,
+        client_secret: C6_ACTIVE_DEFAULTS.client_secret,
+        billing_scheme: C6_ACTIVE_DEFAULTS.billing_scheme,
         webhook_token: existing.webhook_token,
+        cert_crt_storage_path: existing.cert_crt_storage_path,
+        cert_key_storage_path: existing.cert_key_storage_path,
       });
       const refreshed = await fetchC6Config(userId, emitenteId);
       if (refreshed) return refreshed;
