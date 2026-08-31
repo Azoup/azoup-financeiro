@@ -111,6 +111,9 @@ function enriquecerMetaDoXml(meta, xmlRaw) {
   const valorServicos =
     tagXml(xml, 'ValorServicos') ||
     xml.match(/<ValorServicos>\s*([^<]+)\s*<\/ValorServicos>/i)?.[1]?.trim();
+  const optanteXml =
+    tagXml(xml, 'OptanteSimplesNacional') ||
+    xml.match(/<OptanteSimplesNacional>\s*([^<]+)\s*<\/OptanteSimplesNacional>/i)?.[1]?.trim();
   return {
     ...meta,
     numero: nInf || numero || meta.numero,
@@ -119,7 +122,33 @@ function enriquecerMetaDoXml(meta, xmlRaw) {
     discriminacao,
     itemLista,
     valor: valorServicos ? Number(valorServicos) : meta.valor,
+    // ABRASF: 1 = optante Simples, 2 = não optante
+    optanteSimplesNacional: optanteXml || meta.optanteSimplesNacional,
   };
+}
+
+/** Textos de "Outras informações" conforme regime / OptanteSimplesNacional do XML. */
+function linhasOutrasInformacoesRegime(m) {
+  const optante = String(m.optanteSimplesNacional ?? '').trim();
+  const regime = Number(m.regimeTributario ?? 0);
+  const opSimp = Number(m.opSimpNac ?? 0);
+  // Prioriza XML autorizado; senão CRT/op_simp do emitente
+  const isSimples =
+    optante === '1' ||
+    (!optante && (regime === 1 || regime === 2 || opSimp === 2 || opSimp === 3 || opSimp === 4));
+
+  if (isSimples) {
+    return [
+      'O ISS desta NFS-e deverá ser recolhido através do Documento de Arrecadação do Simples Nacional.',
+      '(*) Documento emitido por ME ou EPP optante pelo SIMPLES NACIONAL.',
+      'Esta NFS-e não gera crédito.',
+    ];
+  }
+  return [
+    'Documento emitido por contribuinte do Regime Normal (não optante pelo Simples Nacional).',
+    'O ISS, quando devido, deve ser recolhido conforme legislação municipal aplicável.',
+    'Esta NFS-e não gera crédito de ISS ao tomador por esta via.',
+  ];
 }
 
 const DESCRICAO_ITEM_LISTA = {
@@ -160,9 +189,7 @@ function buildDanfseHtml(metaIn) {
 
   const outras = [
     'Esta NFS-e foi emitida com respaldo da Lei nº 4.930/2009 e no Decreto nº 8.250/2009.',
-    'O ISS desta NFS-e deverá ser recolhido através do Documento de Arrecadação do Simples Nacional.',
-    '(*) Documento emitido por ME ou EPP optante pelo SIMPLES NACIONAL.',
-    'Esta NFS-e não gera crédito.',
+    ...linhasOutrasInformacoesRegime(m),
   ];
   if (rpsNum) {
     outras.push(

@@ -134,9 +134,7 @@ button{padding:10px 18px;font-size:14px;cursor:pointer;background:#1a3a4a;color:
 <div class="section">OUTRAS INFORMAÇÕES</div>
 <div class="pad2 small">
 - Esta NFS-e foi emitida com respaldo da Lei nº 4.930/2009 e no Decreto nº 8.250/2009.<br/>
-- O ISS desta NFS-e deverá ser recolhido através do Documento de Arrecadação do Simples Nacional.<br/>
-- (*) Documento emitido por ME ou EPP optante pelo SIMPLES NACIONAL.<br/>
-- Esta NFS-e não gera crédito.<br/>
+- Texto do regime tributário (Simples/Normal) conforme Configurações › NFS-e do emitente — regenere a DANFSe pela API para o texto oficial completo.<br/>
 - Esta NFS-e substitui o RPS Nº ${esc(nota.numero)} Série ${esc(nota.serie)}, emitido em ${esc(dataEmi)}.
 </div>
 <div class="total-bar">VALOR TOTAL DA NOTA = R$ ${esc(valor)}</div>

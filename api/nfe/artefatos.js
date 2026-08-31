@@ -97,6 +97,8 @@ module.exports = async function handler(req, res) {
         competencia: nota.competencia || '',
         dataEmissao: nota.data_emissao || String(nota.data_emissao || '').slice(0, 10),
         documentoCobranca: String(nota.numero ?? numeroNfse),
+        regimeTributario: Number(config?.regime_tributario ?? 0) || null,
+        opSimpNac: Number(config?.op_simp_nac ?? 0) || null,
       },
     });
 

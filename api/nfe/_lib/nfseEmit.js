@@ -134,6 +134,8 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
             competencia: nota.competencia || '',
             dataEmissao: nota.data_emissao || String(nota.data_emissao || '').slice(0, 10),
             documentoCobranca: String(nota.numero),
+            regimeTributario: Number(config.regime_tributario ?? 0) || null,
+            opSimpNac: Number(config.op_simp_nac ?? 0) || null,
           },
         });
         result.xml_autorizado = artefatos.xml_autorizado || result.xml_autorizado;
