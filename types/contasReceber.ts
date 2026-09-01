@@ -106,4 +106,7 @@ export type ContaReceberListRow = BoletoParcelaVendaRow & {
   /** WhatsApp do cadastro do cliente (contatos, tipo whatsapp). */
   whatsapp: string | null;
   whatsapp_contato_nome: string | null;
+  /** E-mail do cadastro do cliente (contatos, tipo email). */
+  email: string | null;
+  email_contato_nome: string | null;
 };

@@ -573,18 +573,29 @@ export async function fetchContasReceberLista(userId: string): Promise<ContaRece
 
   const clienteIds = [...new Set(clientePorBoleto.values())];
   const whatsappPorCliente = new Map<string, { valor: string; nome: string }>();
+  const emailPorCliente = new Map<string, { valor: string; nome: string }>();
   if (clienteIds.length) {
     const { data: contatos, error: e5 } = await supabase
       .from('contatos_cliente')
-      .select('cliente_id, valor_contato, nome_contato')
+      .select('cliente_id, valor_contato, nome_contato, tipo_contato')
       .in('cliente_id', clienteIds)
-      .eq('tipo_contato', 'whatsapp')
+      .in('tipo_contato', ['whatsapp', 'email'])
       .order('created_at', { ascending: true });
     if (e5) throw new Error(e5.message);
-    for (const c of (contatos as { cliente_id: string; valor_contato: string; nome_contato: string }[] | null) ??
-      []) {
-      if (!whatsappPorCliente.has(c.cliente_id)) {
+    for (const c of (contatos as {
+      cliente_id: string;
+      valor_contato: string;
+      nome_contato: string;
+      tipo_contato: string;
+    }[] | null) ?? []) {
+      if (c.tipo_contato === 'whatsapp' && !whatsappPorCliente.has(c.cliente_id)) {
         whatsappPorCliente.set(c.cliente_id, {
+          valor: c.valor_contato,
+          nome: c.nome_contato,
+        });
+      }
+      if (c.tipo_contato === 'email' && !emailPorCliente.has(c.cliente_id)) {
+        emailPorCliente.set(c.cliente_id, {
           valor: c.valor_contato,
           nome: c.nome_contato,
         });
@@ -615,6 +626,7 @@ export async function fetchContasReceberLista(userId: string): Promise<ContaRece
 
     const clienteId = clientePorBoleto.get(b.id) ?? null;
     const wa = clienteId ? whatsappPorCliente.get(clienteId) : undefined;
+    const em = clienteId ? emailPorCliente.get(clienteId) : undefined;
 
     let nota_fiscal_id = b.nota_fiscal_id;
     if (!nota_fiscal_id && b.mensalidade_id) {
@@ -635,6 +647,8 @@ export async function fetchContasReceberLista(userId: string): Promise<ContaRece
       cliente_id: clienteId,
       whatsapp: wa?.valor ?? null,
       whatsapp_contato_nome: wa?.nome ?? null,
+      email: em?.valor ?? null,
+      email_contato_nome: em?.nome ?? null,
     };
   });
 }

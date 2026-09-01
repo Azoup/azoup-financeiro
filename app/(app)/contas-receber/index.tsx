@@ -20,6 +20,7 @@ import {
   registrarPagamentoMensalidadeGerada,
 } from '@/services/mensalidadeGeradaService';
 import {
+  fetchNotaFiscalById,
   fetchNotaFiscalPorMensalidade,
   gerarNotaFiscalParaMensalidade,
   gerarNotaFiscalParaVenda,
@@ -38,6 +39,8 @@ import type { ContaReceberListRow, ContaReceberOrigem } from '@/types/contasRece
 import type { ContaReceberSituacao } from '@/utils/contaReceberCobranca';
 import { buildContasReceberExport } from '@/utils/exportReportBuilders';
 import { abrirDocumentoBoleto } from '@/utils/openBoletoDocumento';
+import { compartilharBoletoComFeedback } from '@/utils/compartilharBoletoEmail';
+import { compartilharDanfseComFeedback } from '@/utils/danfseDocumento';
 import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate, toISODate } from '@/utils/date';
 import { CONSULTA, useHardwareBackToConsulta } from '@/utils/navigationConsulta';
@@ -50,6 +53,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -129,6 +133,8 @@ export default function ContasReceberScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [pdfId, setPdfId] = useState<string | null>(null);
+  const [emailBusyId, setEmailBusyId] = useState<string | null>(null);
+  const [emailNotaBusyId, setEmailNotaBusyId] = useState<string | null>(null);
   const [c6BusyId, setC6BusyId] = useState<string | null>(null);
   const [nomeBeneficiario, setNomeBeneficiario] = useState<string | null>(null);
   const [acoesItem, setAcoesItem] = useState<ContaReceberListRow | null>(null);
@@ -322,6 +328,60 @@ export default function ContasReceberScreen() {
     }
   };
 
+  const enviarEmail = async (item: ContaReceberListRow) => {
+    setEmailBusyId(item.id);
+    try {
+      await compartilharBoletoComFeedback(item);
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setEmailBusyId(null);
+    }
+  };
+
+  const enviarEmailNota = async (item: ContaReceberListRow) => {
+    if (!user?.id || !item.nota_fiscal_id) return;
+    setEmailNotaBusyId(item.id);
+    try {
+      const nota = await fetchNotaFiscalById(user.id, item.nota_fiscal_id);
+      if (!nota) throw new Error('NFS-e não encontrada.');
+      await compartilharDanfseComFeedback(nota);
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setEmailNotaBusyId(null);
+    }
+  };
+
+  const oferecerCompartilharNotaEmitida = (notaId: string) => {
+    if (!user?.id) return;
+    Alert.alert(
+      'NFS-e emitida',
+      'Deseja compartilhar a DANFSe por e-mail com o cliente?',
+      [
+        {
+          text: 'Depois',
+          style: 'cancel',
+          onPress: () => router.push('/(app)/notas-fiscais'),
+        },
+        {
+          text: 'Compartilhar',
+          onPress: () => {
+            void (async () => {
+              try {
+                const nota = await fetchNotaFiscalById(user.id, notaId);
+                if (nota) await compartilharDanfseComFeedback(nota);
+              } catch (e) {
+                Toast.show({ type: 'error', text1: (e as Error).message });
+              }
+              router.push('/(app)/notas-fiscais');
+            })();
+          },
+        },
+      ],
+    );
+  };
+
   const refreshLista = useCallback(async () => {
     if (!user?.id) return;
     const list = await fetchContasReceberLista(user.id);
@@ -492,8 +552,15 @@ export default function ContasReceberScreen() {
           opts,
         );
         if (res.success) {
-          Toast.show({ type: 'success', text1: res.message ?? 'NFS-e emitida com sucesso.' });
-          router.push('/(app)/notas-fiscais');
+          fecharAcoes();
+          setNfConfirmItem(null);
+          await refreshLista();
+          if (res.notaId) {
+            oferecerCompartilharNotaEmitida(res.notaId);
+          } else {
+            Toast.show({ type: 'success', text1: res.message ?? 'NFS-e emitida com sucesso.' });
+            router.push('/(app)/notas-fiscais');
+          }
         } else if (res.ignorada) {
           Toast.show({ type: 'info', text1: res.message ?? 'Cliente marcado como Sem NF no cadastro.' });
         } else {
@@ -505,8 +572,15 @@ export default function ContasReceberScreen() {
         if (!venda) throw new Error('Venda não encontrada.');
         const res = await gerarNotaFiscalParaVenda(user.id, venda, opts);
         if (res.success) {
-          Toast.show({ type: 'success', text1: 'NFS-e emitida com sucesso.' });
-          router.push('/(app)/notas-fiscais');
+          fecharAcoes();
+          setNfConfirmItem(null);
+          await refreshLista();
+          if (res.notaId) {
+            oferecerCompartilharNotaEmitida(res.notaId);
+          } else {
+            Toast.show({ type: 'success', text1: 'NFS-e emitida com sucesso.' });
+            router.push('/(app)/notas-fiscais');
+          }
         } else {
           Toast.show({ type: 'error', text1: res.message ?? 'NFS-e rejeitada.' });
           if (res.notaId) router.push('/(app)/notas-fiscais');
@@ -514,9 +588,6 @@ export default function ContasReceberScreen() {
       } else {
         throw new Error('Origem do documento não identificada.');
       }
-      fecharAcoes();
-      setNfConfirmItem(null);
-      await refreshLista();
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
@@ -541,8 +612,12 @@ export default function ContasReceberScreen() {
         { emitenteId: emitenteId || undefined },
       );
       if (res.success) {
-        Toast.show({ type: 'success', text1: res.message ?? 'NFS-e emitida com sucesso.' });
-        router.push('/(app)/notas-fiscais');
+        if (res.notaId) {
+          oferecerCompartilharNotaEmitida(res.notaId);
+        } else {
+          Toast.show({ type: 'success', text1: res.message ?? 'NFS-e emitida com sucesso.' });
+          router.push('/(app)/notas-fiscais');
+        }
       } else if (res.ignorada) {
         Toast.show({ type: 'info', text1: res.message ?? 'Cliente sem NF no cadastro.' });
       } else {
@@ -827,11 +902,19 @@ export default function ContasReceberScreen() {
         onWhatsApp={() => {
           if (acoesItem) enviarWhatsApp(acoesItem);
         }}
+        onEmail={() => {
+          if (acoesItem) void enviarEmail(acoesItem);
+        }}
+        onEmailNota={() => {
+          if (acoesItem) void enviarEmailNota(acoesItem);
+        }}
         onVerOrigem={verOrigem}
         temNota={Boolean(acoesItem?.nota_fiscal_id)}
         nfBusy={nfBusy}
         pdfBusy={acoesItem != null && pdfId === acoesItem.id}
         c6Busy={acoesItem != null && c6BusyId === acoesItem.id}
+        emailBusy={acoesItem != null && emailBusyId === acoesItem.id}
+        emailNotaBusy={acoesItem != null && emailNotaBusyId === acoesItem.id}
       />
 
       <MarcarPagamentoMensalidadeGeradaModal

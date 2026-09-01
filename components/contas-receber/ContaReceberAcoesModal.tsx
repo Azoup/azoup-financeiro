@@ -16,11 +16,15 @@ type Props = {
   onPdf: () => void;
   onRegistrarC6?: () => void;
   onWhatsApp: () => void;
+  onEmail: () => void;
+  onEmailNota?: () => void;
   onVerOrigem: () => void;
   temNota: boolean;
   nfBusy?: boolean;
   pdfBusy?: boolean;
   c6Busy?: boolean;
+  emailBusy?: boolean;
+  emailNotaBusy?: boolean;
 };
 
 function origemLabel(origem: ContaReceberListRow['origem']): string {
@@ -87,17 +91,22 @@ export function ContaReceberAcoesModal({
   onPdf,
   onRegistrarC6,
   onWhatsApp,
+  onEmail,
+  onEmailNota,
   onVerOrigem,
   temNota,
   nfBusy,
   pdfBusy,
   c6Busy,
+  emailBusy,
+  emailNotaBusy,
 }: Props) {
   if (!item) return null;
 
   const aberto = item.situacao_cobranca === 'aberto';
   const cancelado = item.situacao_cobranca === 'cancelado';
   const temWhats = Boolean(item.whatsapp?.trim());
+  const temEmail = Boolean(item.email?.trim());
   const venc = formatBRDate(parseISODate(item.data_vencimento)) || item.data_vencimento;
   const precisaC6 =
     Boolean(onRegistrarC6) &&
@@ -148,6 +157,18 @@ export function ContaReceberAcoesModal({
               />
             ) : null}
 
+            {temNota && onEmailNota ? (
+              <AcaoRow
+                icon="mail-open-outline"
+                label={emailNotaBusy ? 'Abrindo e-mail…' : 'Compartilhar NFS-e por e-mail'}
+                sub={temEmail ? item.email! : 'Sem e-mail no cadastro — preencha no envio'}
+                onPress={onEmailNota}
+                disabled={emailNotaBusy}
+                busy={emailNotaBusy}
+                accent={temEmail ? colors.orange : undefined}
+              />
+            ) : null}
+
             {precisaC6 ? (
               <AcaoRow
                 icon="cloud-upload-outline"
@@ -181,6 +202,16 @@ export function ContaReceberAcoesModal({
               onPress={onWhatsApp}
               disabled={!temWhats}
               accent={temWhats ? '#25D366' : undefined}
+            />
+
+            <AcaoRow
+              icon="mail-outline"
+              label={emailBusy ? 'Abrindo e-mail…' : 'Compartilhar boleto por e-mail'}
+              sub={temEmail ? item.email! : 'Sem e-mail no cadastro — preencha no envio'}
+              onPress={onEmail}
+              disabled={emailBusy}
+              busy={emailBusy}
+              accent={temEmail ? colors.orange : undefined}
             />
 
             <AcaoRow

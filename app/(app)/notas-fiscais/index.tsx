@@ -3,8 +3,6 @@ import { CancelarNotaFiscalModal } from '@/components/notas-fiscais/CancelarNota
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
 import { useDebounce } from '@/hooks/useDebounce';
-import { supabase } from '@/lib/supabase';
-import { nfeApiBaseUrl } from '@/services/nfeConfigService';
 import {
   cancelarNotaFiscalSefaz,
   fetchNotasFiscaisLista,
@@ -15,7 +13,7 @@ import { colors, radius, spacing } from '@/theme/colors';
 import type { NfseEmitente, NotaFiscalListRow, NotaFiscalStatus } from '@/types/notaFiscal';
 import { showAppToast } from '@/utils/appToast';
 import { formatBRL } from '@/utils/currency';
-import { buildDanfseHtmlFromNota } from '@/utils/danfseHtml';
+import { compartilharDanfseComFeedback, fetchDanfseHtml } from '@/utils/danfseDocumento';
 import { formatDateTimeBRFromISO } from '@/utils/date';
 import {
   corNotaFiscalStatus,
@@ -105,6 +103,7 @@ export default function NotasFiscaisIndexScreen() {
   const [cancelBusy, setCancelBusy] = useState(false);
   const [reemitBusyId, setReemitBusyId] = useState<string | null>(null);
   const [printBusyId, setPrintBusyId] = useState<string | null>(null);
+  const [shareBusyId, setShareBusyId] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<StatusFiltro>('todos');
   const [emitenteFilter, setEmitenteFilter] = useState<string>('todos');
@@ -208,30 +207,9 @@ export default function NotasFiscaisIndexScreen() {
   const imprimirDanfe = async (item: NotaFiscalListRow) => {
     setPrintBusyId(item.id);
     try {
-      let htmlApi: string | null = null;
-      const base = nfeApiBaseUrl();
-      const { data: session } = await supabase.auth.getSession();
-      const token = session.session?.access_token;
-      if (item.status === 'autorizada' && base && token) {
-        const res = await fetch(`${base}/api/nfe/artefatos`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ notaFiscalId: item.id }),
-        });
-        const body = (await res.json().catch(() => ({}))) as {
-          danfe_url?: string;
-          html?: string;
-        };
-        if (typeof body.html === 'string' && body.html.includes('<html')) {
-          htmlApi = body.html;
-        }
-        if (body.danfe_url) await load();
-      }
+      const { html, danfeUrl } = await fetchDanfseHtml(item);
+      if (danfeUrl && danfeUrl !== item.danfe_url) await load();
 
-      const html = htmlApi || buildDanfseHtmlFromNota(item);
       if (abrirHtmlRenderizado(html)) return;
 
       const { uri } = await Print.printToFileAsync({ html });
@@ -247,6 +225,17 @@ export default function NotasFiscaisIndexScreen() {
       Toast.show({ type: 'error', text1: (e as Error).message || 'Falha ao gerar DANFSe.' });
     } finally {
       setPrintBusyId(null);
+    }
+  };
+
+  const compartilharDanfe = async (item: NotaFiscalListRow) => {
+    setShareBusyId(item.id);
+    try {
+      await compartilharDanfseComFeedback(item);
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message || 'Falha ao compartilhar DANFSe.' });
+    } finally {
+      setShareBusyId(null);
     }
   };
 
@@ -333,6 +322,7 @@ export default function NotasFiscaisIndexScreen() {
     const podeReemitir = podeReemitirNotaFiscal(item);
     const reemitindo = reemitBusyId === item.id;
     const imprimindo = printBusyId === item.id;
+    const compartilhando = shareBusyId === item.id;
 
     return (
       <Card style={styles.card}>
@@ -388,6 +378,13 @@ export default function NotasFiscaisIndexScreen() {
               style={styles.btnAcao}
             />
           ) : null}
+          <PrimaryButton
+            title={compartilhando ? 'Abrindo…' : 'Compartilhar por e-mail'}
+            variant="secondary"
+            onPress={() => void compartilharDanfe(item)}
+            disabled={!podeDanfe || compartilhando}
+            style={styles.btnAcao}
+          />
           <PrimaryButton
             title={imprimindo ? 'Abrindo…' : 'Imprimir DANFSe'}
             variant="secondary"

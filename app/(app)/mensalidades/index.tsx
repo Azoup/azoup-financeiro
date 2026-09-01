@@ -20,6 +20,7 @@ import {
   registrarPagamentoMensalidadeGerada,
 } from '@/services/mensalidadeGeradaService';
 import {
+  fetchNotaFiscalById,
   fetchNotaFiscalPorMensalidade,
   fetchNotasFiscaisPorMensalidadeIds,
   gerarNotaFiscalParaMensalidade,
@@ -39,6 +40,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   RefreshControl,
@@ -49,6 +51,7 @@ import {
   View,
 } from 'react-native';
 import { showAppError, showAppInfo, showAppSuccess } from '@/utils/appToast';
+import { compartilharDanfseComFeedback } from '@/utils/danfseDocumento';
 
 type StatusFiltro = 'todos' | MensalidadeGeradaStatusVisual;
 
@@ -378,8 +381,36 @@ export default function HistoricoMensalidadesGeradasScreen() {
           ...prev,
           [m.id]: { numero: null },
         }));
-        showAppSuccess(res.message ?? 'NFS-e emitida com sucesso.', 'Veja em Notas fiscais.');
-        router.push('/(app)/notas-fiscais');
+        if (res.notaId && user?.id) {
+          Alert.alert(
+            'NFS-e emitida',
+            'Deseja compartilhar a DANFSe por e-mail com o cliente?',
+            [
+              {
+                text: 'Depois',
+                style: 'cancel',
+                onPress: () => router.push('/(app)/notas-fiscais'),
+              },
+              {
+                text: 'Compartilhar',
+                onPress: () => {
+                  void (async () => {
+                    try {
+                      const nota = await fetchNotaFiscalById(user.id, res.notaId!);
+                      if (nota) await compartilharDanfseComFeedback(nota);
+                    } catch (e) {
+                      showAppError((e as Error).message);
+                    }
+                    router.push('/(app)/notas-fiscais');
+                  })();
+                },
+              },
+            ],
+          );
+        } else {
+          showAppSuccess(res.message ?? 'NFS-e emitida com sucesso.', 'Veja em Notas fiscais.');
+          router.push('/(app)/notas-fiscais');
+        }
       } else if (res.ignorada) {
         showAppInfo(res.message ?? 'Cliente sem NF no cadastro (lote automático).');
       } else {

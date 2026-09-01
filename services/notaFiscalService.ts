@@ -183,6 +183,31 @@ export async function fetchUltimaNotaFiscalVenda(
   return mapNotaFiscalRow(data as NotaFiscalListRow & { clientes?: { nome_fantasia?: string; nome?: string } | null });
 }
 
+export async function fetchNotaFiscalById(
+  userId: string,
+  notaId: string,
+): Promise<NotaFiscalListRow | null> {
+  const { data, error } = await supabase
+    .from('nota_fiscal')
+    .select('*, clientes(nome_fantasia, nome), nfse_emitente(id, nome, documento, razao_social)')
+    .eq('user_id', userId)
+    .eq('id', notaId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  return mapNotaFiscalRow(
+    data as NotaFiscalListRow & {
+      clientes?: { nome_fantasia?: string; nome?: string } | null;
+      nfse_emitente?: {
+        id?: string;
+        nome?: string;
+        documento?: string;
+        razao_social?: string;
+      } | null;
+    },
+  );
+}
+
 async function validarPreEmissaoNfse(
   userId: string,
   clienteId: string,
