@@ -361,8 +361,14 @@ export async function gerarBoletosParaMensalidades(
   const boletoIds = ((inserted ?? []) as { id: string }[]).map((r) => r.id);
   if (boletoIds.length) {
     if (banco === 'c6' && emitente?.id) {
-      // C6: falha = erro real (não deixa carnê HTML fingindo boleto bancário)
-      await emitirBoletosC6Lote(userId, emitente.id, boletoIds);
+      try {
+        await emitirBoletosC6Lote(userId, emitente.id, boletoIds, { modoRapido: true });
+      } catch (e) {
+        const msg =
+          (e as Error).message ??
+          'Mensalidade criada; registro C6 pendente. Use “Registrar no C6” na mensalidade.';
+        return { avisoBoleto: msg };
+      }
     } else {
       try {
         await emitirBoletosSicoobLote(userId, boletoIds);

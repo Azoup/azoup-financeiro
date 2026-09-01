@@ -117,7 +117,7 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    const { boletoIds, emitenteId, banco } = body;
+    const { boletoIds, emitenteId, banco, modoRapido } = body;
     const ids = Array.isArray(boletoIds) ? boletoIds.filter(Boolean) : [];
     if (!ids.length) {
       return res.status(400).json({ success: false, message: 'Informe boletoIds.' });
@@ -128,6 +128,9 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ success: false, message: 'Informe emitenteId para emissão C6.' });
     }
 
+    // Lote (mensalidade): rápido — sem PDF/Pix para caber no timeout da Vercel (60s).
+    const c6Opts = { modoRapido: modoRapido !== false };
+
     const resultados = [];
     const erros = [];
     let emitidos = 0;
@@ -135,10 +138,10 @@ module.exports = async function handler(req, res) {
     for (const boletoId of ids) {
       try {
         const result = usarC6
-          ? await emitirUmBoletoC6(admin, user.id, boletoId, emitenteId)
+          ? await emitirUmBoletoC6(admin, user.id, boletoId, emitenteId, c6Opts)
           : await emitirUmBoleto(admin, user.id, boletoId);
         resultados.push(result);
-        if (result.status_registro === 'registrado') emitidos += 1;
+        if (result.status_registro === 'registrado' || result.c6_boleto_id) emitidos += 1;
       } catch (error) {
         const msg = `${boletoId}: ${error.message}`;
         erros.push(msg);

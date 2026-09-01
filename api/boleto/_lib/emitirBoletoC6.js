@@ -117,7 +117,8 @@ async function baixarESalvarPdfC6(admin, userId, boletoId, creds, c6Id, consulta
   return { pdfStoragePath, pdfUrl: signed?.signedUrl ?? null };
 }
 
-async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint) {
+async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint, opts = {}) {
+  const modoRapido = opts.modoRapido !== false;
   const { data: boleto, error: bErr } = await admin
     .from('boletos_parcela_venda')
     .select('*')
@@ -233,7 +234,7 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint) {
     let consultaRaw = c6.raw;
     if (!c6.linha_digitavel || !c6.codigo_barras) {
       try {
-        await sleep(1200);
+        if (!modoRapido) await sleep(1200);
         const consulta = await consultarBoletoC6Api({
           config: creds.config,
           certPath: creds.certPath,
@@ -256,16 +257,21 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint) {
       }
     }
 
-    const { pdfStoragePath, pdfUrl } = await baixarESalvarPdfC6(
-      admin,
-      userId,
-      boletoId,
-      creds,
-      c6.id,
-      consultaRaw,
-    );
+    let pdfStoragePath = null;
+    let pdfUrl = null;
+    if (!modoRapido) {
+      ({ pdfStoragePath, pdfUrl } = await baixarESalvarPdfC6(
+        admin,
+        userId,
+        boletoId,
+        creds,
+        c6.id,
+        consultaRaw,
+      ));
+    }
 
-    if (!c6.linha_digitavel && !pdfUrl) {
+    const temLinha = Boolean(c6.linha_digitavel || c6.codigo_barras);
+    if (!temLinha && !pdfUrl && !modoRapido) {
       throw new Error(
         'C6 registrou o boleto, mas ainda sem linha digitável/PDF. Aguarde e use “Registrar no C6” novamente.',
       );
@@ -274,7 +280,7 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint) {
     const updateRow = {
       tipo_emissao: 'c6',
       emitente_id: emitenteId,
-      status_registro: 'registrado',
+      status_registro: temLinha || pdfUrl ? 'registrado' : 'pendente',
       linha_digitavel: c6.linha_digitavel,
       codigo_barras: c6.codigo_barras,
       nosso_numero_banco: c6.nosso_numero_banco,
@@ -282,33 +288,37 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint) {
       c6_external_id: payload.external_reference_id ?? boleto.c6_external_id,
       pdf_storage_path: pdfStoragePath,
       pdf_url: pdfUrl,
-      data_registro: new Date().toISOString(),
-      mensagem_erro_registro: null,
+      data_registro: temLinha || pdfUrl ? new Date().toISOString() : null,
+      mensagem_erro_registro: temLinha
+        ? null
+        : 'Registrado no C6 (CIP). Use “Registrar no C6” para obter linha/PDF.',
     };
 
-    // PIX com vencimento (cobv) — cliente paga boleto OU Pix
+    // PIX com vencimento (cobv) — omitido no modo rápido (lote mensalidade)
     let pixInfo = null;
-    try {
-      const pix = await criarPixCobvC6Api({
-        config: creds.config,
-        certPath: creds.certPath,
-        keyPath: creds.keyPath,
-        valor: valorDocumento,
-        dataVencimento: boleto.data_vencimento,
-        cliente,
-        solicitacao: `Doc ${boleto.numero_documento || boletoId}`.slice(0, 140),
-        txid: undefined,
-      });
-      pixInfo = {
-        pix_txid: pix.txid,
-        pix_copia_cola: pix.pixCopiaECola || pix.pix_copia_cola || null,
-        pix_location: pix.loc?.location || pix.location || null,
-        pix_status: pix.status || 'ATIVA',
-        pix_criado_em: new Date().toISOString(),
-      };
-      Object.assign(updateRow, pixInfo);
-    } catch (pixErr) {
-      console.warn('[c6] Pix cobv não gerado:', pixErr.message);
+    if (!modoRapido) {
+      try {
+        const pix = await criarPixCobvC6Api({
+          config: creds.config,
+          certPath: creds.certPath,
+          keyPath: creds.keyPath,
+          valor: valorDocumento,
+          dataVencimento: boleto.data_vencimento,
+          cliente,
+          solicitacao: `Doc ${boleto.numero_documento || boletoId}`.slice(0, 140),
+          txid: undefined,
+        });
+        pixInfo = {
+          pix_txid: pix.txid,
+          pix_copia_cola: pix.pixCopiaECola || pix.pix_copia_cola || null,
+          pix_location: pix.loc?.location || pix.location || null,
+          pix_status: pix.status || 'ATIVA',
+          pix_criado_em: new Date().toISOString(),
+        };
+        Object.assign(updateRow, pixInfo);
+      } catch (pixErr) {
+        console.warn('[c6] Pix cobv não gerado:', pixErr.message);
+      }
     }
 
     await admin.from('boletos_parcela_venda').update(updateRow).eq('id', boletoId);
@@ -318,7 +328,9 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint) {
       usuario_id: userId,
       detalhes: pixInfo
         ? 'Boleto C6 + Pix (cobv) registrados.'
-        : 'Boleto registrado via API C6 Bank (boleto real).',
+        : modoRapido
+          ? 'Boleto C6 registrado (modo rápido — PDF/Pix depois).'
+          : 'Boleto registrado via API C6 Bank (boleto real).',
       payload_resposta: c6.raw ?? null,
     });
 
@@ -335,7 +347,9 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint) {
       pix_copia_cola: pixInfo?.pix_copia_cola ?? null,
       message: pixInfo
         ? 'Boleto e Pix C6 registrados.'
-        : 'Boleto real registrado no C6.',
+        : modoRapido && updateRow.status_registro === 'pendente'
+          ? 'Boleto enviado ao C6. Linha/PDF em processamento — use Registrar no C6 se necessário.'
+          : 'Boleto real registrado no C6.',
     };
   } catch (error) {
     const msg = error?.message ?? 'Falha na emissão C6.';

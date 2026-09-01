@@ -670,9 +670,11 @@ export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emiti
     body = {
       success: false,
       message:
-        res.status === 500
-          ? 'Erro interno na API de emissão. Verifique na Vercel: SUPABASE_SERVICE_ROLE_KEY, CERT_ENCRYPTION_KEY (mesma chave do app) e redeploy.'
-          : `Emissão falhou (${res.status}).`,
+        res.status === 504
+          ? 'Tempo esgotado ao emitir NFS-e (504). A nota pode estar em processamento — veja em Notas fiscais e reemitir se necessário.'
+          : res.status === 500
+            ? 'Erro interno na API de emissão. Verifique na Vercel: SUPABASE_SERVICE_ROLE_KEY, CERT_ENCRYPTION_KEY (mesma chave do app) e redeploy.'
+            : `Emissão falhou (${res.status}).`,
     };
   }
 
