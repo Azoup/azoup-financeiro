@@ -9,19 +9,32 @@ function isWeb(): boolean {
   return Platform.OS === 'web' || (typeof document !== 'undefined' && typeof window !== 'undefined');
 }
 
-/** Outlook trata "+" do URLSearchParams como literal; usamos %20. */
+/** Normaliza texto para e-mail (sem +, com quebras Windows). */
+export function normalizeEmailText(value: unknown): string {
+  return safeTrim(value)
+    .replace(/\u00A0/g, ' ')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\n/g, '\r\n');
+}
+
+/**
+ * Outlook no Windows trata "+" do mailto como caractere literal.
+ * Nunca use URLSearchParams — encodeURIComponent gera %20.
+ */
 export function buildMailtoUrl(opts: {
   to?: string | null;
   subject: string;
   body: string;
 }): string {
   const to = safeTrim(opts.to);
-  const subject = safeTrim(opts.subject);
-  const body = safeTrim(opts.body);
+  const subject = normalizeEmailText(opts.subject);
+  const body = normalizeEmailText(opts.body);
   const parts: string[] = [];
   if (subject) parts.push(`subject=${encodeURIComponent(subject)}`);
   if (body) parts.push(`body=${encodeURIComponent(body)}`);
-  const qs = parts.join('&');
+  // encodeURIComponent já usa %20; reforço caso algum polyfill use +
+  const qs = parts.join('&').replace(/\+/g, '%20');
   return qs ? `mailto:${to}?${qs}` : `mailto:${to}`;
 }
 
@@ -30,11 +43,17 @@ export async function abrirEmail(opts: {
   subject: string;
   body: string;
 }): Promise<CompartilharResultado> {
-  const url = buildMailtoUrl(opts);
+  // No web, preferimos .eml (texto limpo) em vez de mailto (Outlook coloca +).
   if (isWeb()) {
-    window.location.href = url;
-    return 'email';
+    const eml = buildEmlDraft({
+      to: opts.to,
+      subject: normalizeEmailText(opts.subject),
+      body: normalizeEmailText(opts.body),
+    });
+    downloadEmlFile('mensagem.eml', eml);
+    return 'eml';
   }
+  const url = buildMailtoUrl(opts);
   const can = await Linking.canOpenURL(url);
   if (!can) {
     throw new Error('Não foi possível abrir o app de e-mail neste dispositivo.');
@@ -72,8 +91,8 @@ async function baixarArquivoWeb(blob: Blob, filename: string): Promise<void> {
 /**
  * Preferências no web (em ordem):
  * 1) Web Share com arquivo (quando o browser permite)
- * 2) .eml com anexo (Outlook abre rascunho com PDF/HTML anexado)
- * 3) baixa o arquivo + mailto sem link quebrado
+ * 2) .eml com anexo (Outlook abre rascunho com PDF anexado e texto limpo)
+ * Nunca usa mailto no web (evita texto com "+").
  */
 export async function compartilharComEmail(opts: {
   to?: string | null;
@@ -83,25 +102,19 @@ export async function compartilharComEmail(opts: {
   preferirShareSheet?: boolean;
 }): Promise<CompartilharResultado> {
   const preferirShare = opts.preferirShareSheet !== false;
-  const subject = safeTrim(opts.subject);
-  const body = safeTrim(opts.body);
+  const subject = normalizeEmailText(opts.subject);
+  const body = normalizeEmailText(opts.body);
 
-  if (
-    isWeb() &&
-    typeof navigator !== 'undefined' &&
-    opts.arquivo?.blob &&
-    typeof File !== 'undefined'
-  ) {
+  if (isWeb() && opts.arquivo?.blob && typeof File !== 'undefined') {
     const file = new File([opts.arquivo.blob], opts.arquivo.filename, {
       type: opts.arquivo.mimeType,
     });
     const shareData: ShareData = { title: subject, text: body, files: [file] };
-    if (navigator.share && navigator.canShare?.(shareData)) {
+    if (typeof navigator !== 'undefined' && navigator.share && navigator.canShare?.(shareData)) {
       await navigator.share(shareData);
       return 'compartilhado';
     }
 
-    // Rascunho .eml com anexo — abre no Outlook com o arquivo anexado.
     const contentBase64 = await blobToBase64(opts.arquivo.blob);
     const eml = buildEmlDraft({
       to: opts.to,
@@ -117,7 +130,6 @@ export async function compartilharComEmail(opts: {
     });
     const emlName = opts.arquivo.filename.replace(/\.[^.]+$/, '') || 'documento';
     downloadEmlFile(`${emlName}.eml`, eml);
-    // Também baixa o PDF/HTML solto, caso o usuário prefira anexar manualmente.
     await baixarArquivoWeb(opts.arquivo.blob, opts.arquivo.filename);
     return 'eml';
   }
@@ -131,7 +143,7 @@ export async function compartilharComEmail(opts: {
       });
       if (ok) return 'compartilhado';
     } catch {
-      /* fallback mailto */
+      /* fallback */
     }
   }
 

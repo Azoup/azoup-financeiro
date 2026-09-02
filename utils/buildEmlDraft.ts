@@ -29,8 +29,14 @@ export function buildEmlDraft(opts: {
   attachments?: EmlAttachment[];
 }): string {
   const to = safeTrim(opts.to);
-  const subject = safeTrim(opts.subject);
-  const body = safeTrim(opts.body);
+  const subject = safeTrim(opts.subject).replace(/\+/g, ' ');
+  // Texto puro com CRLF — sem URL-encoding (evita "+" no Outlook)
+  const body = safeTrim(opts.body)
+    .replace(/\+/g, ' ')
+    .replace(/\u00A0/g, ' ')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\n/g, '\r\n');
   const attachments = opts.attachments ?? [];
   const boundary = `Azoup_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
