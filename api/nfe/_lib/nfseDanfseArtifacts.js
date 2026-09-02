@@ -503,16 +503,21 @@ async function salvarArtefatosNfseAbrasf({ admin, userId, chave, xmlRaw, meta })
     } catch {
       /* ignore */
     }
+    // Sem BOM: alguns clients tratam UTF-8 BOM + HTML como text/plain no Storage público.
     const { error } = await admin.storage
       .from('nota_fiscal_danfe')
-      .upload(danfePath, Buffer.from(`\uFEFF${html}`, 'utf8'), {
-        contentType: 'text/html; charset=utf-8',
+      .upload(danfePath, Buffer.from(html, 'utf8'), {
+        contentType: 'text/html;charset=utf-8',
         upsert: true,
         cacheControl: '60',
       });
     if (!error) {
       const { data: pub } = admin.storage.from('nota_fiscal_danfe').getPublicUrl(danfePath);
       danfeUrl = pub?.publicUrl || null;
+      // Cache-bust para o browser não reusar Content-Type antigo
+      if (danfeUrl) {
+        danfeUrl = `${danfeUrl}${danfeUrl.includes('?') ? '&' : '?'}v=${Date.now()}`;
+      }
     } else {
       console.warn('[nfse] upload danfe html:', error.message);
       danfePath = null;

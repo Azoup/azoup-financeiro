@@ -89,7 +89,8 @@ function abrirHtmlDanfseWeb(html: string): void {
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
     return;
   }
-  URL.revokeObjectURL(url);
+  // Popup bloqueado: navega na mesma aba
+  window.location.assign(url);
 }
 
 export async function compartilharDanfsePorEmail(item: NotaFiscalListRow): Promise<{
@@ -101,20 +102,23 @@ export async function compartilharDanfsePorEmail(item: NotaFiscalListRow): Promi
   const serie = safeTrim(item.serie) || '1';
   const numero = safeTrim(item.numero) || 's_numero';
   const subject = `NFS-e ${serie}/${numero}`;
-  const body = buildCorpoEmailDanfse(item, { pdfLink: danfeUrl });
+  // No web o Storage costuma servir .html como text/plain; o cliente abre a DANFSe
+  // renderizada via blob. O link público só entra no e-mail se existir.
+  const body = buildCorpoEmailDanfse(item, {
+    pdfLink: isWeb() ? null : danfeUrl,
+  });
 
   if (isWeb()) {
+    // Abre a DANFSe renderizada (blob text/html) — nunca a URL do Storage em bruto.
+    abrirHtmlDanfseWeb(html);
     const resultado = await compartilharComEmail({
       to: email,
       subject,
-      body,
+      body:
+        body +
+        '\n\n(A DANFSe foi aberta em outra aba: use Imprimir / Salvar como PDF e anexe ao e-mail.)',
       preferirShareSheet: false,
     });
-    if (danfeUrl && typeof window !== 'undefined') {
-      window.open(danfeUrl, '_blank', 'noopener,noreferrer');
-    } else {
-      abrirHtmlDanfseWeb(html);
-    }
     return { email, resultado };
   }
 
@@ -139,13 +143,17 @@ export async function compartilharDanfseComFeedback(item: NotaFiscalListRow): Pr
     Toast.show({
       type: 'info',
       text1: 'E-mail do cliente não cadastrado.',
-      text2: 'Preencha o destinatário no app de e-mail ou cadastre em Contatos do cliente.',
+      text2: isWeb()
+        ? 'DANFSe aberta em outra aba. Cadastre o e-mail ou preencha o destinatário.'
+        : 'Preencha o destinatário no app de e-mail ou cadastre em Contatos do cliente.',
     });
   } else if (resultado === 'email') {
     Toast.show({
       type: 'success',
       text1: 'E-mail aberto.',
-      text2: `Destinatário sugerido: ${email}`,
+      text2: isWeb()
+        ? `Destinatário: ${email}. Na aba da DANFSe use Imprimir → Salvar PDF e anexe.`
+        : `Destinatário sugerido: ${email}`,
     });
   } else {
     Toast.show({ type: 'success', text1: 'Compartilhamento iniciado.' });
