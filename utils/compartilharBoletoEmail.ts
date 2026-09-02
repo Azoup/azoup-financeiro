@@ -5,8 +5,13 @@ import { compartilharComEmail } from '@/utils/compartilharDocumento';
 import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate } from '@/utils/date';
 import { resolveBoletoPdfUrl } from '@/utils/openBoletoDocumento';
+import { safeTrim } from '@/utils/safeTrim';
 import * as Print from 'expo-print';
 import { Platform } from 'react-native';
+
+function isWeb(): boolean {
+  return Platform.OS === 'web' || (typeof document !== 'undefined' && typeof window !== 'undefined');
+}
 
 export function buildCorpoEmailBoleto(
   row: ContaReceberListRow,
@@ -14,7 +19,7 @@ export function buildCorpoEmailBoleto(
 ): string {
   const venc = formatBRDate(parseISODate(row.data_vencimento)) || row.data_vencimento;
   const linhas = [
-    `Olá, ${row.nome_cliente.trim() || 'cliente'}!`,
+    `Olá, ${safeTrim(row.nome_cliente) || 'cliente'}!`,
     '',
     'Segue o boleto para pagamento:',
     `• ${row.referencia_label}`,
@@ -52,7 +57,7 @@ export async function compartilharBoletoPorEmail(row: ContaReceberListRow): Prom
   const body = buildCorpoEmailBoleto(row, { pdfLink: pdfUrl });
 
   if (pdfUrl) {
-    if (Platform.OS === 'web') {
+    if (isWeb()) {
       const resultado = await compartilharComEmail({
         to: email,
         subject,
@@ -81,14 +86,14 @@ export async function compartilharBoletoPorEmail(row: ContaReceberListRow): Prom
 
   if (row.tipo_emissao === 'c6' && !row.linha_digitavel) {
     throw new Error(
-      row.mensagem_erro_registro?.trim() ||
+      safeTrim(row.mensagem_erro_registro) ||
         'Boleto C6 ainda não registrado. Use “Registrar no C6” antes de compartilhar.',
     );
   }
 
   const html = buildBoletoCobrancaHtml(row);
 
-  if (Platform.OS === 'web') {
+  if (isWeb()) {
     const resultado = await compartilharComEmail({
       to: email,
       subject,
