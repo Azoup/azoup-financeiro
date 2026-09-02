@@ -4,7 +4,7 @@ import type { NotaFiscalListRow } from '@/types/notaFiscal';
 import { formatBRL } from '@/utils/currency';
 import { buildDanfseHtmlFromNota } from '@/utils/danfseHtml';
 import { fetchEmailCliente } from '@/services/clienteContatoService';
-import { compartilharComEmail } from '@/utils/compartilharDocumento';
+import { compartilharComEmail, type CompartilharResultado } from '@/utils/compartilharDocumento';
 import { safeTrim } from '@/utils/safeTrim';
 import * as Print from 'expo-print';
 import { Platform } from 'react-native';
@@ -52,10 +52,7 @@ export async function fetchDanfseHtml(item: NotaFiscalListRow): Promise<{
   return { html, danfeUrl };
 }
 
-export function buildCorpoEmailDanfse(
-  item: NotaFiscalListRow,
-  opts?: { pdfLink?: string | null },
-): string {
+export function buildCorpoEmailDanfse(item: NotaFiscalListRow): string {
   const nome = safeTrim(item.cliente?.nome_cliente) || 'cliente';
   const serie = safeTrim(item.serie) || '1';
   const numero = safeTrim(item.numero) || '—';
@@ -70,9 +67,7 @@ export function buildCorpoEmailDanfse(
       ? `• Código de verificação: ${safeTrim(item.codigo_verificacao)}`
       : null,
     '',
-    opts?.pdfLink
-      ? `Documento (DANFSe): ${safeTrim(opts.pdfLink)}`
-      : 'O documento DANFSe segue em anexo (ou abra pelo link se disponível).',
+    'O documento DANFSe segue em anexo.',
     '',
     'Qualquer dúvida, estamos à disposição.',
     'Atenciosamente.',
@@ -80,82 +75,98 @@ export function buildCorpoEmailDanfse(
   return linhas.join('\n');
 }
 
-function abrirHtmlDanfseWeb(html: string): void {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return;
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const w = window.open(url, '_blank', 'noopener,noreferrer');
-  if (w) {
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    return;
+async function htmlParaPdfBlob(html: string): Promise<{ blob: Blob; uri?: string }> {
+  const { uri } = await Print.printToFileAsync({ html });
+  if (isWeb() && typeof fetch !== 'undefined') {
+    const res = await fetch(uri);
+    const blob = await res.blob();
+    // Garante MIME de PDF mesmo se o browser devolver octet-stream
+    const pdfBlob =
+      blob.type === 'application/pdf'
+        ? blob
+        : new Blob([await blob.arrayBuffer()], { type: 'application/pdf' });
+    return { blob: pdfBlob, uri };
   }
-  // Popup bloqueado: navega na mesma aba
-  window.location.assign(url);
+  // Native: lê arquivo gerado pelo expo-print
+  const FileSystem = await import('expo-file-system/legacy');
+  const base64 = await FileSystem.readAsStringAsync(uri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return { blob: new Blob([bytes], { type: 'application/pdf' }), uri };
 }
 
 export async function compartilharDanfsePorEmail(item: NotaFiscalListRow): Promise<{
   email: string | null;
-  resultado: 'email' | 'compartilhado';
+  resultado: CompartilharResultado;
 }> {
   const email = await fetchEmailCliente(item.cliente_id);
-  const { html, danfeUrl } = await fetchDanfseHtml(item);
+  const { html } = await fetchDanfseHtml(item);
   const serie = safeTrim(item.serie) || '1';
   const numero = safeTrim(item.numero) || 's_numero';
   const subject = `NFS-e ${serie}/${numero}`;
-  // No web o Storage costuma servir .html como text/plain; o cliente abre a DANFSe
-  // renderizada via blob. O link público só entra no e-mail se existir.
-  const body = buildCorpoEmailDanfse(item, {
-    pdfLink: isWeb() ? null : danfeUrl,
-  });
+  const body = buildCorpoEmailDanfse(item);
+  const filename = `DANFSe_${serie}_${numero}.pdf`;
 
-  if (isWeb()) {
-    // Abre a DANFSe renderizada (blob text/html) — nunca a URL do Storage em bruto.
-    abrirHtmlDanfseWeb(html);
+  try {
+    const { blob, uri } = await htmlParaPdfBlob(html);
     const resultado = await compartilharComEmail({
       to: email,
       subject,
-      body:
-        body +
-        '\n\n(A DANFSe foi aberta em outra aba: use Imprimir / Salvar como PDF e anexe ao e-mail.)',
-      preferirShareSheet: false,
+      body,
+      arquivo: {
+        uri,
+        blob,
+        filename,
+        mimeType: 'application/pdf',
+      },
+    });
+    return { email, resultado };
+  } catch {
+    // Fallback: anexa HTML se a geração de PDF falhar
+    const htmlBlob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const resultado = await compartilharComEmail({
+      to: email,
+      subject,
+      body,
+      arquivo: {
+        blob: htmlBlob,
+        filename: `DANFSe_${serie}_${numero}.html`,
+        mimeType: 'text/html',
+      },
     });
     return { email, resultado };
   }
-
-  const { uri } = await Print.printToFileAsync({ html });
-  const resultado = await compartilharComEmail({
-    to: email,
-    subject,
-    body,
-    arquivo: {
-      uri,
-      filename: `DANFSe_${serie}_${numero}.pdf`,
-      mimeType: 'application/pdf',
-    },
-  });
-  return { email, resultado };
 }
 
 export async function compartilharDanfseComFeedback(item: NotaFiscalListRow): Promise<void> {
   const { email, resultado } = await compartilharDanfsePorEmail(item);
   const Toast = (await import('react-native-toast-message')).default;
+  if (resultado === 'eml') {
+    Toast.show({
+      type: 'success',
+      text1: 'E-mail com DANFSe em anexo baixado.',
+      text2: email
+        ? `Abra o arquivo .eml no Outlook (para ${email}) e clique em Enviar.`
+        : 'Abra o arquivo .eml no Outlook, confira o destinatário e envie.',
+    });
+    return;
+  }
   if (!email) {
     Toast.show({
       type: 'info',
       text1: 'E-mail do cliente não cadastrado.',
-      text2: isWeb()
-        ? 'DANFSe aberta em outra aba. Cadastre o e-mail ou preencha o destinatário.'
-        : 'Preencha o destinatário no app de e-mail ou cadastre em Contatos do cliente.',
+      text2: 'Preencha o destinatário no app de e-mail ou cadastre em Contatos do cliente.',
     });
   } else if (resultado === 'email') {
     Toast.show({
       type: 'success',
       text1: 'E-mail aberto.',
-      text2: isWeb()
-        ? `Destinatário: ${email}. Na aba da DANFSe use Imprimir → Salvar PDF e anexe.`
-        : `Destinatário sugerido: ${email}`,
+      text2: `Destinatário sugerido: ${email}`,
     });
   } else {
-    Toast.show({ type: 'success', text1: 'Compartilhamento iniciado.' });
+    Toast.show({ type: 'success', text1: 'Compartilhamento iniciado com anexo.' });
   }
 }
