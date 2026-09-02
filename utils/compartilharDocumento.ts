@@ -1,17 +1,24 @@
 import * as Sharing from 'expo-sharing';
 import { Linking, Platform } from 'react-native';
+import { safeTrim } from '@/utils/safeTrim';
 
 export type CompartilharResultado = 'email' | 'compartilhado';
+
+function isWeb(): boolean {
+  return Platform.OS === 'web' || (typeof document !== 'undefined' && typeof window !== 'undefined');
+}
 
 export function buildMailtoUrl(opts: {
   to?: string | null;
   subject: string;
   body: string;
 }): string {
-  const to = opts.to?.trim() || '';
+  const to = safeTrim(opts.to);
   const params = new URLSearchParams();
-  if (opts.subject) params.set('subject', opts.subject);
-  if (opts.body) params.set('body', opts.body);
+  const subject = safeTrim(opts.subject);
+  const body = safeTrim(opts.body);
+  if (subject) params.set('subject', subject);
+  if (body) params.set('body', body);
   const qs = params.toString();
   return qs ? `mailto:${to}?${qs}` : `mailto:${to}`;
 }
@@ -22,7 +29,7 @@ export async function abrirEmail(opts: {
   body: string;
 }): Promise<CompartilharResultado> {
   const url = buildMailtoUrl(opts);
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  if (isWeb()) {
     window.location.href = url;
     return 'email';
   }
@@ -58,20 +65,24 @@ export async function compartilharComEmail(opts: {
   const preferirShare = opts.preferirShareSheet !== false;
 
   if (
-    Platform.OS === 'web' &&
+    isWeb() &&
     typeof navigator !== 'undefined' &&
     opts.arquivo?.blob &&
     typeof File !== 'undefined'
   ) {
     const file = new File([opts.arquivo.blob], opts.arquivo.filename, { type: opts.arquivo.mimeType });
-    const shareData: ShareData = { title: opts.subject, text: opts.body, files: [file] };
+    const shareData: ShareData = {
+      title: safeTrim(opts.subject),
+      text: safeTrim(opts.body),
+      files: [file],
+    };
     if (navigator.share && navigator.canShare?.(shareData)) {
       await navigator.share(shareData);
       return 'compartilhado';
     }
   }
 
-  if (preferirShare && opts.arquivo?.uri && Platform.OS !== 'web') {
+  if (preferirShare && opts.arquivo?.uri && !isWeb()) {
     try {
       const ok = await compartilharArquivoNativo({
         uri: opts.arquivo.uri,

@@ -67,9 +67,14 @@ function formatDataHoraBr(iso) {
 
 function formatEndereco({ logradouro, numero, bairro, cep }) {
   const parts = [];
-  const rua = [logradouro, numero].filter(Boolean).join(' ').trim();
+  const rua = [logradouro, numero]
+    .map((p) => String(p ?? '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim();
   if (rua) parts.push(rua);
-  if (bairro) parts.push(bairro);
+  const bairroStr = String(bairro ?? '').trim();
+  if (bairroStr) parts.push(bairroStr);
   const cepF = formatCep(cep);
   if (cepF) parts.push(`Cep: ${cepF}`);
   return parts.join(' - ') || '—';

@@ -5,36 +5,47 @@ import { formatBRL } from '@/utils/currency';
 import { buildDanfseHtmlFromNota } from '@/utils/danfseHtml';
 import { fetchEmailCliente } from '@/services/clienteContatoService';
 import { compartilharComEmail } from '@/utils/compartilharDocumento';
+import { safeTrim } from '@/utils/safeTrim';
 import * as Print from 'expo-print';
 import { Platform } from 'react-native';
+
+function isWeb(): boolean {
+  return Platform.OS === 'web' || (typeof document !== 'undefined' && typeof window !== 'undefined');
+}
 
 export async function fetchDanfseHtml(item: NotaFiscalListRow): Promise<{
   html: string;
   danfeUrl: string | null;
 }> {
   let htmlApi: string | null = null;
-  let danfeUrl: string | null = item.danfe_url ?? null;
+  let danfeUrl: string | null = safeTrim(item.danfe_url) || null;
   const base = nfeApiBaseUrl();
   const { data: session } = await supabase.auth.getSession();
   const token = session.session?.access_token;
 
   if (item.status === 'autorizada' && base && token) {
-    const res = await fetch(`${base}/api/nfe/artefatos`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ notaFiscalId: item.id }),
-    });
-    const body = (await res.json().catch(() => ({}))) as {
-      danfe_url?: string;
-      html?: string;
-    };
-    if (typeof body.html === 'string' && body.html.includes('<html')) {
-      htmlApi = body.html;
+    try {
+      const res = await fetch(`${base}/api/nfe/artefatos`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ notaFiscalId: item.id }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        danfe_url?: string;
+        html?: string;
+        message?: string;
+      };
+      if (typeof body.html === 'string' && body.html.includes('<html')) {
+        htmlApi = body.html;
+      }
+      const url = safeTrim(body.danfe_url);
+      if (url) danfeUrl = url;
+    } catch {
+      /* fallback HTML local */
     }
-    if (body.danfe_url) danfeUrl = body.danfe_url;
   }
 
   const html = htmlApi || buildDanfseHtmlFromNota(item);
@@ -45,18 +56,22 @@ export function buildCorpoEmailDanfse(
   item: NotaFiscalListRow,
   opts?: { pdfLink?: string | null },
 ): string {
-  const nome = item.cliente?.nome_cliente ?? 'cliente';
+  const nome = safeTrim(item.cliente?.nome_cliente) || 'cliente';
+  const serie = safeTrim(item.serie) || '1';
+  const numero = safeTrim(item.numero) || '—';
   const linhas = [
     `Olá, ${nome}!`,
     '',
     'Segue a NFS-e referente ao serviço prestado:',
-    `• Nota: ${item.serie}/${item.numero}`,
+    `• Nota: ${serie}/${numero}`,
     `• Valor: ${formatBRL(item.valor_total)}`,
-    item.competencia ? `• Competência: ${item.competencia}` : null,
-    item.codigo_verificacao ? `• Código de verificação: ${item.codigo_verificacao}` : null,
+    item.competencia ? `• Competência: ${safeTrim(item.competencia)}` : null,
+    item.codigo_verificacao
+      ? `• Código de verificação: ${safeTrim(item.codigo_verificacao)}`
+      : null,
     '',
     opts?.pdfLink
-      ? `Documento (DANFSe): ${opts.pdfLink}`
+      ? `Documento (DANFSe): ${safeTrim(opts.pdfLink)}`
       : 'O documento DANFSe segue em anexo (ou abra pelo link se disponível).',
     '',
     'Qualquer dúvida, estamos à disposição.',
@@ -83,10 +98,12 @@ export async function compartilharDanfsePorEmail(item: NotaFiscalListRow): Promi
 }> {
   const email = await fetchEmailCliente(item.cliente_id);
   const { html, danfeUrl } = await fetchDanfseHtml(item);
-  const subject = `NFS-e ${item.serie}/${item.numero}`;
+  const serie = safeTrim(item.serie) || '1';
+  const numero = safeTrim(item.numero) || 's_numero';
+  const subject = `NFS-e ${serie}/${numero}`;
   const body = buildCorpoEmailDanfse(item, { pdfLink: danfeUrl });
 
-  if (Platform.OS === 'web') {
+  if (isWeb()) {
     const resultado = await compartilharComEmail({
       to: email,
       subject,
@@ -108,7 +125,7 @@ export async function compartilharDanfsePorEmail(item: NotaFiscalListRow): Promi
     body,
     arquivo: {
       uri,
-      filename: `DANFSe_${item.serie}_${item.numero}.pdf`,
+      filename: `DANFSe_${serie}_${numero}.pdf`,
       mimeType: 'application/pdf',
     },
   });

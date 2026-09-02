@@ -47,6 +47,7 @@ module.exports = async function handler(req, res) {
 
     const { perfil, config, emitente } = emitCtx;
     const prest = emitente || perfil || {};
+    const str = (v) => String(v ?? '').trim();
     const itemLista = itemListaServico(config?.codigo_tributacao_nacional || '010701');
 
     // Número da NFS-e TipLan (protocolo) tem prioridade sobre o RPS (nota.numero)
@@ -58,43 +59,45 @@ module.exports = async function handler(req, res) {
       admin,
       userId: nota.user_id,
       chave:
-        nota.codigo_verificacao ||
-        nota.chave_acesso ||
-        nota.protocolo_autorizacao ||
+        str(nota.codigo_verificacao) ||
+        str(nota.chave_acesso) ||
+        str(nota.protocolo_autorizacao) ||
         `${nota.serie}-${nota.numero}`,
-      xmlRaw: nota.xml_autorizado,
+      xmlRaw: typeof nota.xml_autorizado === 'string' ? nota.xml_autorizado : String(nota.xml_autorizado ?? ''),
       meta: {
-        prestadorNome: prest.razao_social || 'Prestador',
-        prestadorFantasia: prest.nome || prest.razao_social || '',
+        prestadorNome: str(prest.razao_social) || 'Prestador',
+        prestadorFantasia: str(prest.nome) || str(prest.razao_social) || '',
         prestadorDoc: onlyDigits(prest.documento),
         prestadorIm: onlyDigits(config?.inscricao_municipal || prest.inscricao_municipal),
-        prestadorIe: prest.inscricao_estadual || config?.inscricao_estadual || '',
-        prestadorTel: prest.telefone_suporte || '',
+        prestadorIe: str(prest.inscricao_estadual || config?.inscricao_estadual),
+        prestadorTel: str(prest.telefone_suporte),
         prestadorEmail: '',
         prestadorEndereco: joinEndereco(prest),
-        prestadorMunicipio: (prest.cidade || 'AMERICANA').toUpperCase(),
-        prestadorUf: (prest.uf || 'SP').toUpperCase(),
-        tomadorNome: cliente?.nome || cliente?.nome_fantasia || 'Tomador',
+        prestadorMunicipio: str(prest.cidade || 'AMERICANA').toUpperCase(),
+        prestadorUf: str(prest.uf || 'SP').toUpperCase(),
+        tomadorNome: str(cliente?.nome || cliente?.nome_fantasia) || 'Tomador',
         tomadorDoc: onlyDigits(cliente?.cnpj) || onlyDigits(cliente?.documento),
         tomadorIm: '',
-        tomadorIe: cliente?.inscricao_estadual || '',
-        tomadorTel: cliente?.celular || '',
-        tomadorEmail: cliente?.email || '',
+        tomadorIe: str(cliente?.inscricao_estadual),
+        tomadorTel: str(cliente?.celular),
+        tomadorEmail: str(cliente?.email),
         tomadorEndereco: joinEndereco(cliente),
-        tomadorMunicipio: (cliente?.cidade || '').toUpperCase(),
-        tomadorUf: (cliente?.estado || cliente?.uf || '').toUpperCase(),
+        tomadorMunicipio: str(cliente?.cidade).toUpperCase(),
+        tomadorUf: str(cliente?.estado || cliente?.uf).toUpperCase(),
         numero: numeroNfse,
         serie: String(nota.serie || '1'),
         rpsNumero: String(nota.numero ?? ''),
         rpsSerie: String(nota.serie || '1'),
         rpsDataEmissao: nota.data_emissao,
-        codigoVerificacao: nota.codigo_verificacao,
-        chaveAcesso: nota.chave_acesso,
+        codigoVerificacao: str(nota.codigo_verificacao),
+        chaveAcesso: str(nota.chave_acesso),
         discriminacao:
-          itens?.[0]?.descricao || config?.descricao_servico_padrao || 'Prestação de serviços',
+          str(itens?.[0]?.descricao) ||
+          str(config?.descricao_servico_padrao) ||
+          'Prestação de serviços',
         valor: nota.valor_total,
         itemLista,
-        competencia: nota.competencia || '',
+        competencia: str(nota.competencia),
         dataEmissao: nota.data_emissao || String(nota.data_emissao || '').slice(0, 10),
         documentoCobranca: String(nota.numero ?? numeroNfse),
         regimeTributario: Number(config?.regime_tributario ?? 0) || null,

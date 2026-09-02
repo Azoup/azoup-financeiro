@@ -240,7 +240,7 @@ export default function NotasFiscaisIndexScreen() {
   };
 
   const baixarXml = async (item: NotaFiscalListRow) => {
-    const xml = item.xml_autorizado?.trim();
+    const xml = typeof item.xml_autorizado === 'string' ? item.xml_autorizado.trim() : '';
     if (!xml) {
       Toast.show({
         type: 'info',

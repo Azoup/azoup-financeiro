@@ -1,3 +1,5 @@
+import { safeTrim } from '@/utils/safeTrim';
+
 /** Rótulos amigáveis do status interno da NF-e. */
 export function labelNotaFiscalStatus(status: string): string {
   switch (status) {
@@ -48,10 +50,10 @@ export function podeImprimirDanfe(nota: {
 }): boolean {
   if (nota.status !== 'autorizada') return false;
   return Boolean(
-    nota.danfe_url?.trim() ||
-      nota.codigo_verificacao?.trim() ||
-      nota.chave_acesso?.trim() ||
-      nota.xml_autorizado?.trim(),
+    safeTrim(nota.danfe_url) ||
+      safeTrim(nota.codigo_verificacao) ||
+      safeTrim(nota.chave_acesso) ||
+      safeTrim(nota.xml_autorizado),
   );
 }
 
@@ -59,7 +61,7 @@ export function podeBaixarXmlNfse(nota: {
   status: string;
   xml_autorizado?: string | null;
 }): boolean {
-  return nota.status === 'autorizada' && Boolean(nota.xml_autorizado?.trim());
+  return nota.status === 'autorizada' && Boolean(safeTrim(nota.xml_autorizado));
 }
 
 export function podeCancelarNotaFiscal(nota: {
@@ -68,10 +70,10 @@ export function podeCancelarNotaFiscal(nota: {
   protocolo_autorizacao?: string | null;
   tipo_documento?: string | null;
 }): boolean {
-  if (nota.status !== 'autorizada' || !nota.chave_acesso?.trim()) return false;
+  if (nota.status !== 'autorizada' || !safeTrim(nota.chave_acesso)) return false;
   // NFS-e (padrão do app) ou tipo ausente em registros antigos.
   if (!nota.tipo_documento || nota.tipo_documento === 'nfse') return true;
-  return Boolean(nota.protocolo_autorizacao?.trim());
+  return Boolean(safeTrim(nota.protocolo_autorizacao));
 }
 
 export function podeReemitirNotaFiscal(nota: { status: string }): boolean {
