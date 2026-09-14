@@ -14,6 +14,7 @@ import {
   createEmitente,
   deleteEmitente,
   emitenteLabel,
+  emitenteNome,
   ensureEmitentes,
   fetchCertificadoAtivoEmitente,
   setEmitentePadrao,
@@ -500,7 +501,7 @@ export default function NfeConfigScreen() {
                 onPress={() => void selectEmitente(e.id)}
               >
                 <Text style={[styles.tabTxt, on && styles.tabTxtOn]} numberOfLines={2}>
-                  {e.nome}
+                  {emitenteNome(e)}
                   {e.padrao ? ' ★' : ''}
                 </Text>
                 <Text style={[styles.tabSub, on && styles.tabTxtOn]} numberOfLines={1}>

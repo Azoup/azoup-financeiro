@@ -71,3 +71,37 @@ export type AzoupDashboardData = {
   planos_clientes: AzoupPlanoResumo[];
   clientes: AzoupClienteResumo[];
 };
+
+export type AzoupFaturaResumo = {
+  id: string;
+  stripe_invoice_id: string;
+  numero: string | null;
+  azoup_cliente_id: string | null;
+  cliente_nome: string;
+  cliente_email: string | null;
+  empresa_matriz_nome: string | null;
+  empresa_matriz_cnpj: string | null;
+  pode_emitir_nf: boolean;
+  valor_centavos: number;
+  status: string;
+  periodo_inicio: string | null;
+  periodo_fim: string | null;
+  data_pagamento: string | null;
+  criado_em: string | null;
+  vencimento?: string | null;
+  competencia: string | null;
+  frequencia: string;
+  endereco?: AzoupEnderecoResumo;
+  fonte: 'stripe' | 'historico';
+  /** NFS-e já emitida para esta fatura Stripe. */
+  nfse_emitida?: boolean;
+  nota_fiscal_id?: string | null;
+};
+
+export type AzoupFaturasData = {
+  gerado_em: string;
+  from: string | null;
+  to: string | null;
+  total: number;
+  faturas: AzoupFaturaResumo[];
+};

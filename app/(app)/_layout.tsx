@@ -64,6 +64,10 @@ function AppShell() {
           >
             <Tabs.Screen name="dashboard" options={{ title: 'Painel' }} />
             <Tabs.Screen name="azoup" options={{ title: 'Azoup - Web', headerShown: false }} />
+            <Tabs.Screen
+              name="faturamento"
+              options={{ title: 'Faturamento', headerShown: false }}
+            />
             <Tabs.Screen name="clients" options={{ title: 'Clientes', headerShown: false }} />
             <Tabs.Screen
               name="mensalidades"

@@ -1,7 +1,7 @@
 import { BrandLogo } from '@/components/BrandLogo';
 import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import { useSidebar } from '@/context/SidebarContext';
-import { emitenteLabel } from '@/services/nfseEmitenteService';
+import { emitenteNome } from '@/services/nfseEmitenteService';
 import { useTheme } from '@/context/ThemeContext';
 import { fonts } from '@/theme/typography';
 import { Ionicons } from '@expo/vector-icons';
@@ -45,6 +45,14 @@ const NAV_ITEMS: NavItem[] = [
     match: '/azoup',
     icon: 'planet-outline',
     iconActive: 'planet',
+  },
+  {
+    key: 'faturamento',
+    label: 'Faturamento',
+    href: '/(app)/faturamento',
+    match: '/faturamento',
+    icon: 'card-outline',
+    iconActive: 'card',
   },
   {
     key: 'clients',
@@ -381,7 +389,7 @@ export function AppSideNav() {
                   style={[styles.empresaOpt, on && styles.empresaOptOn]}
                 >
                   <Text style={[styles.empresaOptTxt, on && styles.empresaOptTxtOn]} numberOfLines={2}>
-                    {e.nome?.trim() || e.razao_social?.trim() || emitenteLabel(e)}
+                    {emitenteNome(e)}
                   </Text>
                 </Pressable>
               );

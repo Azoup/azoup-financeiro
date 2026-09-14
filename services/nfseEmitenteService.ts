@@ -229,6 +229,27 @@ export async function fetchEmitentePadrao(userId: string): Promise<NfseEmitente 
   return list.find((e) => e.padrao) ?? list[0] ?? null;
 }
 
+/** Emitente 1: o rótulo "Emitente 1", senão o mais antigo cadastrado. */
+export function escolherEmitenteUm(list: NfseEmitente[]): NfseEmitente | null {
+  if (!list.length) return null;
+  const porNome = list.find((e) => /^emitente\s*1$/i.test((e.nome ?? '').trim()));
+  if (porNome) return porNome;
+  return [...list].sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''))[0] ?? null;
+}
+
+/** Clientes sem empresa passam a usar o emitente 1. Quem já foi alterado não muda. */
+export async function atribuirClientesSemEmpresaAoEmitenteUm(userId: string): Promise<void> {
+  const um = escolherEmitenteUm(await fetchEmitentes(userId));
+  if (!um) return;
+  const { error } = await supabase.from('clientes').update({ emitente_nf_id: um.id }).is('emitente_nf_id', null);
+  if (error) {
+    if (/emitente_nf_id/i.test(error.message) && /does not exist|column|schema cache/i.test(error.message)) {
+      return;
+    }
+    throw new Error(error.message);
+  }
+}
+
 /**
  * Garante pelo menos 1 emitente (seed a partir de perfil + nfe_config se a tabela existir).
  */
@@ -444,6 +465,18 @@ export async function uploadCertificadoA1Emitente(
   await uploadCertificadoA1(userId, file, senha, emitenteId);
 }
 
+const ROTULO_EMITENTE = /^emitente(\s+(\d+|regime normal|simples nacional))?$/i;
+const RAZAO_PLACEHOLDER = /^(prestador|preencher razão social)$/i;
+
+/** Nome da empresa para filtros e seleção. Ignora o rótulo interno "Emitente 1/2". */
+export function emitenteNome(e: Pick<NfseEmitente, 'nome' | 'razao_social'>): string {
+  const razao = e.razao_social?.trim() ?? '';
+  const nome = e.nome?.trim() ?? '';
+  if (razao && !RAZAO_PLACEHOLDER.test(razao)) return razao;
+  if (nome && !ROTULO_EMITENTE.test(nome)) return nome;
+  return razao || nome || 'Empresa';
+}
+
 export function emitenteLabel(
   e: Pick<NfseEmitente, 'nome' | 'documento' | 'razao_social'> & {
     regime_tributario?: number | null;
@@ -458,7 +491,7 @@ export function emitenteLabel(
       : doc.length === 11
         ? doc.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4')
         : doc || '—';
-  const nome = e.nome?.trim() || e.razao_social?.trim() || 'Emitente';
+  const nome = emitenteNome(e);
   let regime = '';
   if (e.regime_tributario != null) {
     if (e.regime_tributario === 3) {

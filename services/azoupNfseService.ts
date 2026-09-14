@@ -194,29 +194,73 @@ export async function ensureLocalClienteFromAzoup(
 export async function emitirNfseClienteAzoup(
   userId: string,
   azoupClienteId: string,
-  opts?: { emitenteId?: string | null; usarValorBruto?: boolean; descricaoServico?: string | null },
+  opts?: {
+    emitenteId?: string | null;
+    usarValorBruto?: boolean;
+    descricaoServico?: string | null;
+    /** Valor em reais da fatura (sobrescreve o MRR). */
+    valorReais?: number | null;
+    /** Competência YYYY-MM da fatura. */
+    competencia?: string | null;
+    /** Id Stripe da fatura — evita emitir duas vezes. */
+    stripeInvoiceId?: string | null;
+  },
 ): Promise<{ success: boolean; notaId?: string; message?: string; clienteLocalId?: string }> {
   const payload = await fetchAzoupClienteParaNf(azoupClienteId);
   const { clienteId } = await ensureLocalClienteFromAzoup(userId, payload);
 
-  const centavos = opts?.usarValorBruto
-    ? payload.valor_bruto_centavos || payload.valor_centavos
-    : payload.valor_centavos || payload.valor_bruto_centavos;
-  if (!centavos || centavos <= 0) {
-    throw new Error('Assinatura sem valor para emitir NFS-e.');
+  const stripeInvoiceId = opts?.stripeInvoiceId?.trim() || null;
+  if (stripeInvoiceId) {
+    const marker = `stripe_invoice:${stripeInvoiceId}`;
+    const { data: itens } = await supabase
+      .from('nota_fiscal_item')
+      .select('id, descricao, nota_fiscal_id, nota_fiscal:nota_fiscal_id(id, user_id, status)')
+      .ilike('descricao', `%${marker}%`)
+      .limit(20);
+    const jaEmitida = (itens ?? []).some((row) => {
+      const nf = (row as {
+        nota_fiscal?: { user_id?: string; status?: string } | { user_id?: string; status?: string }[];
+      }).nota_fiscal;
+      const nota = Array.isArray(nf) ? nf[0] : nf;
+      if (!nota || nota.user_id !== userId) return false;
+      return nota.status === 'autorizada' || nota.status === 'processando' || nota.status === 'rascunho';
+    });
+    if (jaEmitida) {
+      return {
+        success: false,
+        message: `NFS-e já emitida para a fatura ${stripeInvoiceId}.`,
+        clienteLocalId: clienteId,
+      };
+    }
+  }
+
+  let valorReais = opts?.valorReais != null && opts.valorReais > 0 ? opts.valorReais : null;
+  if (valorReais == null) {
+    const centavos = opts?.usarValorBruto
+      ? payload.valor_bruto_centavos || payload.valor_centavos
+      : payload.valor_centavos || payload.valor_bruto_centavos;
+    if (!centavos || centavos <= 0) {
+      throw new Error('Assinatura sem valor para emitir NFS-e.');
+    }
+    valorReais = centavos / 100;
   }
 
   const agora = new Date();
-  const competencia = `${agora.getFullYear()}-${`${agora.getMonth() + 1}`.padStart(2, '0')}`;
-  const descricao =
+  const competencia =
+    opts?.competencia?.trim() ||
+    `${agora.getFullYear()}-${`${agora.getMonth() + 1}`.padStart(2, '0')}`;
+  const baseDesc =
     opts?.descricaoServico?.trim() ||
     `Assinatura Azoup — ${payload.plano_id ? `plano ${payload.plano_id}` : payload.nome} — ${competencia}`;
+  const descricao = stripeInvoiceId
+    ? `${baseDesc} [stripe_invoice:${stripeInvoiceId}]`.slice(0, 2000)
+    : baseDesc;
 
   const res = await gerarNotaFiscalAvulsa(
     userId,
     {
       cliente_id: clienteId,
-      valor: centavos / 100,
+      valor: valorReais,
       descricao,
       competencia,
     },

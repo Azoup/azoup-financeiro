@@ -21,7 +21,7 @@ import { validateClienteForm } from '@/utils/validation';
 import { isCnpjDigitsComplete, isZpfDocumento, CNPJ_INPUT_MASK } from '@/utils/cnpj';
 import { fetchCompanyByCnpj } from '@/services/cnpjLookup';
 import { useAuth } from '@/context/AuthContext';
-import { emitenteLabel, ensureEmitentes } from '@/services/nfseEmitenteService';
+import { escolherEmitenteUm, emitenteNome, ensureEmitentes } from '@/services/nfseEmitenteService';
 import type { NfseEmitente } from '@/types/notaFiscal';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
@@ -161,6 +161,12 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
       .then(setEmitentes)
       .catch(() => setEmitentes([]));
   }, [user?.id]);
+
+  useEffect(() => {
+    const um = escolherEmitenteUm(emitentes);
+    if (!um) return;
+    setValues((v) => (v.emitente_nf_id ? v : { ...v, emitente_nf_id: um.id }));
+  }, [emitentes, initial]);
 
   const previewAnual = useMemo(
     () =>
@@ -369,7 +375,7 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
                   style={[styles.emitenteOpt, on && styles.emitenteOptOn]}
                 >
                   <Text style={[styles.emitenteOptTxt, on && styles.emitenteOptTxtOn]} numberOfLines={2}>
-                    {e.nome?.trim() || emitenteLabel(e)}
+                    {emitenteNome(e)}
                   </Text>
                 </Pressable>
               );

@@ -1,5 +1,5 @@
 import { useAuth } from '@/context/AuthContext';
-import { ensureEmitentes } from '@/services/nfseEmitenteService';
+import { atribuirClientesSemEmpresaAoEmitenteUm, ensureEmitentes } from '@/services/nfseEmitenteService';
 import type { NfseEmitente } from '@/types/notaFiscal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
@@ -57,6 +57,7 @@ export function EmpresaFiltroProvider({ children }: { children: React.ReactNode 
     void ensureEmitentes(user.id)
       .then((list) => {
         if (alive) setEmitentes(list);
+        return atribuirClientesSemEmpresaAoEmitenteUm(user.id);
       })
       .catch(() => {
         if (alive) setEmitentes([]);

@@ -9,7 +9,7 @@ import {
   fetchNotasFiscaisLista,
   reemitirNotaFiscalSefaz,
 } from '@/services/notaFiscalService';
-import { ensureEmitentes } from '@/services/nfseEmitenteService';
+import { emitenteNome, ensureEmitentes } from '@/services/nfseEmitenteService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { NfseEmitente, NotaFiscalListRow, NotaFiscalStatus } from '@/types/notaFiscal';
 import { showAppToast } from '@/utils/appToast';
@@ -491,7 +491,7 @@ export default function NotasFiscaisIndexScreen() {
                   style={[styles.chip, active && styles.chipOn]}
                 >
                   <Text style={[styles.chipTxt, active && styles.chipTxtOn]} numberOfLines={1}>
-                    {e.nome?.trim() || e.razao_social?.trim() || 'Emitente'}
+                    {emitenteNome(e)}
                   </Text>
                 </Pressable>
               );

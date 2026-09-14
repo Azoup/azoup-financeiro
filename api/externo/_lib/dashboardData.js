@@ -268,4 +268,10 @@ async function carregarClienteAzoupParaNf(admin, azoupClienteId) {
   };
 }
 
-module.exports = { carregarDashboardAzoup, carregarClienteAzoupParaNf };
+module.exports = {
+  carregarDashboardAzoup,
+  carregarClienteAzoupParaNf,
+  nomeCliente,
+  rotuloEmpresaMatriz,
+  pickEnderecoEmpresa,
+};
