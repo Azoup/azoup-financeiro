@@ -65,6 +65,8 @@ type FormState = {
   uf: string;
   cep: string;
   serie: string;
+  /** Último RPS já emitido neste CNPJ. A próxima nota usa último + 1. */
+  ultimo_numero: string;
   proximo_numero: string;
   ibge: string;
   inscricao_municipal: string;
@@ -107,6 +109,7 @@ function formFromEmitente(e: NfseEmitente): FormState {
     uf: e.uf,
     cep: e.cep,
     serie: e.serie,
+    ultimo_numero: String(Math.max(0, Number(e.proximo_numero) - 1)),
     proximo_numero: String(e.proximo_numero),
     ibge: e.codigo_ibge_emitente,
     inscricao_municipal: e.inscricao_municipal ?? '',
@@ -390,7 +393,10 @@ export default function NfeConfigScreen() {
         uf: form.uf,
         cep: form.cep,
         serie: form.serie,
-        proximo_numero: Math.max(1, parseInt(form.proximo_numero, 10) || 1),
+        proximo_numero: Math.max(
+          1,
+          (parseInt(form.ultimo_numero.replace(/\D/g, ''), 10) || 0) + 1,
+        ),
         codigo_ibge_emitente: form.ibge,
         inscricao_municipal: form.inscricao_municipal,
         inscricao_estadual: form.inscricao_estadual,
@@ -660,11 +666,24 @@ export default function NfeConfigScreen() {
             <Text style={styles.h}>3. Município e numeração</Text>
             <FormTextInput label="Série do RPS" value={form.serie} onChangeText={(t) => patch({ serie: t })} />
             <FormTextInput
-              label="Próximo número do RPS"
-              value={form.proximo_numero}
-              onChangeText={(t) => patch({ proximo_numero: t })}
+              label="Último número emitido"
+              value={form.ultimo_numero}
+              onChangeText={(t) => {
+                const digits = t.replace(/\D/g, '');
+                const ultimo = digits ? parseInt(digits, 10) : 0;
+                patch({
+                  ultimo_numero: digits,
+                  proximo_numero: String(Math.max(1, ultimo + 1)),
+                });
+              }}
               keyboardType="number-pad"
+              placeholder="Ex.: 1452"
             />
+            <Text style={styles.sub}>
+              A próxima NFS-e deste CNPJ sairá com o número{' '}
+              {form.proximo_numero || '1'}. Use o último RPS que já foi aceito na
+              prefeitura para a sequência continuar daí.
+            </Text>
             <FormTextInput
               label="Código IBGE"
               value={form.ibge}
