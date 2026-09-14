@@ -6,12 +6,7 @@ import { buildDanfseHtmlFromNota } from '@/utils/danfseHtml';
 import { fetchEmailCliente } from '@/services/clienteContatoService';
 import { compartilharComEmail, type CompartilharResultado } from '@/utils/compartilharDocumento';
 import { safeTrim } from '@/utils/safeTrim';
-import * as Print from 'expo-print';
-import { Platform } from 'react-native';
-
-function isWeb(): boolean {
-  return Platform.OS === 'web' || (typeof document !== 'undefined' && typeof window !== 'undefined');
-}
+import { htmlDanfseParaPdf } from '@/utils/baixarDanfseArquivos';
 
 export async function fetchDanfseHtml(item: NotaFiscalListRow): Promise<{
   html: string;
@@ -75,27 +70,9 @@ export function buildCorpoEmailDanfse(item: NotaFiscalListRow): string {
   return linhas.join('\n');
 }
 
-async function htmlParaPdfBlob(html: string): Promise<{ blob: Blob; uri?: string }> {
-  const { uri } = await Print.printToFileAsync({ html });
-  if (isWeb() && typeof fetch !== 'undefined') {
-    const res = await fetch(uri);
-    const blob = await res.blob();
-    // Garante MIME de PDF mesmo se o browser devolver octet-stream
-    const pdfBlob =
-      blob.type === 'application/pdf'
-        ? blob
-        : new Blob([await blob.arrayBuffer()], { type: 'application/pdf' });
-    return { blob: pdfBlob, uri };
-  }
-  // Native: lê arquivo gerado pelo expo-print
-  const FileSystem = await import('expo-file-system/legacy');
-  const base64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return { blob: new Blob([bytes], { type: 'application/pdf' }), uri };
+async function htmlParaPdfBlob(html: string): Promise<{ blob: Blob }> {
+  const blob = await htmlDanfseParaPdf(html);
+  return { blob };
 }
 
 export async function compartilharDanfsePorEmail(item: NotaFiscalListRow): Promise<{
@@ -111,13 +88,12 @@ export async function compartilharDanfsePorEmail(item: NotaFiscalListRow): Promi
   const filename = `DANFSe_${serie}_${numero}.pdf`;
 
   try {
-    const { blob, uri } = await htmlParaPdfBlob(html);
+    const { blob } = await htmlParaPdfBlob(html);
     const resultado = await compartilharComEmail({
       to: email,
       subject,
       body,
       arquivo: {
-        uri,
         blob,
         filename,
         mimeType: 'application/pdf',

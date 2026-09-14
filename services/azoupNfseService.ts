@@ -193,7 +193,7 @@ export async function ensureLocalClienteFromAzoup(
 export async function emitirNfseClienteAzoup(
   userId: string,
   azoupClienteId: string,
-  opts?: { emitenteId?: string | null; usarValorBruto?: boolean },
+  opts?: { emitenteId?: string | null; usarValorBruto?: boolean; descricaoServico?: string | null },
 ): Promise<{ success: boolean; notaId?: string; message?: string; clienteLocalId?: string }> {
   const payload = await fetchAzoupClienteParaNf(azoupClienteId);
   const { clienteId } = await ensureLocalClienteFromAzoup(userId, payload);
@@ -207,7 +207,9 @@ export async function emitirNfseClienteAzoup(
 
   const agora = new Date();
   const competencia = `${agora.getFullYear()}-${`${agora.getMonth() + 1}`.padStart(2, '0')}`;
-  const descricao = `Assinatura Azoup — ${payload.plano_id ? `plano ${payload.plano_id}` : payload.nome} — ${competencia}`;
+  const descricao =
+    opts?.descricaoServico?.trim() ||
+    `Assinatura Azoup — ${payload.plano_id ? `plano ${payload.plano_id}` : payload.nome} — ${competencia}`;
 
   const res = await gerarNotaFiscalAvulsa(
     userId,

@@ -12,8 +12,9 @@ import { emitenteLabel, ensureEmitentes } from '@/services/nfseEmitenteService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { NfseEmitente, NotaFiscalListRow, NotaFiscalStatus } from '@/types/notaFiscal';
 import { showAppToast } from '@/utils/appToast';
+import { baixarDanfePdf, baixarLoteDanfeXml } from '@/utils/baixarDanfseArquivos';
 import { formatBRL } from '@/utils/currency';
-import { compartilharDanfseComFeedback, fetchDanfseHtml } from '@/utils/danfseDocumento';
+import { compartilharDanfseComFeedback } from '@/utils/danfseDocumento';
 import { formatDateTimeBRFromISO } from '@/utils/date';
 import {
   corNotaFiscalStatus,
@@ -27,7 +28,6 @@ import {
 } from '@/utils/nfeStatus';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -68,29 +68,6 @@ function baixarXmlNoNavegador(xml: string, nomeArquivo: string) {
   URL.revokeObjectURL(url);
 }
 
-function abrirHtmlRenderizado(html: string): boolean {
-  if (Platform.OS !== 'web' || typeof window === 'undefined' || typeof document === 'undefined') {
-    return false;
-  }
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const w = window.open(url, '_blank', 'noopener,noreferrer');
-  if (w) {
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    return true;
-  }
-  const w2 = window.open('', '_blank', 'noopener,noreferrer');
-  if (w2) {
-    w2.document.open();
-    w2.document.write(html);
-    w2.document.close();
-    URL.revokeObjectURL(url);
-    return true;
-  }
-  URL.revokeObjectURL(url);
-  return false;
-}
-
 export default function NotasFiscaisIndexScreen() {
   const { user } = useAuth();
   const router = useRouter();
@@ -104,6 +81,8 @@ export default function NotasFiscaisIndexScreen() {
   const [reemitBusyId, setReemitBusyId] = useState<string | null>(null);
   const [printBusyId, setPrintBusyId] = useState<string | null>(null);
   const [shareBusyId, setShareBusyId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [batchBusy, setBatchBusy] = useState(false);
 
   const [statusFilter, setStatusFilter] = useState<StatusFiltro>('todos');
   const [emitenteFilter, setEmitenteFilter] = useState<string>('todos');
@@ -197,6 +176,50 @@ export default function NotasFiscaisIndexScreen() {
     setClienteSearch('');
   };
 
+  const baixaveisVisiveis = useMemo(
+    () => filtered.filter((r) => podeImprimirDanfe(r)),
+    [filtered],
+  );
+  const selecionadasVisiveis = baixaveisVisiveis.filter((r) => selectedIds.includes(r.id));
+  const todasVisiveisMarcadas =
+    baixaveisVisiveis.length > 0 && selecionadasVisiveis.length === baixaveisVisiveis.length;
+
+  const alternarNota = (id: string) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const alternarTodasVisiveis = () => {
+    setSelectedIds((prev) => {
+      const visiveis = baixaveisVisiveis.map((r) => r.id);
+      if (visiveis.length && visiveis.every((id) => prev.includes(id))) {
+        return prev.filter((id) => !visiveis.includes(id));
+      }
+      return [...new Set([...prev, ...visiveis])];
+    });
+  };
+
+  const baixarSelecionadas = async () => {
+    const itens = filtered.filter((r) => selectedIds.includes(r.id) && podeImprimirDanfe(r));
+    if (!itens.length) {
+      Toast.show({ type: 'info', text1: 'Selecione notas autorizadas para baixar.' });
+      return;
+    }
+    setBatchBusy(true);
+    try {
+      const res = await baixarLoteDanfeXml(itens);
+      if (res.modo === 'cancelado') return;
+      const extra = res.falhas ? ` ${res.falhas} nota(s) não puderam ser geradas.` : '';
+      Toast.show({
+        type: 'success',
+        text1: res.modo === 'pasta' ? 'Arquivos salvos na pasta escolhida.' : 'Download do ZIP iniciado.',
+        text2: `${res.arquivos} arquivo(s) (DANFE e XML).${extra}`,
+      });
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message || 'Falha ao baixar as notas.' });
+    } finally {
+      setBatchBusy(false);
+    }
+  };
   const resolveEmitenteLabel = (item: NotaFiscalListRow) => {
     if (item.emitente) return emitenteLabel(item.emitente);
     const fromList = item.emitente_id ? emitenteMap.get(item.emitente_id) : null;
@@ -204,25 +227,13 @@ export default function NotasFiscaisIndexScreen() {
     return null;
   };
 
-  const imprimirDanfe = async (item: NotaFiscalListRow) => {
+  const baixarDanfe = async (item: NotaFiscalListRow) => {
     setPrintBusyId(item.id);
     try {
-      const { html, danfeUrl } = await fetchDanfseHtml(item);
-      if (danfeUrl && danfeUrl !== item.danfe_url) await load();
-
-      if (abrirHtmlRenderizado(html)) return;
-
-      const { uri } = await Print.printToFileAsync({ html });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, {
-          mimeType: 'application/pdf',
-          dialogTitle: `DANFSe ${item.serie}-${item.numero}`,
-        });
-      } else {
-        await Print.printAsync({ html });
-      }
+      await baixarDanfePdf(item);
+      Toast.show({ type: 'success', text1: 'Download da DANFE iniciado.' });
     } catch (e) {
-      Toast.show({ type: 'error', text1: (e as Error).message || 'Falha ao gerar DANFSe.' });
+      Toast.show({ type: 'error', text1: (e as Error).message || 'Falha ao baixar a DANFE.' });
     } finally {
       setPrintBusyId(null);
     }
@@ -245,7 +256,7 @@ export default function NotasFiscaisIndexScreen() {
       Toast.show({
         type: 'info',
         text1: 'XML ainda não disponível nesta nota.',
-        text2: 'Notas emitidas antes do ajuste: use Imprimir DANFSe ou confira no portal da prefeitura.',
+        text2: 'Notas emitidas antes do ajuste: confira no portal da prefeitura.',
       });
       return;
     }
@@ -323,10 +334,28 @@ export default function NotasFiscaisIndexScreen() {
     const reemitindo = reemitBusyId === item.id;
     const imprimindo = printBusyId === item.id;
     const compartilhando = shareBusyId === item.id;
+    const selecionada = selectedIds.includes(item.id);
 
     return (
       <Card style={styles.card}>
         <View style={styles.cardTop}>
+          {podeDanfe ? (
+            <Pressable
+              onPress={() => alternarNota(item.id)}
+              hitSlop={8}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: selecionada }}
+              style={styles.check}
+            >
+              <Ionicons
+                name={selecionada ? 'checkbox' : 'square-outline'}
+                size={22}
+                color={selecionada ? colors.orange : colors.gray400}
+              />
+            </Pressable>
+          ) : (
+            <View style={styles.check} />
+          )}
           <View style={{ flex: 1 }}>
             <Text style={styles.nfNum}>
               NFS-e {item.serie}/{item.numero}
@@ -386,9 +415,9 @@ export default function NotasFiscaisIndexScreen() {
             style={styles.btnAcao}
           />
           <PrimaryButton
-            title={imprimindo ? 'Abrindo…' : 'Imprimir DANFSe'}
+            title={imprimindo ? 'Baixando…' : 'Baixar DANFE'}
             variant="secondary"
-            onPress={() => void imprimirDanfe(item)}
+            onPress={() => void baixarDanfe(item)}
             disabled={!podeDanfe || imprimindo}
             style={styles.btnAcao}
           />
@@ -521,6 +550,28 @@ export default function NotasFiscaisIndexScreen() {
           </Pressable>
         ) : null}
       </View>
+
+      {baixaveisVisiveis.length ? (
+        <View style={styles.loteBar}>
+          <Pressable onPress={alternarTodasVisiveis} style={styles.loteCheck} hitSlop={6}>
+            <Ionicons
+              name={todasVisiveisMarcadas ? 'checkbox' : 'square-outline'}
+              size={22}
+              color={todasVisiveisMarcadas ? colors.orange : colors.gray400}
+            />
+            <Text style={styles.loteCheckTxt}>
+              Selecionar todas visíveis ({selecionadasVisiveis.length}/{baixaveisVisiveis.length})
+            </Text>
+          </Pressable>
+          <PrimaryButton
+            title={batchBusy ? 'Baixando…' : 'Baixar DANFE e XML'}
+            onPress={() => void baixarSelecionadas()}
+            disabled={batchBusy || selecionadasVisiveis.length === 0}
+            loading={batchBusy}
+            style={styles.loteBtn}
+          />
+        </View>
+      ) : null}
     </View>
   );
 
@@ -640,6 +691,19 @@ const styles = StyleSheet.create({
   },
   resultTxt: { fontSize: 12, color: colors.gray600, fontWeight: '600' },
   clearTxt: { fontSize: 12, color: colors.orange, fontWeight: '700' },
+  loteBar: {
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+    padding: spacing.sm,
+    backgroundColor: colors.white,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.gray100,
+  },
+  loteCheck: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  loteCheckTxt: { flex: 1, fontSize: 13, fontWeight: '700', color: colors.petroleum },
+  loteBtn: { minHeight: 44 },
+  check: { width: 28, paddingTop: 2 },
   list: { padding: spacing.md, paddingBottom: spacing.xl * 2 },
   card: { marginBottom: spacing.md },
   cardTop: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },

@@ -150,6 +150,8 @@ export default function ContasReceberScreen() {
   const [nfPosPagamentoMensalidade, setNfPosPagamentoMensalidade] = useState<MensalidadeGerada | null>(null);
   const [nfEmitindoPosPagamento, setNfEmitindoPosPagamento] = useState(false);
   const [nfConfirmItem, setNfConfirmItem] = useState<ContaReceberListRow | null>(null);
+  const [nfConfirmCompetencia, setNfConfirmCompetencia] = useState<string | null>(null);
+  const [nfConfirmDisc, setNfConfirmDisc] = useState<string | undefined>(undefined);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -509,12 +511,23 @@ export default function ContasReceberScreen() {
     await refreshLista();
   };
 
-  const solicitarEmitirNf = (item: ContaReceberListRow) => {
+  const solicitarEmitirNf = async (item: ContaReceberListRow) => {
     if (item.nota_fiscal_id) {
       router.push('/(app)/notas-fiscais');
       return;
     }
     fecharAcoes();
+    let competencia: string | null = null;
+    let disc: string | undefined;
+    if (user?.id && item.origem === 'mensalidade' && item.mensalidade_id) {
+      const m = await fetchMensalidadeGeradaById(user.id, item.mensalidade_id).catch(() => null);
+      competencia = m?.competencia ?? null;
+    } else if (user?.id && item.origem === 'venda' && item.venda_id) {
+      const venda = await fetchVendaParaNotaFiscal(user.id, item.venda_id).catch(() => null);
+      disc = venda?.descricao || undefined;
+    }
+    setNfConfirmCompetencia(competencia);
+    setNfConfirmDisc(disc);
     setNfConfirmItem(item);
   };
 
@@ -526,7 +539,11 @@ export default function ContasReceberScreen() {
     return `Gerar NFS-e de ${valor} para esta venda (${item.referencia_label})?`;
   };
 
-  const emitirNotaFiscal = async (itemOverride?: ContaReceberListRow, emitenteId?: string) => {
+  const emitirNotaFiscal = async (
+    itemOverride?: ContaReceberListRow,
+    emitenteId?: string,
+    discriminacao?: string,
+  ) => {
     const item = itemOverride ?? acoesItem;
     if (!user?.id || !item) return;
     if (item.nota_fiscal_id) {
@@ -537,7 +554,7 @@ export default function ContasReceberScreen() {
     setNfBusy(true);
     setNfBusyId(item.id);
     try {
-      const opts = { emitenteId: emitenteId || undefined };
+      const opts = { emitenteId: emitenteId || undefined, descricaoServico: discriminacao };
       if (item.origem === 'mensalidade' && item.mensalidade_id) {
         const m = await fetchMensalidadeGeradaById(user.id, item.mensalidade_id);
         if (!m) throw new Error('Mensalidade não encontrada.');
@@ -596,7 +613,7 @@ export default function ContasReceberScreen() {
     }
   };
 
-  const emitirNfPosPagamento = async (emitenteId?: string) => {
+  const emitirNfPosPagamento = async (emitenteId?: string, discriminacao?: string) => {
     if (!user?.id || !nfPosPagamentoMensalidade) return;
     setNfEmitindoPosPagamento(true);
     try {
@@ -609,7 +626,7 @@ export default function ContasReceberScreen() {
           valor: m.valor,
           competencia: m.competencia,
         },
-        { emitenteId: emitenteId || undefined },
+        { emitenteId: emitenteId || undefined, descricaoServico: discriminacao },
       );
       if (res.success) {
         if (res.notaId) {
@@ -940,16 +957,21 @@ export default function ContasReceberScreen() {
         botaoSecundario="Cancelar"
         loading={nfBusy}
         onClose={() => !nfBusy && setNfConfirmItem(null)}
-        onEmitir={(emitenteId) => nfConfirmItem && void emitirNotaFiscal(nfConfirmItem, emitenteId)}
+        onEmitir={(emitenteId, discriminacao) =>
+          nfConfirmItem && void emitirNotaFiscal(nfConfirmItem, emitenteId, discriminacao)
+        }
         onDepois={() => !nfBusy && setNfConfirmItem(null)}
+        competencia={nfConfirmCompetencia}
+        discriminacaoInicial={nfConfirmDisc}
       />
 
       <ConfirmarEmitirNfseModal
         visible={nfPosPagamentoMensalidade != null}
         loading={nfEmitindoPosPagamento}
         onClose={() => setNfPosPagamentoMensalidade(null)}
-        onEmitir={(emitenteId) => void emitirNfPosPagamento(emitenteId)}
+        onEmitir={(emitenteId, discriminacao) => void emitirNfPosPagamento(emitenteId, discriminacao)}
         onDepois={() => setNfPosPagamentoMensalidade(null)}
+        competencia={nfPosPagamentoMensalidade?.competencia}
       />
 
       <Modal visible={filterOpen} animationType="slide" transparent onRequestClose={() => setFilterOpen(false)}>

@@ -6,7 +6,7 @@ import { colors, radius, spacing } from '@/theme/colors';
 import type { NfseEmitente } from '@/types/notaFiscal';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 type Props = {
   visible: boolean;
@@ -15,7 +15,7 @@ type Props = {
   /** Mensalidade + boleto bancário (Sicoob ou C6 conforme CNPJ). */
   onMensalidadeComBoleto: (emitenteId: string) => void;
   /** Mensalidade + boleto + NFS-e no mesmo CNPJ. */
-  onMensalidadeComBoletoENf: (emitenteId: string) => void;
+  onMensalidadeComBoletoENf: (emitenteId: string, discriminacao: string) => void;
 };
 
 export function EnviarMensalidadeModal({
@@ -29,11 +29,14 @@ export function EnviarMensalidadeModal({
   const [emitentes, setEmitentes] = useState<NfseEmitente[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadingEmit, setLoadingEmit] = useState(false);
+  const [discriminacao, setDiscriminacao] = useState('Serviço de mensalidade — competência {competencia}');
+  const [editouTexto, setEditouTexto] = useState(false);
 
   useEffect(() => {
     if (!visible || !user?.id) return;
     let cancelled = false;
     setLoadingEmit(true);
+    setEditouTexto(false);
     void ensureEmitentes(user.id)
       .then((list) => {
         if (cancelled) return;
@@ -44,6 +47,10 @@ export function EnviarMensalidadeModal({
           list.find((e) => e.padrao) ??
           list[0];
         setSelectedId(preferred?.id ?? null);
+        if (!editouTexto) {
+          const padraoTxt = preferred?.descricao_servico_padrao?.trim() || 'Serviço de mensalidade';
+          setDiscriminacao(`${padraoTxt} — competência {competencia}`);
+        }
       })
       .catch(() => {
         if (!cancelled) {
@@ -104,9 +111,27 @@ export function EnviarMensalidadeModal({
             </Text>
           )}
 
+          <View style={styles.discBox}>
+            <Text style={styles.emitLabel}>Discriminação dos serviços (NFS-e)</Text>
+            <TextInput
+              style={styles.discInput}
+              value={discriminacao}
+              onChangeText={(t) => {
+                setEditouTexto(true);
+                setDiscriminacao(t);
+              }}
+              multiline
+              placeholder="Texto da DANFE. Use {competencia} para variar por cliente."
+              placeholderTextColor={colors.gray400}
+            />
+            <Text style={styles.hint}>
+              {'{competencia}'} vira o mês de cada mensalidade. Esse texto só entra na nota.
+            </Text>
+          </View>
+
           <Pressable
             style={[styles.option, styles.optionPrimary]}
-            onPress={() => onMensalidadeComBoletoENf(emitenteId)}
+            onPress={() => onMensalidadeComBoletoENf(emitenteId, discriminacao.trim())}
             disabled={loading || loadingEmit}
           >
             <Ionicons name="document-text" size={22} color={colors.white} />
@@ -172,6 +197,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(232, 106, 36, 0.06)',
   },
   emitOptTxt: { flex: 1, fontSize: 13, color: colors.gray800, fontWeight: '600' },
+  discBox: { gap: 6 },
+  discInput: {
+    minHeight: 72,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    fontSize: 14,
+    color: colors.petroleum,
+    textAlignVertical: 'top',
+  },
   option: {
     flexDirection: 'row',
     alignItems: 'flex-start',

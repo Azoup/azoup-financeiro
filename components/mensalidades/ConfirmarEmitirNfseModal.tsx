@@ -5,7 +5,7 @@ import { colors, radius, spacing } from '@/theme/colors';
 import type { NfseEmitente } from '@/types/notaFiscal';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 type Props = {
   visible: boolean;
@@ -15,10 +15,25 @@ type Props = {
   botaoSecundario?: string;
   loading?: boolean;
   onClose: () => void;
-  /** Recebe o id do emitente (CNPJ) escolhido. */
-  onEmitir: (emitenteId: string) => void;
+  /** CNPJ escolhido e texto que vai na discriminação dos serviços. */
+  onEmitir: (emitenteId: string, discriminacao: string) => void;
   onDepois: () => void;
+  discriminacaoInicial?: string;
+  /** Inclui “— competência …” no texto padrão, como na emissão automática. */
+  competencia?: string | null;
 };
+
+function textoDiscriminacaoPadrao(
+  emitente: NfseEmitente | undefined,
+  discriminacaoInicial?: string,
+  competencia?: string | null,
+): string {
+  const inicial = discriminacaoInicial?.trim();
+  if (inicial) return inicial;
+  const padrao = emitente?.descricao_servico_padrao?.trim() || 'Prestação de serviços';
+  const comp = competencia?.trim();
+  return comp ? `${padrao} — competência ${comp}` : padrao;
+}
 
 export function ConfirmarEmitirNfseModal({
   visible,
@@ -30,22 +45,28 @@ export function ConfirmarEmitirNfseModal({
   onClose,
   onEmitir,
   onDepois,
+  discriminacaoInicial,
+  competencia,
 }: Props) {
   const { user } = useAuth();
   const [emitentes, setEmitentes] = useState<NfseEmitente[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadingEmitentes, setLoadingEmitentes] = useState(false);
+  const [discriminacao, setDiscriminacao] = useState('');
+  const [editouTexto, setEditouTexto] = useState(false);
 
   useEffect(() => {
     if (!visible || !user?.id) return;
     let cancelled = false;
     setLoadingEmitentes(true);
+    setEditouTexto(false);
     void ensureEmitentes(user.id)
       .then((list) => {
         if (cancelled) return;
         setEmitentes(list);
         const padrao = list.find((e) => e.padrao) ?? list[0];
         setSelectedId(padrao?.id ?? null);
+        setDiscriminacao(textoDiscriminacaoPadrao(padrao, discriminacaoInicial, competencia));
       })
       .catch(() => {
         if (!cancelled) {
@@ -59,7 +80,14 @@ export function ConfirmarEmitirNfseModal({
     return () => {
       cancelled = true;
     };
-  }, [visible, user?.id]);
+  }, [visible, user?.id, discriminacaoInicial, competencia]);
+
+  const escolherEmitente = (e: NfseEmitente) => {
+    setSelectedId(e.id);
+    if (!editouTexto) {
+      setDiscriminacao(textoDiscriminacaoPadrao(e, discriminacaoInicial, competencia));
+    }
+  };
 
   const canEmit = Boolean(selectedId) || emitentes.length === 0;
 
@@ -84,7 +112,7 @@ export function ConfirmarEmitirNfseModal({
                   <Pressable
                     key={e.id}
                     style={[styles.emitOpt, selected && styles.emitOptOn]}
-                    onPress={() => setSelectedId(e.id)}
+                    onPress={() => escolherEmitente(e)}
                   >
                     <Ionicons
                       name={selected ? 'radio-button-on' : 'radio-button-off'}
@@ -100,12 +128,28 @@ export function ConfirmarEmitirNfseModal({
             <Text style={styles.singleEmit}>CNPJ: {emitenteLabel(emitentes[0])}</Text>
           ) : null}
 
+          <View style={styles.discBox}>
+            <Text style={styles.emitLabel}>Discriminação dos serviços</Text>
+            <TextInput
+              style={styles.discInput}
+              value={discriminacao}
+              onChangeText={(t) => {
+                setEditouTexto(true);
+                setDiscriminacao(t);
+              }}
+              multiline
+              placeholder="Texto que aparece na DANFE"
+              placeholderTextColor={colors.gray400}
+            />
+          </View>
+
           <PrimaryButton
             title={loading ? 'Emitindo NFS-e…' : botaoPrimario}
             onPress={() => {
-              if (selectedId) onEmitir(selectedId);
-              else if (emitentes[0]?.id) onEmitir(emitentes[0].id);
-              else onEmitir('');
+              const texto = discriminacao.trim();
+              if (selectedId) onEmitir(selectedId, texto);
+              else if (emitentes[0]?.id) onEmitir(emitentes[0].id, texto);
+              else onEmitir('', texto);
             }}
             loading={loading}
             disabled={loading || loadingEmitentes || !canEmit}
@@ -158,4 +202,15 @@ const styles = StyleSheet.create({
   },
   emitOptTxt: { flex: 1, fontSize: 13, color: colors.gray800, fontWeight: '600' },
   singleEmit: { fontSize: 12, color: colors.gray600, textAlign: 'center' },
+  discBox: { gap: 6 },
+  discInput: {
+    minHeight: 72,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    fontSize: 14,
+    color: colors.petroleum,
+    textAlignVertical: 'top',
+  },
 });

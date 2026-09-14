@@ -401,7 +401,7 @@ export default function GerarMensalidadeScreen() {
     }
   };
 
-  const executarEnvio = async (gerarNotaFiscal: boolean, emitenteId?: string) => {
+  const executarEnvio = async (gerarNotaFiscal: boolean, emitenteId?: string, discriminacao?: string) => {
     if (!user?.id) return;
     const ids = targetIds;
     if (!ids.length) {
@@ -483,6 +483,7 @@ export default function GerarMensalidadeScreen() {
         competencia: competencia.trim() || null,
         gerarNotaFiscal,
         emitenteId: emitenteId || null,
+        descricaoServico: discriminacao?.trim() || null,
         proximaGeracaoMes,
       });
       const extras: string[] = [];
@@ -1040,7 +1041,9 @@ export default function GerarMensalidadeScreen() {
         loading={busy}
         onClose={() => setEnviarModalOpen(false)}
         onMensalidadeComBoleto={(emitenteId) => void executarEnvio(false, emitenteId)}
-        onMensalidadeComBoletoENf={(emitenteId) => void executarEnvio(true, emitenteId)}
+        onMensalidadeComBoletoENf={(emitenteId, discriminacao) =>
+          void executarEnvio(true, emitenteId, discriminacao)
+        }
       />
     </View>
   );

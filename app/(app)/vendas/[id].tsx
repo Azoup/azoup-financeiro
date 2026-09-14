@@ -157,7 +157,7 @@ export default function VendaDetailScreen() {
     setNfConfirmOpen(true);
   };
 
-  const executarEmitirNf = async (emitenteId?: string) => {
+  const executarEmitirNf = async (emitenteId?: string, discriminacao?: string) => {
     if (!user?.id || !detail || !id) return;
     const descricao = vendaDescricaoLinhas(detail).join(' · ');
     setEmittingNf(true);
@@ -170,7 +170,7 @@ export default function VendaDetailScreen() {
           valor_total: Number(detail.valor_total),
           descricao,
         },
-        { emitenteId: emitenteId || undefined },
+        { emitenteId: emitenteId || undefined, descricaoServico: discriminacao || descricao },
       );
       if (res.success) {
         setNfConfirmOpen(false);
@@ -436,8 +436,9 @@ export default function VendaDetailScreen() {
         botaoSecundario="Cancelar"
         loading={emittingNf}
         onClose={() => !emittingNf && setNfConfirmOpen(false)}
-        onEmitir={(emitenteId) => void executarEmitirNf(emitenteId)}
+        onEmitir={(emitenteId, discriminacao) => void executarEmitirNf(emitenteId, discriminacao)}
         onDepois={() => !emittingNf && setNfConfirmOpen(false)}
+        discriminacaoInicial={detail ? vendaDescricaoLinhas(detail).join(' · ') : undefined}
       />
     </View>
   );

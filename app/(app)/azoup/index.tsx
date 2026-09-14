@@ -177,7 +177,7 @@ export default function AzoupDashboardScreen() {
   const maxPlano = Math.max(1, ...(data?.planos_clientes.map((p) => p.total) ?? [1]));
 
   const onEmitirNf = useCallback(
-    async (emitenteId: string) => {
+    async (emitenteId: string, discriminacao?: string) => {
       if (!user?.id || !nfCliente) return;
       setNfLoading(true);
       setNfMsg(null);
@@ -185,6 +185,7 @@ export default function AzoupDashboardScreen() {
         const res = await emitirNfseClienteAzoup(user.id, nfCliente.id, {
           emitenteId: emitenteId || null,
           usarValorBruto: false,
+          descricaoServico: discriminacao,
         });
         if (res.success) {
           setNfMsg(`NFS-e autorizada (${nfCliente.nome}).`);
@@ -515,10 +516,15 @@ export default function AzoupDashboardScreen() {
         onClose={() => {
           if (!nfLoading) setNfCliente(null);
         }}
-        onEmitir={(emitenteId) => void onEmitirNf(emitenteId)}
+        onEmitir={(emitenteId, discriminacao) => void onEmitirNf(emitenteId, discriminacao)}
         onDepois={() => {
           if (!nfLoading) setNfCliente(null);
         }}
+        discriminacaoInicial={
+          nfCliente
+            ? `Assinatura Azoup — ${nfCliente.plano_id ? `plano ${nfCliente.plano_id}` : nfCliente.nome} — ${new Date().getFullYear()}-${`${new Date().getMonth() + 1}`.padStart(2, '0')}`
+            : undefined
+        }
       />
     </View>
   );

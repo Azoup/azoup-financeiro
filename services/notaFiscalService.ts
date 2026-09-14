@@ -31,15 +31,32 @@ type VendaNfInput = {
   descricao: string;
 };
 
-type EmitOpts = { emitenteId?: string | null };
+type EmitOpts = { emitenteId?: string | null; descricaoServico?: string | null };
 
 function onlyDigits(s: string): string {
   return s.replace(/\D/g, '');
 }
 
+function aplicarTemplateDescricao(texto: string, competencia: string | null): string {
+  const base = texto.trim();
+  if (!base) return '';
+  const comp = competencia?.trim() || '';
+  return base.replaceAll('{competencia}', comp).replace(/\s+—\s*$/, '').trim().slice(0, 2000);
+}
+
 function descricaoItem(competencia: string | null, padrao: string): string {
   const comp = competencia?.trim();
   return comp ? `${padrao} — competência ${comp}` : padrao;
+}
+
+function resolverDescricaoServico(
+  opts: EmitOpts | undefined,
+  competencia: string | null,
+  padrao: string,
+): string {
+  const custom = opts?.descricaoServico?.trim();
+  if (custom) return aplicarTemplateDescricao(custom, competencia) || descricaoItem(competencia, padrao);
+  return descricaoItem(competencia, padrao);
 }
 
 function wrapNotaFiscalInsertError(msg?: string): Error {
@@ -348,6 +365,16 @@ async function inserirItensNotaFiscal(
   }
 }
 
+async function atualizarDescricaoItem(notaId: string, descricao: string) {
+  const texto = descricao.trim().slice(0, 2000);
+  if (!texto) return;
+  const { error } = await supabase
+    .from('nota_fiscal_item')
+    .update({ descricao: texto })
+    .eq('nota_fiscal_id', notaId);
+  if (error) throw new Error(error.message);
+}
+
 async function bumpProximoNumero(userId: string, emitente: NfseEmitente, novoProximo: number) {
   if (emitente.id) {
     await supabase
@@ -373,13 +400,25 @@ export async function criarNotaFiscalRascunhoMensalidade(
     if (existente.status === 'autorizada') {
       throw new Error('Já existe NFS-e autorizada para esta mensalidade.');
     }
+    const custom = opts?.descricaoServico?.trim();
+    if (custom) {
+      const { emitente } = await validarPreEmissaoNfse(userId, mensalidade.cliente_id, opts?.emitenteId);
+      await atualizarDescricaoItem(
+        existente.id,
+        resolverDescricaoServico(opts, mensalidade.competencia, emitente.descricao_servico_padrao),
+      );
+    }
     return existente.id;
   }
 
   const { emitente } = await validarPreEmissaoNfse(userId, mensalidade.cliente_id, opts?.emitenteId);
 
   const numero = emitente.proximo_numero;
-  const descricao = descricaoItem(mensalidade.competencia, emitente.descricao_servico_padrao);
+  const descricao = resolverDescricaoServico(
+    opts,
+    mensalidade.competencia,
+    emitente.descricao_servico_padrao,
+  );
 
   const insertRow: Record<string, unknown> = {
     user_id: userId,
@@ -421,13 +460,20 @@ export async function criarNotaFiscalRascunhoVenda(
     if (existente.status === 'autorizada') {
       throw new Error('Já existe NFS-e autorizada para esta venda.');
     }
+    const custom = opts?.descricaoServico?.trim();
+    if (custom) {
+      await atualizarDescricaoItem(existente.id, custom.slice(0, 2000));
+    }
     return existente.id;
   }
 
   const { emitente } = await validarPreEmissaoNfse(userId, venda.cliente_id, opts?.emitenteId);
 
   const numero = emitente.proximo_numero;
-  const descricao = venda.descricao.trim().slice(0, 2000) || emitente.descricao_servico_padrao;
+  const descricao =
+    opts?.descricaoServico?.trim().slice(0, 2000) ||
+    venda.descricao.trim().slice(0, 2000) ||
+    emitente.descricao_servico_padrao;
 
   const insertRow: Record<string, unknown> = {
     user_id: userId,
@@ -818,7 +864,7 @@ export async function gerarNotasFiscaisParaMensalidades(
     }
 
     try {
-      const result = await gerarNotaFiscalParaMensalidade(userId, m, { emitenteId });
+      const result = await gerarNotaFiscalParaMensalidade(userId, m, opts);
       if (result.ignorada) {
         ignoradas += 1;
         continue;

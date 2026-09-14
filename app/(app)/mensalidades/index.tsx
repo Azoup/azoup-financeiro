@@ -362,7 +362,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
     }
   };
 
-  const emitirNfMensalidade = async (m: MensalidadeGerada, emitenteId?: string) => {
+  const emitirNfMensalidade = async (m: MensalidadeGerada, emitenteId?: string, discriminacao?: string) => {
     if (!user?.id) return;
     setNfBusyId(m.id);
     try {
@@ -374,7 +374,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
           valor: m.valor,
           competencia: m.competencia,
         },
-        { emitenteId: emitenteId || undefined },
+        { emitenteId: emitenteId || undefined, descricaoServico: discriminacao },
       );
       if (res.success) {
         setNfEmitidas((prev) => ({
@@ -427,20 +427,20 @@ export default function HistoricoMensalidadesGeradasScreen() {
     }
   };
 
-  const emitirNfPosPagamento = async (emitenteId?: string) => {
+  const emitirNfPosPagamento = async (emitenteId?: string, discriminacao?: string) => {
     if (!nfPosPagamento) return;
     setNfEmitindoPosPagamento(true);
     try {
-      await emitirNfMensalidade(nfPosPagamento, emitenteId);
+      await emitirNfMensalidade(nfPosPagamento, emitenteId, discriminacao);
     } finally {
       setNfEmitindoPosPagamento(false);
       setNfPosPagamento(null);
     }
   };
 
-  const executarNfConfirmada = async (emitenteId?: string) => {
+  const executarNfConfirmada = async (emitenteId?: string, discriminacao?: string) => {
     if (!nfConfirmMensalidade) return;
-    await emitirNfMensalidade(nfConfirmMensalidade, emitenteId);
+    await emitirNfMensalidade(nfConfirmMensalidade, emitenteId, discriminacao);
     setNfConfirmMensalidade(null);
   };
 
@@ -821,8 +821,9 @@ export default function HistoricoMensalidadesGeradasScreen() {
         visible={nfPosPagamento != null}
         loading={nfEmitindoPosPagamento}
         onClose={() => setNfPosPagamento(null)}
-        onEmitir={(emitenteId) => void emitirNfPosPagamento(emitenteId)}
+        onEmitir={(emitenteId, discriminacao) => void emitirNfPosPagamento(emitenteId, discriminacao)}
         onDepois={() => setNfPosPagamento(null)}
+        competencia={nfPosPagamento?.competencia}
       />
 
       <ConfirmarEmitirNfseModal
@@ -839,8 +840,9 @@ export default function HistoricoMensalidadesGeradasScreen() {
         botaoSecundario="Cancelar"
         loading={nfBusyId === nfConfirmMensalidade?.id}
         onClose={() => !nfBusyId && setNfConfirmMensalidade(null)}
-        onEmitir={(emitenteId) => void executarNfConfirmada(emitenteId)}
+        onEmitir={(emitenteId, discriminacao) => void executarNfConfirmada(emitenteId, discriminacao)}
         onDepois={() => !nfBusyId && setNfConfirmMensalidade(null)}
+        competencia={nfConfirmMensalidade?.competencia}
       />
     </View>
   );

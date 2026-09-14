@@ -286,6 +286,7 @@ export async function criarMensalidadesGeradasLote(params: {
   gerarNotaFiscal?: boolean;
   /** CNPJ/emitente cobrador (boleto Sicoob ou C6) e NFS-e quando solicitada. */
   emitenteId?: string | null;
+  descricaoServico?: string | null;
   /**
    * 1º dia do mês (ISO) — agenda quando o cliente volta a aparecer em Gerar mensalidades.
    * Aplicado só aos clientes que tiveram ao menos uma mensalidade criada neste lote.
@@ -510,7 +511,7 @@ export async function criarMensalidadesGeradasLote(params: {
           valor: m.valor,
           competencia: m.competencia,
         })),
-        { emitenteId: params.emitenteId },
+        { emitenteId: params.emitenteId, descricaoServico: params.descricaoServico },
       );
     } catch (e) {
       nfResult = {
