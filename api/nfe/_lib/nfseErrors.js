@@ -130,11 +130,11 @@ function humanizeNfseRejection(message, ibge) {
     ].join(' ');
   }
 
-  if (/L1268|Chave de acesso da NFS-e enviada já existe/i.test(raw)) {
+  if (isRpsChaveDuplicadaAdn(raw)) {
     return [
-      'L1268 — Este RPS/chave já existe no Ambiente Nacional (ADN).',
+      'L1260/L1268 — Este RPS/chave já existe no Ambiente Nacional (ADN).',
       'A emissão anterior pode ter sido aceita mesmo com alerta. Confira em nfse.americana.sp.gov.br.',
-      'Para nova tentativa no Azoup, use "Reemitir" (gera novo número de RPS) ou crie uma nota nova.',
+      'O Azoup tenta de novo com um número de RPS novo. Se continuar rejeitada, use "Reemitir".',
     ].join(' ');
   }
 
@@ -244,4 +244,17 @@ async function validarConvenioMunicipio(wizard, ibge) {
   }
 }
 
-module.exports = { humanizeNfseRejection, parseConvenioResponse, validarConvenioMunicipio };
+/** RPS/chave já gravado no ADN (emissão anterior aceita ou reenvio do mesmo número). */
+function isRpsChaveDuplicadaAdn(message) {
+  const raw = String(message ?? '');
+  return /L1260|L1268|Chave de acesso da NFS-e enviada já existe|já existe no Ambiente Nacional/i.test(
+    raw,
+  );
+}
+
+module.exports = {
+  humanizeNfseRejection,
+  parseConvenioResponse,
+  validarConvenioMunicipio,
+  isRpsChaveDuplicadaAdn,
+};

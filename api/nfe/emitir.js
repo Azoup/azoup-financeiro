@@ -1,7 +1,54 @@
 const { getAdmin, getUserFromBearer } = require('./_lib/supabaseAdmin');
 const { emitirNfseSefaz } = require('./_lib/nfseEmit');
+const { isRpsChaveDuplicadaAdn } = require('./_lib/nfseErrors');
 const { prepareServerlessCryptoEnv } = require('./_lib/serverlessEnv');
 const { resolveEmitenteContexto } = require('./_lib/nfseEmitenteResolve');
+
+/**
+ * Próximo RPS livre (maior que o atual e que qualquer nota da mesma série).
+ * Usado quando o ADN rejeita "RPS/chave já existe" — reenviar o mesmo número sempre falha.
+ */
+async function realocarNumeroRps(admin, { userId, nota, emitenteId }) {
+  const serie = String(nota.serie ?? '1');
+  const { data, error } = await admin
+    .from('nota_fiscal')
+    .select('numero')
+    .eq('user_id', userId)
+    .eq('serie', serie);
+  if (error) throw new Error(error.message);
+
+  let max = Number(nota.numero) || 0;
+  for (const row of data ?? []) {
+    const n = Number(row.numero) || 0;
+    if (n > max) max = n;
+  }
+  const novo = max + 1;
+
+  const { error: upErr } = await admin
+    .from('nota_fiscal')
+    .update({
+      numero: novo,
+      status: 'processando',
+      motivo_rejeicao: null,
+      chave_acesso: null,
+      protocolo_autorizacao: null,
+      codigo_verificacao: null,
+      xml_autorizado: null,
+    })
+    .eq('id', nota.id)
+    .eq('user_id', userId);
+  if (upErr) throw new Error(upErr.message);
+
+  if (emitenteId) {
+    await admin
+      .from('nfse_emitente')
+      .update({ proximo_numero: novo + 1 })
+      .eq('id', emitenteId)
+      .eq('user_id', userId);
+  }
+
+  return { ...nota, numero: novo };
+}
 
 prepareServerlessCryptoEnv();
 
@@ -70,9 +117,10 @@ module.exports = async function handler(req, res) {
       throw new Error('Senha do certificado não encontrada. Reenvie o certificado A1.');
     }
 
-    const result = await emitirNfseSefaz({
+    let notaAtual = nota;
+    let result = await emitirNfseSefaz({
       admin,
-      nota,
+      nota: notaAtual,
       itens,
       pagamentos: pagamentos ?? [],
       perfil,
@@ -81,6 +129,34 @@ module.exports = async function handler(req, res) {
       cert,
       senhaEnc: sec.senha_criptografada,
     });
+
+    // L1260/L1268: o RPS já está no ADN. Reenviar o mesmo número falha de novo.
+    if (!result.success && isRpsChaveDuplicadaAdn(result.message)) {
+      console.warn(
+        '[nfse] RPS/chave já existe no ADN — realocando número',
+        notaAtual.serie,
+        notaAtual.numero,
+      );
+      notaAtual = await realocarNumeroRps(admin, {
+        userId: user.id,
+        nota: notaAtual,
+        emitenteId: nota.emitente_id || emitCtx.emitente?.id || null,
+      });
+      result = await emitirNfseSefaz({
+        admin,
+        nota: notaAtual,
+        itens,
+        pagamentos: pagamentos ?? [],
+        perfil,
+        cliente,
+        config,
+        cert,
+        senhaEnc: sec.senha_criptografada,
+      });
+      if (result.success) {
+        result.message = `NFS-e autorizada com RPS ${notaAtual.numero} (o número anterior já existia no ADN).`;
+      }
+    }
 
     if (!result.success) {
       await admin

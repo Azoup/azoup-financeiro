@@ -569,7 +569,7 @@ export async function reemitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emi
 
   const { data: nota, error } = await supabase
     .from('nota_fiscal')
-    .select('id, status, user_id, numero, emitente_id')
+    .select('id, status, user_id, numero, serie, emitente_id')
     .eq('id', notaFiscalId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -585,12 +585,22 @@ export async function reemitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emi
     ? await fetchEmitenteById(userId, nota.emitente_id as string)
     : await fetchEmitentePadrao(userId);
 
+  const { data: usados } = await supabase
+    .from('nota_fiscal')
+    .select('numero')
+    .eq('user_id', userId)
+    .eq('serie', String((nota as { serie?: string }).serie ?? '1'));
+  const maiorUsado = (usados ?? []).reduce((max, row) => {
+    const n = Number((row as { numero?: number }).numero) || 0;
+    return n > max ? n : max;
+  }, Number(nota.numero) || 0);
+
   let novoNumero: number;
   if (emitente) {
-    novoNumero = Number(emitente.proximo_numero) || Number(nota.numero) + 1;
+    novoNumero = Math.max(maiorUsado + 1, Number(emitente.proximo_numero) || 0);
   } else {
     const config = await ensureNfeConfig(userId);
-    novoNumero = Number(config.proximo_numero) || Number(nota.numero) + 1;
+    novoNumero = Math.max(maiorUsado + 1, Number(config.proximo_numero) || 0);
     emitente = {
       id: '',
       user_id: userId,
