@@ -38,6 +38,7 @@ export type ClienteDbRow = {
   segmento_cliente_codigo?: string | null;
   valor_mensalidade_anterior?: number | null;
   emite_nf?: boolean | null;
+  emitente_nf_id?: string | null;
   tipo_faturamento?: string | null;
   parcelas_anuais?: number | null;
   proxima_geracao_mes?: string | null;
@@ -48,12 +49,12 @@ export type ClienteDbRow = {
 };
 
 export const CLIENTE_LIST_SELECT =
-  'id, user_id, created_at, updated_at, documento, cnpj, nome, nome_fantasia, mensalidade, data_inicio, dia_vencimento, data_reajuste, ultimo_reajuste, mes_entrada, observacao, cep, logradouro, numero, complemento, bairro, cidade, estado, segmento_cliente_codigo, tipo_cliente, valor_mensalidade_anterior, emite_nf, tipo_faturamento, parcelas_anuais, proxima_geracao_mes, congelado_ate, inscricao_estadual, pdf_path, cancelado, ativo, data_cancelamento, celular, email';
+  'id, user_id, created_at, updated_at, documento, cnpj, nome, nome_fantasia, mensalidade, data_inicio, dia_vencimento, data_reajuste, ultimo_reajuste, mes_entrada, observacao, cep, logradouro, numero, complemento, bairro, cidade, estado, segmento_cliente_codigo, tipo_cliente, valor_mensalidade_anterior, emite_nf, emitente_nf_id, tipo_faturamento, parcelas_anuais, proxima_geracao_mes, congelado_ate, inscricao_estadual, pdf_path, cancelado, ativo, data_cancelamento, celular, email';
 
 export const CLIENTE_DETAIL_SELECT = `${CLIENTE_LIST_SELECT}, contatos_cliente(*)`;
 
 export const CLIENTE_GERAR_MENSALIDADES_SELECT =
-  'id, nome, nome_fantasia, mensalidade, valor_mensalidade_anterior, segmento_cliente_codigo, tipo_cliente, cancelado, ativo, data_cancelamento, data_reajuste, data_inicio, dia_vencimento, tipo_faturamento, parcelas_anuais, proxima_geracao_mes, congelado_ate, emite_nf';
+  'id, nome, nome_fantasia, mensalidade, valor_mensalidade_anterior, segmento_cliente_codigo, tipo_cliente, cancelado, ativo, data_cancelamento, data_reajuste, data_inicio, dia_vencimento, tipo_faturamento, parcelas_anuais, proxima_geracao_mes, congelado_ate, emite_nf, emitente_nf_id';
 
 /** Join embutido em outras tabelas (mensalidades, vendas, NF). */
 export const CLIENTE_EMBED_SELECT = 'nome_fantasia, nome, cnpj, documento, emite_nf, logradouro, numero, bairro, cidade, estado, cep';
@@ -112,6 +113,7 @@ export function mapDbRowToCliente(row: ClienteDbRow): Cliente {
     pdf_path: row.pdf_path ?? null,
     cancelado: isClienteCancelado(row),
     emite_nf: Boolean(row.emite_nf),
+    emitente_nf_id: row.emitente_nf_id ?? null,
     tipo_faturamento: normalizeTipoFaturamento(row.tipo_faturamento),
     parcelas_anuais:
       normalizeTipoFaturamento(row.tipo_faturamento) === 'anual'
@@ -205,6 +207,7 @@ export function mapClienteFormToDbRow(
     ativo: cancelado ? 'N' : 'S',
     data_cancelamento: cancelado ? toISODate(new Date()) : null,
     emite_nf: values.emite_nf,
+    emitente_nf_id: values.emitente_nf_id || null,
     tipo_faturamento,
     parcelas_anuais,
     proxima_geracao_mes,

@@ -59,6 +59,18 @@ export async function htmlDanfseParaPdf(html: string): Promise<Blob> {
     doc.write(limpo);
     doc.close();
     await new Promise((r) => setTimeout(r, 350));
+    const imgs = [...doc.images];
+    await Promise.all(
+      imgs.map(
+        (img) =>
+          img.complete
+            ? Promise.resolve()
+            : new Promise((resolve) => {
+                img.onload = () => resolve(undefined);
+                img.onerror = () => resolve(undefined);
+              }),
+      ),
+    );
     const fonts = (doc as Document & { fonts?: { ready: Promise<unknown> } }).fonts;
     if (fonts?.ready) await fonts.ready.catch(() => undefined);
     const alvo = (doc.querySelector('.page') as HTMLElement | null) ?? doc.body;

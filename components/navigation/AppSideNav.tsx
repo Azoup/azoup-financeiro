@@ -1,4 +1,7 @@
+import { BrandLogo } from '@/components/BrandLogo';
+import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import { useSidebar } from '@/context/SidebarContext';
+import { emitenteLabel } from '@/services/nfseEmitenteService';
 import { useTheme } from '@/context/ThemeContext';
 import { fonts } from '@/theme/typography';
 import { Ionicons } from '@expo/vector-icons';
@@ -114,6 +117,7 @@ export function AppSideNav() {
   const insets = useSafeAreaInsets();
   const { theme, isDark, toggleTheme } = useTheme();
   const { collapsed, isMobileNav, isOpen, toggle, close } = useSidebar();
+  const { empresaId, setEmpresaId, emitentes } = useEmpresaFiltro();
 
   const targetWidth = isMobileNav
     ? SIDEBAR_WIDTH_EXPANDED
@@ -255,6 +259,26 @@ export function AppSideNav() {
           fontSize: 12,
           color: theme.sidebarSubText,
         },
+        empresaBox: { marginHorizontal: 12, marginBottom: 12, gap: 4 },
+        empresaLab: {
+          fontFamily: fonts.semibold,
+          fontSize: 10,
+          letterSpacing: 0.4,
+          textTransform: 'uppercase',
+          color: theme.sidebarSubText,
+          marginBottom: 2,
+        },
+        empresaOpt: {
+          borderRadius: 8,
+          paddingVertical: 7,
+          paddingHorizontal: 10,
+          borderWidth: 1,
+          borderColor: theme.sidebarSectionDivider,
+        },
+        empresaOptOn: { backgroundColor: theme.sidebarItemActive, borderColor: theme.primary },
+        empresaOptTxt: { fontFamily: fonts.medium, fontSize: 12, color: theme.sidebarSubText },
+        empresaOptTxtOn: { color: theme.sidebarText, fontFamily: fonts.semibold },
+        empresaCollapsed: { alignItems: 'center', marginBottom: 12, paddingVertical: 8 },
       }),
     [theme],
   );
@@ -308,9 +332,7 @@ export function AppSideNav() {
       ]}
     >
       <View style={[styles.brandRow, !showLabels && styles.brandRowCollapsed]}>
-        <View style={styles.brandMark}>
-          <Text style={styles.brandMarkTxt}>A</Text>
-        </View>
+        <BrandLogo size={40} />
         {showLabels ? (
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.brandName}>Azoup</Text>
@@ -339,6 +361,45 @@ export function AppSideNav() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {showLabels ? (
+          <View style={styles.empresaBox}>
+            <Text style={styles.empresaLab}>Empresa</Text>
+            <Pressable
+              onPress={() => setEmpresaId('todos')}
+              style={[styles.empresaOpt, empresaId === 'todos' && styles.empresaOptOn]}
+            >
+              <Text style={[styles.empresaOptTxt, empresaId === 'todos' && styles.empresaOptTxtOn]} numberOfLines={1}>
+                Todas
+              </Text>
+            </Pressable>
+            {emitentes.map((e) => {
+              const on = empresaId === e.id;
+              return (
+                <Pressable
+                  key={e.id}
+                  onPress={() => setEmpresaId(e.id)}
+                  style={[styles.empresaOpt, on && styles.empresaOptOn]}
+                >
+                  <Text style={[styles.empresaOptTxt, on && styles.empresaOptTxtOn]} numberOfLines={2}>
+                    {e.nome?.trim() || e.razao_social?.trim() || emitenteLabel(e)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : (
+          <Pressable
+            onPress={() => {
+              const ids = ['todos', ...emitentes.map((e) => e.id)];
+              const i = ids.indexOf(empresaId);
+              setEmpresaId(ids[(i + 1) % ids.length] ?? 'todos');
+            }}
+            style={styles.empresaCollapsed}
+            accessibilityLabel="Trocar empresa"
+          >
+            <Ionicons name="business-outline" size={20} color={theme.primary} />
+          </Pressable>
+        )}
         <View style={styles.section}>{NAV_ITEMS.map(renderItem)}</View>
         <View style={styles.spacer} />
         <View style={styles.section}>

@@ -52,7 +52,11 @@ function addDaysIso(iso: string, days: number): string {
   return toISODate(dt);
 }
 
-export async function fetchDashboardOverview(userId: string): Promise<DashboardOverview> {
+export async function fetchDashboardOverview(
+  userId: string,
+  opts?: { empresaId?: string | null },
+): Promise<DashboardOverview> {
+  const empresaId = opts?.empresaId || null;
   const hoje = toISODate(new Date());
   const ate7 = addDaysIso(hoje, 7);
 
@@ -66,17 +70,17 @@ export async function fetchDashboardOverview(userId: string): Promise<DashboardO
   ] = await Promise.all([
     supabase
       .from('clientes')
-      .select('cancelado, ativo, data_cancelamento, mensalidade, segmento_cliente_codigo, tipo_cliente'),
+      .select('id, cancelado, ativo, data_cancelamento, mensalidade, segmento_cliente_codigo, tipo_cliente, emitente_nf_id'),
     supabase
       .from('mensalidades')
-      .select('valor, valor_pago, data_vencimento, status')
+      .select('valor, valor_pago, data_vencimento, status, cliente_id')
       .eq('user_id', userId),
-    supabase.from('vendas').select('id, status, valor_total').eq('user_id', userId),
+    supabase.from('vendas').select('id, status, valor_total, cliente_id').eq('user_id', userId),
     supabase
       .from('boletos_parcela_venda')
-      .select('valor_documento, parcela_id, venda_id')
+      .select('valor_documento, parcela_id, venda_id, emitente_id')
       .eq('user_id', userId),
-    fetchVendaFinanceiroStats(userId),
+    fetchVendaFinanceiroStats(userId, { empresaId }),
     getSegmentoNomePorCodigo(),
   ]);
 
@@ -85,7 +89,9 @@ export async function fetchDashboardOverview(userId: string): Promise<DashboardO
   if (vendasAllRes.error) throw new Error(vendasAllRes.error.message);
   if (boletosRes.error) throw new Error(boletosRes.error.message);
 
-  const clientes = (clientesRes.data ?? []) as {
+  const clientesTodos = (clientesRes.data ?? []) as {
+    id?: string;
+    emitente_nf_id?: string | null;
     cancelado?: boolean | null;
     ativo?: string | null;
     data_cancelamento?: string | null;
@@ -93,6 +99,10 @@ export async function fetchDashboardOverview(userId: string): Promise<DashboardO
     segmento_cliente_codigo?: string | null;
     tipo_cliente?: string | null;
   }[];
+  const clientes = empresaId
+    ? clientesTodos.filter((c) => c.emitente_nf_id === empresaId)
+    : clientesTodos;
+  const clienteIds = new Set(clientes.map((c) => c.id).filter(Boolean));
 
   const ativos = clientes.filter((c) => !isClienteCancelado(c));
   const cancelados = clientes.filter((c) => isClienteCancelado(c));
@@ -121,12 +131,14 @@ export async function fetchDashboardOverview(userId: string): Promise<DashboardO
   let mensRecebido = 0;
   let proximos7 = 0;
 
-  for (const m of (mensRes.data ?? []) as {
+  const mensRows = ((mensRes.data ?? []) as {
     valor: number;
     valor_pago: number;
     data_vencimento: string;
     status: string;
-  }[]) {
+    cliente_id?: string;
+  }[]).filter((m) => !empresaId || clienteIds.has(m.cliente_id));
+  for (const m of mensRows) {
     mensTotal += 1;
     if (m.status === 'cancelado') continue;
     const vc = reaisParaCentavos(m.valor);
@@ -143,7 +155,9 @@ export async function fetchDashboardOverview(userId: string): Promise<DashboardO
     }
   }
 
-  const vendasAll = (vendasAllRes.data ?? []) as { status: string }[];
+  const vendasAll = ((vendasAllRes.data ?? []) as { status: string; cliente_id?: string }[]).filter(
+    (v) => !empresaId || clienteIds.has(v.cliente_id),
+  );
   const totalVendas = vendasAll.length;
   const vendasCanceladas = vendasAll.filter((v) => v.status === 'cancelada').length;
 
@@ -152,11 +166,12 @@ export async function fetchDashboardOverview(userId: string): Promise<DashboardO
       ? Math.min(100, Math.round((vendaStats.totalRecebido / vendaStats.totalVendido) * 100))
       : 0;
 
-  const boletos = (boletosRes.data ?? []) as {
+  const boletos = ((boletosRes.data ?? []) as {
     valor_documento: number;
     parcela_id: string | null;
     venda_id: string | null;
-  }[];
+    emitente_id?: string | null;
+  }[]).filter((b) => !empresaId || b.emitente_id === empresaId);
   let origemVenda = 0;
   let origemMen = 0;
   let valorDocs = 0;

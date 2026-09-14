@@ -205,6 +205,16 @@ function buildDanfseHtml(metaIn) {
     outras.push(String(m.outrasInformacoes));
   }
 
+  let logoSrc = '';
+  try {
+    logoSrc = require('../../../utils/azoupLogoDataUri');
+  } catch {
+    logoSrc = '';
+  }
+  const logoCell = logoSrc
+    ? `<td class="pad2 br" style="width:52px;vertical-align:middle"><img src="${logoSrc}" alt="Azoup" width="44" height="44" style="display:block;width:44px;height:44px;border-radius:50%;object-fit:cover"/></td>`
+    : '';
+
   return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -281,6 +291,7 @@ function buildDanfseHtml(metaIn) {
   <!-- Cabeçalho -->
   <table>
     <tr>
+      ${logoCell}
       <td class="pad2 br" style="width:62%">
         <div class="tiny">SECRETARIA MUNICIPAL DE FAZENDA</div>
         <div class="header-title">NOTA FISCAL DE SERVIÇOS ELETRÔNICA - NFS-e</div>

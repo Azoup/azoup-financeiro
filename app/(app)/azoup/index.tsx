@@ -1,6 +1,7 @@
 import { Card } from '@/components/Card';
 import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmitirNfseModal';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import { fetchAzoupDashboard } from '@/services/azoupAdminService';
 import { emitirNfseClienteAzoup } from '@/services/azoupNfseService';
@@ -90,6 +91,7 @@ function MetricPill({
 
 export default function AzoupDashboardScreen() {
   const { user } = useAuth();
+  const { emitenteInicial } = useEmpresaFiltro();
   const [data, setData] = useState<AzoupDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -520,6 +522,7 @@ export default function AzoupDashboardScreen() {
         onDepois={() => {
           if (!nfLoading) setNfCliente(null);
         }}
+        emitenteIdInicial={emitenteInicial()}
         discriminacaoInicial={
           nfCliente
             ? `Assinatura Azoup — ${nfCliente.plano_id ? `plano ${nfCliente.plano_id}` : nfCliente.nome} — ${new Date().getFullYear()}-${`${new Date().getMonth() + 1}`.padStart(2, '0')}`

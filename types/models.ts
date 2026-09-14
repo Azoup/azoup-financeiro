@@ -56,6 +56,8 @@ export interface Cliente {
   ultima_justificativa_cancelamento?: string | null;
   /** true = com NF (nota fiscal); false = sem NF. Ausente até migration 014 = sem NF. */
   emite_nf?: boolean;
+  /** Emitente NFS-e que emite a nota deste cliente. */
+  emitente_nf_id?: string | null;
   /** mensal | anual — faturamento da cobrança. */
   tipo_faturamento: 'mensal' | 'anual';
   /** Qtd. de parcelas no ano quando tipo_faturamento=anual (1,2,3,4,6,12). */
@@ -120,6 +122,8 @@ export interface ClienteFormValues {
   cancelamento_justificativa: string;
   /** Com NF (nota fiscal) ou sem NF. */
   emite_nf: boolean;
+  /** Empresa (emitente NFS-e) que emite a nota deste cliente. */
+  emitente_nf_id: string | null;
   /** mensal | anual */
   tipo_faturamento: 'mensal' | 'anual';
   /** Texto 1|2|3|4|6|12 quando anual. */

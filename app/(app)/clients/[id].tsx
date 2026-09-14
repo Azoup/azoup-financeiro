@@ -6,6 +6,7 @@ import { MarcarPagamentoMensalidadeGeradaModal } from '@/components/mensalidades
 import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmitirNfseModal';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import {
   deleteCliente,
   fetchClienteDetail,
@@ -50,6 +51,7 @@ import Toast from 'react-native-toast-message';
 export default function ClientDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
+  const { emitenteInicial } = useEmpresaFiltro();
   const router = useRouter();
   useHardwareBackToConsulta(CONSULTA.clients);
   const [mode, setMode] = useState<'view' | 'edit'>('view');
@@ -582,6 +584,7 @@ export default function ClientDetailScreen() {
           onEmitir={(emitenteId, discriminacao) => void emitirNfPosPagamento(emitenteId, discriminacao)}
           onDepois={() => setNfPosPagamento(null)}
           competencia={nfPosPagamento?.competencia}
+          emitenteIdInicial={emitenteInicial(data?.emitente_nf_id)}
         />
         <ConfirmarEmitirNfseModal
           visible={nfConfirmMensalidade != null}
@@ -600,6 +603,7 @@ export default function ClientDetailScreen() {
           onEmitir={(emitenteId, discriminacao) => void executarNfConfirmada(emitenteId, discriminacao)}
           onDepois={() => !nfBusyId && setNfConfirmMensalidade(null)}
           competencia={nfConfirmMensalidade?.competencia}
+          emitenteIdInicial={emitenteInicial(data?.emitente_nf_id)}
         />
       </>
     ) : null}

@@ -2,6 +2,7 @@ import { Card } from '@/components/Card';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { ImportClientsModal } from '@/components/ImportClientsModal';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import {
   fetchClientsExportAll,
   fetchClientsPage,
@@ -51,6 +52,7 @@ const SORT_PRESETS: { label: string; field: SortField; order: SortOrder }[] = [
 
 export default function ClientsListScreen() {
   const { user, loading: authLoading, session, configured } = useAuth();
+  const { empresaId } = useEmpresaFiltro();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [search, setSearch] = useState('');
@@ -99,6 +101,7 @@ export default function ClientsListScreen() {
         sortOrder,
         page: pageNum,
         situacao,
+        emitenteNfId: empresaId === 'todos' ? null : empresaId,
       });
       if (id !== reqId.current) return;
       setItems(chunk);
@@ -106,7 +109,7 @@ export default function ClientsListScreen() {
       setPage(pageNum);
       setFetchError(null);
     },
-    [session?.user?.id, debounced, sortField, sortOrder, situacao],
+    [session?.user?.id, debounced, sortField, sortOrder, situacao, empresaId],
   );
 
   useEffect(() => {
@@ -282,6 +285,7 @@ export default function ClientsListScreen() {
               sortField,
               sortOrder,
               situacao,
+              emitenteNfId: empresaId === 'todos' ? null : empresaId,
             });
             return buildClientsListExport(all, {
               search: debounced,

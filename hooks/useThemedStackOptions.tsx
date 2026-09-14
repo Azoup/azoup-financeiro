@@ -1,3 +1,4 @@
+import { AppHeaderTitle } from '@/components/AppHeaderTitle';
 import { NotificationBell } from '@/components/notificacoes/NotificationBell';
 import { useTheme } from '@/context/ThemeContext';
 import { fonts } from '@/theme/typography';
@@ -19,6 +20,9 @@ export function useThemedStackOptions() {
         fontSize: 17,
         color: theme.headerText,
       },
+      headerTitle: ({ children }: { children?: React.ReactNode }) => (
+        <AppHeaderTitle>{children}</AppHeaderTitle>
+      ),
       headerShadowVisible: false,
       headerRight: () => <NotificationBell />,
     }),

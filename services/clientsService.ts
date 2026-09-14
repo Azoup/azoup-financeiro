@@ -32,6 +32,7 @@ export type ClientesListQuery = {
   sortField: SortField;
   sortOrder: SortOrder;
   situacao?: ClienteSituacaoFiltro;
+  emitenteNfId?: string | null;
 };
 
 function applyClientesListFilters<T extends { eq: Function; or: Function; not: Function; gte: Function }>(
@@ -50,6 +51,10 @@ function applyClientesListFilters<T extends { eq: Function; or: Function; not: F
     next = next.eq('cancelado', false).not('congelado_ate', 'is', null).gte('congelado_ate', hoje) as T;
   }
 
+  if (params.emitenteNfId) {
+    next = next.eq('emitente_nf_id', params.emitenteNfId) as T;
+  }
+
   const term = params.search.trim().replace(/[%_,()]/g, '');
   if (term) {
     const esc = term.replace(/%/g, '\\%').replace(/,/g, '');
@@ -61,6 +66,9 @@ function applyClientesListFilters<T extends { eq: Function; or: Function; not: F
 }
 
 function mapClienteDbError(message: string, code?: string): string {
+  if (/emitente_nf_id/i.test(message) && /does not exist|column|schema cache/i.test(message)) {
+    return 'Falta a coluna de empresa do cliente. Rode supabase/migrations/048_cliente_emitente_nf.sql no SQL Editor do Supabase.';
+  }
   if (/proxima_geracao_mes|congelado_ate|notificacoes/i.test(message) || (/column|schema cache|relation/i.test(message) && /proxima|congelado|notificac/i.test(message))) {
     return 'Falta migration. Rode 042_cliente_proxima_geracao.sql, 043_cliente_congelado.sql e 044_notificacoes.sql no SQL Editor.';
   }
@@ -182,6 +190,7 @@ export async function fetchClientsExportAll(params: {
   sortField: SortField;
   sortOrder: SortOrder;
   situacao?: ClienteSituacaoFiltro;
+  emitenteNfId?: string | null;
 }): Promise<ClienteListItem[]> {
   const all: ClienteListItem[] = [];
   let page = 0;

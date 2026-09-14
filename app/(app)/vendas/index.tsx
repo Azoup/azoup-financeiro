@@ -4,6 +4,7 @@ import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ClienteVendaPicker } from '@/components/vendas/ClienteVendaPicker';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import { fetchFormasPagamentoAtivas } from '@/services/formasPagamentoService';
 import {
@@ -59,6 +60,7 @@ function statusStyle(s: VendaStatus): { bg: string; fg: string } {
 
 export default function VendasIndexScreen() {
   const { user } = useAuth();
+  const { empresaId } = useEmpresaFiltro();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [search, setSearch] = useState('');
@@ -99,8 +101,9 @@ export default function VendasIndexScreen() {
       ...filters,
       search: debounced,
       clienteId: clienteFilter?.id ?? 'todos',
+      empresaId: empresaId === 'todos' ? null : empresaId,
     }),
-    [filters, debounced, clienteFilter],
+    [filters, debounced, clienteFilter, empresaId],
   );
 
   useEffect(() => {
@@ -110,12 +113,14 @@ export default function VendasIndexScreen() {
   const loadStats = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const s = await fetchVendaFinanceiroStats(user.id);
+      const s = await fetchVendaFinanceiroStats(user.id, {
+        empresaId: empresaId === 'todos' ? null : empresaId,
+      });
       setStats(s);
     } catch {
       setStats(null);
     }
-  }, [user?.id]);
+  }, [user?.id, empresaId]);
 
   const runFetch = useCallback(
     async (pageNum: number, mode: 'replace' | 'append') => {

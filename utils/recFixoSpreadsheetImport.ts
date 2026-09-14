@@ -169,6 +169,7 @@ function emptyImportForm(): ClienteFormValues {
     cancelado: false,
     cancelamento_justificativa: '',
     emite_nf: false,
+    emitente_nf_id: null,
     tipo_faturamento: 'mensal',
     parcelas_anuais: '12',
     proxima_geracao_mes: '',

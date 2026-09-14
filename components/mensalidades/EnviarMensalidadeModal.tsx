@@ -16,6 +16,7 @@ type Props = {
   onMensalidadeComBoleto: (emitenteId: string) => void;
   /** Mensalidade + boleto + NFS-e no mesmo CNPJ. */
   onMensalidadeComBoletoENf: (emitenteId: string, discriminacao: string) => void;
+  emitenteIdInicial?: string | null;
 };
 
 export function EnviarMensalidadeModal({
@@ -24,6 +25,7 @@ export function EnviarMensalidadeModal({
   onClose,
   onMensalidadeComBoleto,
   onMensalidadeComBoletoENf,
+  emitenteIdInicial,
 }: Props) {
   const { user } = useAuth();
   const [emitentes, setEmitentes] = useState<NfseEmitente[]>([]);
@@ -42,6 +44,7 @@ export function EnviarMensalidadeModal({
         if (cancelled) return;
         setEmitentes(list);
         const preferred =
+          (emitenteIdInicial ? list.find((e) => e.id === emitenteIdInicial) : undefined) ??
           pickEmitenteC6(list) ??
           list.find((e) => e.banco_cobranca === 'c6') ??
           list.find((e) => e.padrao) ??
@@ -64,7 +67,7 @@ export function EnviarMensalidadeModal({
     return () => {
       cancelled = true;
     };
-  }, [visible, user?.id]);
+  }, [visible, user?.id, emitenteIdInicial]);
 
   const selected = emitentes.find((e) => e.id === selectedId) ?? null;
   const bancoLabel = selected?.banco_cobranca === 'c6' ? 'C6 Bank' : 'Sicoob';

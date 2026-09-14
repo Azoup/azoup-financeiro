@@ -1,3 +1,4 @@
+import { AcoesMenuModal, type AcaoMenuItem } from '@/components/AcoesMenuModal';
 import { Card } from '@/components/Card';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmitirNfseModal';
@@ -5,6 +6,7 @@ import { buildMensalidadesExport } from '@/utils/exportReportBuilders';
 import { MarcarPagamentoMensalidadeGeradaModal } from '@/components/mensalidades/MarcarPagamentoMensalidadeGeradaModal';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import { sincronizarCarnesMensalidadesFaltantes, fetchBoletosPorMensalidadeIds, fetchBoletoParcelaById } from '@/services/boletoParcelaService';
 import { abrirDocumentoBoleto } from '@/utils/openBoletoDocumento';
@@ -138,6 +140,7 @@ function matchSearch(m: MensalidadeGerada, term: string): boolean {
 
 export default function HistoricoMensalidadesGeradasScreen() {
   const { user } = useAuth();
+  const { matchEmpresa, emitenteInicial } = useEmpresaFiltro();
   const router = useRouter();
   const { cliente: clienteParam } = useLocalSearchParams<{ cliente?: string | string[] }>();
   const clienteFiltro = Array.isArray(clienteParam) ? clienteParam[0] : clienteParam;
@@ -162,6 +165,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
   const [c6BusyId, setC6BusyId] = useState<string | null>(null);
   const [pagina, setPagina] = useState(1);
   const [lotesExpandidos, setLotesExpandidos] = useState<Set<string>>(new Set());
+  const [acoesM, setAcoesM] = useState<MensalidadeGerada | null>(null);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -190,7 +194,9 @@ export default function HistoricoMensalidadesGeradasScreen() {
   );
 
   const filteredRows = useMemo(() => {
-    let list = allRows;
+    let list = allRows.filter((m) =>
+      matchEmpresa(m.cliente_emitente_nf_id, boletosPorMensalidade[m.id]?.emitente_id),
+    );
     if (clienteFiltro) {
       list = list.filter((m) => m.cliente_id === String(clienteFiltro));
     }
@@ -218,15 +224,15 @@ export default function HistoricoMensalidadesGeradasScreen() {
       );
     }
     return list;
-  }, [allRows, clienteFiltro, debouncedSearch, statusFilter]);
+  }, [allRows, clienteFiltro, debouncedSearch, statusFilter, matchEmpresa, boletosPorMensalidade]);
 
   const historicoItems = useMemo(() => groupHistoricoRows(filteredRows), [filteredRows]);
 
-  const totalPaginas = Math.max(1, Math.ceil(historicoItems.length / MENSALIDADES_POR_PAGINA));
+  const totalPaginas = Math.max(1, Math.ceil(filteredRows.length / MENSALIDADES_POR_PAGINA));
   const itemsPagina = useMemo(() => {
     const inicio = (pagina - 1) * MENSALIDADES_POR_PAGINA;
-    return historicoItems.slice(inicio, inicio + MENSALIDADES_POR_PAGINA);
-  }, [historicoItems, pagina]);
+    return filteredRows.slice(inicio, inicio + MENSALIDADES_POR_PAGINA);
+  }, [filteredRows, pagina]);
 
   useEffect(() => {
     setPagina(1);
@@ -734,17 +740,26 @@ export default function HistoricoMensalidadesGeradasScreen() {
           })}
         </ScrollView>
 
+        {filteredRows.length > 0 ? (
+          <View style={styles.tableHead}>
+            <Text style={[styles.th, styles.linhaCli]}>Cliente</Text>
+            <Text style={[styles.th, styles.linhaVenc]}>Venc.</Text>
+            <Text style={[styles.th, styles.linhaVal]}>Valor</Text>
+            <Text style={[styles.th, { width: 72 }]}>Status</Text>
+            <View style={styles.moreBtn} />
+          </View>
+        ) : null}
         <Text style={styles.resultCount}>
           {loading
             ? 'Carregando…'
-            : `${historicoItems.length} grupo(s)/item(ns) · ${filteredRows.length} mensalidade(s)`}
+            : `${filteredRows.length} mensalidade(s)`}
         </Text>
       </View>
     </>
   );
 
   const listFooter =
-    !loading && historicoItems.length > 0 ? (
+    !loading && filteredRows.length > 0 ? (
       <View style={styles.paginacao}>
         <Pressable
           style={[styles.paginaBtn, pagina === 1 && styles.paginaBtnDisabled]}
@@ -785,12 +800,111 @@ export default function HistoricoMensalidadesGeradasScreen() {
       </View>
     ) : null;
 
+  const renderLinha = ({ item, index }: { item: MensalidadeGerada; index: number }) => {
+    const vis = mensalidadeGeradaStatusVisual(item);
+    const st = statusColor(vis);
+    const cli = unwrapCliente(item);
+    const venc = item.data_vencimento.split('-').reverse().join('/');
+    const parcela =
+      item.parcela_numero != null && item.parcela_total != null
+        ? `${item.parcela_numero}/${item.parcela_total}`
+        : null;
+    const isLast = index === itemsPagina.length - 1;
+    return (
+      <View style={[styles.linha, isLast && styles.linhaLast]}>
+        <View style={styles.linhaCli}>
+          <Text style={styles.cli} numberOfLines={1}>
+            {cli.nome}
+          </Text>
+          <Text style={styles.metaTxt} numberOfLines={1}>
+            {item.competencia ? `Comp. ${item.competencia}` : 'Sem competência'}
+            {parcela ? ` · ${parcela}` : ''}
+          </Text>
+        </View>
+        <Text style={styles.linhaVenc}>{venc}</Text>
+        <Text style={styles.linhaVal}>{formatBRL(item.valor)}</Text>
+        <View style={[styles.tag, { backgroundColor: st.bg }]}>
+          <Text style={[styles.tagTxt, { color: st.fg }]} numberOfLines={1}>
+            {vis}
+          </Text>
+        </View>
+        <Pressable onPress={() => setAcoesM(item)} style={styles.moreBtn} accessibilityLabel="Ações da mensalidade">
+          <Ionicons name="ellipsis-horizontal" size={18} color={colors.petroleum} />
+        </Pressable>
+      </View>
+    );
+  };
+
+  const acoesDaMensalidade = (m: MensalidadeGerada): AcaoMenuItem[] => {
+    const vis = mensalidadeGeradaStatusVisual(m);
+    const showPay = podeRegistrarPagamentoMensalidadeGerada(m);
+    const nfEmitida = nfEmitidas[m.id];
+    const boleto = boletosPorMensalidade[m.id];
+    const itens: AcaoMenuItem[] = [];
+    if (boleto) {
+      itens.push({
+        key: 'boleto',
+        label: pdfBusyId === m.id ? 'Abrindo boleto…' : 'Baixar boleto',
+        icon: 'download-outline',
+        busy: pdfBusyId === m.id,
+        onPress: () => void abrirPdfBoleto(m.id),
+      });
+      const precisaC6 =
+        boleto.status_registro === 'erro' ||
+        boleto.status_registro === 'informativo' ||
+        boleto.status_registro === 'pendente' ||
+        (boleto.tipo_emissao === 'c6' && !boleto.pdf_url && !boleto.linha_digitavel);
+      if (precisaC6) {
+        itens.push({
+          key: 'c6',
+          label: c6BusyId === m.id ? 'Registrando…' : 'Registrar no C6',
+          icon: 'cloud-upload-outline',
+          busy: c6BusyId === m.id,
+          onPress: () => void registrarNoC6(m.id),
+        });
+      }
+    }
+    if (showPay) {
+      itens.push({
+        key: 'pagar',
+        label: 'Lançar pagamento',
+        icon: 'cash-outline',
+        onPress: () => setRegistroPagamento(m),
+      });
+    } else if (vis === 'pago') {
+      itens.push({
+        key: 'pago',
+        label: 'Pago',
+        icon: 'checkmark-circle-outline',
+        disabled: true,
+        onPress: () => undefined,
+      });
+    }
+    if (nfEmitida) {
+      itens.push({
+        key: 'nf',
+        label: `NFS-e emitida${nfEmitida.numero != null ? ` nº ${nfEmitida.numero}` : ''}`,
+        icon: 'document-text-outline',
+        onPress: () => router.push('/(app)/notas-fiscais'),
+      });
+    } else if (m.status !== 'cancelado') {
+      itens.push({
+        key: 'emitir',
+        label: nfBusyId === m.id ? 'Emitindo…' : 'Emitir NFS-e',
+        icon: 'receipt-outline',
+        busy: nfBusyId === m.id,
+        onPress: () => setNfConfirmMensalidade(m),
+      });
+    }
+    return itens;
+  };
+
   return (
     <View style={styles.root}>
       <FlatList
         data={itemsPagina}
-        keyExtractor={(it) => it.key}
-        renderItem={renderItem}
+        keyExtractor={(it) => it.id}
+        renderItem={renderLinha}
         ListHeaderComponent={listHeader}
         ListFooterComponent={listFooter}
         contentContainerStyle={styles.listContent}
@@ -810,6 +924,18 @@ export default function HistoricoMensalidadesGeradasScreen() {
         }
       />
 
+      <AcoesMenuModal
+        visible={acoesM != null}
+        title={acoesM ? unwrapCliente(acoesM).nome : ''}
+        subtitle={
+          acoesM
+            ? `${acoesM.competencia ? `Comp. ${acoesM.competencia} · ` : ''}${formatBRL(acoesM.valor)}`
+            : undefined
+        }
+        items={acoesM ? acoesDaMensalidade(acoesM) : []}
+        onClose={() => setAcoesM(null)}
+      />
+
       <MarcarPagamentoMensalidadeGeradaModal
         visible={registroPagamento != null}
         registro={registroPagamento}
@@ -824,6 +950,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
         onEmitir={(emitenteId, discriminacao) => void emitirNfPosPagamento(emitenteId, discriminacao)}
         onDepois={() => setNfPosPagamento(null)}
         competencia={nfPosPagamento?.competencia}
+        emitenteIdInicial={emitenteInicial(nfPosPagamento?.cliente_emitente_nf_id)}
       />
 
       <ConfirmarEmitirNfseModal
@@ -843,6 +970,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
         onEmitir={(emitenteId, discriminacao) => void executarNfConfirmada(emitenteId, discriminacao)}
         onDepois={() => !nfBusyId && setNfConfirmMensalidade(null)}
         competencia={nfConfirmMensalidade?.competencia}
+        emitenteIdInicial={emitenteInicial(nfConfirmMensalidade?.cliente_emitente_nf_id)}
       />
     </View>
   );
@@ -953,6 +1081,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     fontSize: 14,
   },
+  tableHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.md,
+    paddingVertical: 8,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.petroleum,
+    borderTopLeftRadius: radius.md,
+    borderTopRightRadius: radius.md,
+    gap: 6,
+  },
+  th: { fontSize: 10, fontWeight: '800', color: colors.white, textTransform: 'uppercase' },
+  linha: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.md,
+    backgroundColor: colors.white,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: colors.gray100,
+    paddingVertical: 8,
+    paddingHorizontal: spacing.sm,
+    gap: 6,
+  },
+  linhaLast: { borderBottomLeftRadius: radius.md, borderBottomRightRadius: radius.md },
+  linhaCli: { flex: 1, minWidth: 0 },
+  linhaVenc: { width: 72, fontSize: 12, color: colors.gray800 },
+  linhaVal: { width: 84, textAlign: 'right', fontSize: 13, fontWeight: '700', color: colors.orange },
+  moreBtn: { width: 32, alignItems: 'center' },
   card: {
     flex: 1,
     minWidth: 0,

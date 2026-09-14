@@ -61,7 +61,13 @@ export interface PagamentoParcelaRow {
 }
 
 export interface VendaDetail extends Venda {
-  cliente: { id: string; nome_cliente: string; nome_empresa: string | null; emite_nf: boolean };
+  cliente: {
+    id: string;
+    nome_cliente: string;
+    nome_empresa: string | null;
+    emite_nf: boolean;
+    emitente_nf_id?: string | null;
+  };
   parcelas: ParcelaVenda[];
   pagamentos: PagamentoVenda[];
   pagamento_parcelas: PagamentoParcelaRow[];
@@ -97,6 +103,8 @@ export interface VendaListFilters {
   pagamentoDe: string | null;
   pagamentoAte: string | null;
   clienteId: string | 'todos';
+  /** Filtra vendas dos clientes dessa empresa (emitente NFS-e). */
+  empresaId?: string | null;
 }
 
 export interface VendaFinanceiroStats {

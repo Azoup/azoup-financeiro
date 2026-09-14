@@ -21,6 +21,8 @@ type Props = {
   discriminacaoInicial?: string;
   /** Inclui “— competência …” no texto padrão, como na emissão automática. */
   competencia?: string | null;
+  /** Empresa pré-selecionada (filtro do menu ou cadastro do cliente). */
+  emitenteIdInicial?: string | null;
 };
 
 function textoDiscriminacaoPadrao(
@@ -47,6 +49,7 @@ export function ConfirmarEmitirNfseModal({
   onDepois,
   discriminacaoInicial,
   competencia,
+  emitenteIdInicial,
 }: Props) {
   const { user } = useAuth();
   const [emitentes, setEmitentes] = useState<NfseEmitente[]>([]);
@@ -64,7 +67,10 @@ export function ConfirmarEmitirNfseModal({
       .then((list) => {
         if (cancelled) return;
         setEmitentes(list);
-        const padrao = list.find((e) => e.padrao) ?? list[0];
+        const padrao =
+          (emitenteIdInicial ? list.find((e) => e.id === emitenteIdInicial) : undefined) ??
+          list.find((e) => e.padrao) ??
+          list[0];
         setSelectedId(padrao?.id ?? null);
         setDiscriminacao(textoDiscriminacaoPadrao(padrao, discriminacaoInicial, competencia));
       })
@@ -80,7 +86,7 @@ export function ConfirmarEmitirNfseModal({
     return () => {
       cancelled = true;
     };
-  }, [visible, user?.id, discriminacaoInicial, competencia]);
+  }, [visible, user?.id, discriminacaoInicial, competencia, emitenteIdInicial]);
 
   const escolherEmitente = (e: NfseEmitente) => {
     setSelectedId(e.id);

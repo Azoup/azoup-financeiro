@@ -1,26 +1,24 @@
-import { Card } from '@/components/Card';
+import { AcoesMenuModal, type AcaoMenuItem } from '@/components/AcoesMenuModal';
 import { CancelarNotaFiscalModal } from '@/components/notas-fiscais/CancelarNotaFiscalModal';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import {
   cancelarNotaFiscalSefaz,
   fetchNotasFiscaisLista,
   reemitirNotaFiscalSefaz,
 } from '@/services/notaFiscalService';
-import { emitenteLabel, ensureEmitentes } from '@/services/nfseEmitenteService';
+import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { NfseEmitente, NotaFiscalListRow, NotaFiscalStatus } from '@/types/notaFiscal';
 import { showAppToast } from '@/utils/appToast';
 import { baixarDanfePdf, baixarLoteDanfeXml } from '@/utils/baixarDanfseArquivos';
 import { formatBRL } from '@/utils/currency';
 import { compartilharDanfseComFeedback } from '@/utils/danfseDocumento';
-import { formatDateTimeBRFromISO } from '@/utils/date';
 import {
   corNotaFiscalStatus,
-  labelAmbienteNfe,
   labelNotaFiscalStatus,
-  labelTipoDocumentoFiscal,
   podeBaixarXmlNfse,
   podeCancelarNotaFiscal,
   podeImprimirDanfe,
@@ -70,6 +68,7 @@ function baixarXmlNoNavegador(xml: string, nomeArquivo: string) {
 
 export default function NotasFiscaisIndexScreen() {
   const { user } = useAuth();
+  const { matchEmpresa } = useEmpresaFiltro();
   const router = useRouter();
   const [rows, setRows] = useState<NotaFiscalListRow[]>([]);
   const [emitentes, setEmitentes] = useState<NfseEmitente[]>([]);
@@ -82,6 +81,7 @@ export default function NotasFiscaisIndexScreen() {
   const [printBusyId, setPrintBusyId] = useState<string | null>(null);
   const [shareBusyId, setShareBusyId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [acoesNota, setAcoesNota] = useState<NotaFiscalListRow | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
 
   const [statusFilter, setStatusFilter] = useState<StatusFiltro>('todos');
@@ -134,15 +134,10 @@ export default function NotasFiscaisIndexScreen() {
     }
   }, [load]);
 
-  const emitenteMap = useMemo(() => {
-    const m = new Map<string, NfseEmitente>();
-    for (const e of emitentes) m.set(e.id, e);
-    return m;
-  }, [emitentes]);
-
   const filtered = useMemo(() => {
     const term = debouncedCliente.trim().toLowerCase();
     return rows.filter((r) => {
+      if (!matchEmpresa(r.emitente_id, r.emitente?.id)) return false;
       if (statusFilter !== 'todos' && r.status !== statusFilter) return false;
       if (emitenteFilter !== 'todos') {
         const eid = r.emitente_id ?? r.emitente?.id ?? '';
@@ -156,7 +151,7 @@ export default function NotasFiscaisIndexScreen() {
       }
       return true;
     });
-  }, [rows, statusFilter, emitenteFilter, debouncedCliente]);
+  }, [rows, statusFilter, emitenteFilter, debouncedCliente, matchEmpresa]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { todos: rows.length };
@@ -220,13 +215,6 @@ export default function NotasFiscaisIndexScreen() {
       setBatchBusy(false);
     }
   };
-  const resolveEmitenteLabel = (item: NotaFiscalListRow) => {
-    if (item.emitente) return emitenteLabel(item.emitente);
-    const fromList = item.emitente_id ? emitenteMap.get(item.emitente_id) : null;
-    if (fromList) return emitenteLabel(fromList);
-    return null;
-  };
-
   const baixarDanfe = async (item: NotaFiscalListRow) => {
     setPrintBusyId(item.id);
     try {
@@ -323,121 +311,110 @@ export default function NotasFiscaisIndexScreen() {
     }
   };
 
-  const renderItem = ({ item }: { item: NotaFiscalListRow }) => {
-    const st = corNotaFiscalStatus(item.status);
-    const cli = item.cliente?.nome_cliente ?? '—';
-    const empLabel = resolveEmitenteLabel(item);
+  const acoesDaNota = (item: NotaFiscalListRow): AcaoMenuItem[] => {
     const podeDanfe = podeImprimirDanfe(item);
     const podeXml = podeBaixarXmlNfse(item);
-    const podeCancelar = podeCancelarNotaFiscal(item);
-    const podeReemitir = podeReemitirNotaFiscal(item);
-    const reemitindo = reemitBusyId === item.id;
-    const imprimindo = printBusyId === item.id;
-    const compartilhando = shareBusyId === item.id;
+    const itens: AcaoMenuItem[] = [];
+    if (podeReemitirNotaFiscal(item)) {
+      itens.push({
+        key: 'reemitir',
+        label: 'Reemitir NFS-e',
+        icon: 'refresh-outline',
+        busy: reemitBusyId === item.id,
+        onPress: () => void reemitir(item),
+      });
+    }
+    itens.push(
+      {
+        key: 'email',
+        label: 'Compartilhar por e-mail',
+        icon: 'mail-outline',
+        disabled: !podeDanfe,
+        busy: shareBusyId === item.id,
+        onPress: () => void compartilharDanfe(item),
+      },
+      {
+        key: 'danfe',
+        label: 'Baixar DANFE',
+        icon: 'download-outline',
+        disabled: !podeDanfe,
+        busy: printBusyId === item.id,
+        onPress: () => void baixarDanfe(item),
+      },
+      {
+        key: 'xml',
+        label: 'Baixar XML',
+        icon: 'code-slash-outline',
+        disabled: !podeXml,
+        onPress: () => void baixarXml(item),
+      },
+    );
+    if (podeCancelarNotaFiscal(item)) {
+      itens.push({
+        key: 'cancelar',
+        label: 'Cancelar NFS-e',
+        icon: 'close-circle-outline',
+        danger: true,
+        onPress: () => setCancelTarget(item),
+      });
+    }
+    return itens;
+  };
+
+  const renderItem = ({ item, index }: { item: NotaFiscalListRow; index: number }) => {
+    const st = corNotaFiscalStatus(item.status);
+    const cli = item.cliente?.nome_cliente ?? '—';
+    const podeDanfe = podeImprimirDanfe(item);
     const selecionada = selectedIds.includes(item.id);
+    const isLast = index === filtered.length - 1;
 
     return (
-      <Card style={styles.card}>
-        <View style={styles.cardTop}>
-          {podeDanfe ? (
-            <Pressable
-              onPress={() => alternarNota(item.id)}
-              hitSlop={8}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: selecionada }}
-              style={styles.check}
-            >
-              <Ionicons
-                name={selecionada ? 'checkbox' : 'square-outline'}
-                size={22}
-                color={selecionada ? colors.orange : colors.gray400}
-              />
-            </Pressable>
-          ) : (
-            <View style={styles.check} />
-          )}
-          <View style={{ flex: 1 }}>
-            <Text style={styles.nfNum}>
-              NFS-e {item.serie}/{item.numero}
+      <View style={[styles.row, isLast && styles.rowLast]}>
+        {podeDanfe ? (
+          <Pressable onPress={() => alternarNota(item.id)} hitSlop={8} style={styles.check}>
+            <Ionicons
+              name={selecionada ? 'checkbox' : 'square-outline'}
+              size={20}
+              color={selecionada ? colors.orange : colors.gray400}
+            />
+          </Pressable>
+        ) : (
+          <View style={styles.check} />
+        )}
+        <View style={styles.colNum}>
+          <Text style={styles.nfNum} numberOfLines={1}>
+            {item.numero}
+          </Text>
+          {item.competencia ? (
+            <Text style={styles.comp} numberOfLines={1}>
+              {item.competencia}
             </Text>
-            <Text style={styles.cli}>{cli}</Text>
-            {empLabel ? (
-              <Text style={styles.emitente} numberOfLines={1}>
-                Empresa: {empLabel}
-              </Text>
-            ) : null}
-            {item.competencia ? <Text style={styles.comp}>Competência: {item.competencia}</Text> : null}
-          </View>
-          <View style={[styles.badge, { backgroundColor: st.bg }]}>
-            <Text style={[styles.badgeTxt, { color: st.fg }]}>{labelNotaFiscalStatus(item.status)}</Text>
-          </View>
-        </View>
-        <Text style={styles.val}>{formatBRL(item.valor_total)}</Text>
-        <Text style={styles.meta}>
-          {labelTipoDocumentoFiscal(item.tipo_documento)} · {labelAmbienteNfe(item.ambiente)}
-          {item.status_sefaz ? ` · ${item.status_sefaz}` : ''}
-        </Text>
-        {item.codigo_verificacao ? (
-          <Text style={styles.chave} numberOfLines={1}>
-            Cód. verificação: {item.codigo_verificacao}
-          </Text>
-        ) : null}
-        {item.chave_acesso ? (
-          <Text style={styles.chave} numberOfLines={1}>
-            Chave: {item.chave_acesso}
-          </Text>
-        ) : null}
-        {item.motivo_cancelamento ? (
-          <Text style={styles.cancelMotivo} numberOfLines={3}>
-            Cancelamento: {item.motivo_cancelamento}
-          </Text>
-        ) : null}
-        {item.motivo_rejeicao ? (
-          <Text style={styles.rejeicao} selectable>
-            Rejeição: {item.motivo_rejeicao}
-          </Text>
-        ) : null}
-        <Text style={styles.date}>{formatDateTimeBRFromISO(item.created_at)}</Text>
-        <View style={styles.acoes}>
-          {podeReemitir ? (
-            <PrimaryButton
-              title={reemitindo ? 'Reemitindo…' : 'Reemitir NFS-e'}
-              onPress={() => void reemitir(item)}
-              disabled={reemitindo || cancelBusy}
-              style={styles.btnAcao}
-            />
-          ) : null}
-          <PrimaryButton
-            title={compartilhando ? 'Abrindo…' : 'Compartilhar por e-mail'}
-            variant="secondary"
-            onPress={() => void compartilharDanfe(item)}
-            disabled={!podeDanfe || compartilhando}
-            style={styles.btnAcao}
-          />
-          <PrimaryButton
-            title={imprimindo ? 'Baixando…' : 'Baixar DANFE'}
-            variant="secondary"
-            onPress={() => void baixarDanfe(item)}
-            disabled={!podeDanfe || imprimindo}
-            style={styles.btnAcao}
-          />
-          <PrimaryButton
-            title="Baixar XML"
-            variant="secondary"
-            onPress={() => void baixarXml(item)}
-            disabled={!podeXml}
-            style={styles.btnAcao}
-          />
-          {podeCancelar ? (
-            <PrimaryButton
-              title="Cancelar NFS-e"
-              variant="danger"
-              onPress={() => setCancelTarget(item)}
-              style={styles.btnAcao}
-            />
           ) : null}
         </View>
-      </Card>
+        <View style={styles.colCli}>
+          <Text style={styles.cli} numberOfLines={1}>
+            {cli}
+          </Text>
+          {item.motivo_rejeicao ? (
+            <Text style={styles.rejeicao} numberOfLines={1}>
+              {item.motivo_rejeicao}
+            </Text>
+          ) : null}
+        </View>
+        <Text style={styles.colVal}>{formatBRL(item.valor_total)}</Text>
+        <View style={[styles.badge, { backgroundColor: st.bg }]}>
+          <Text style={[styles.badgeTxt, { color: st.fg }]} numberOfLines={1}>
+            {labelNotaFiscalStatus(item.status)}
+          </Text>
+        </View>
+        <Pressable
+          onPress={() => setAcoesNota(item)}
+          style={styles.moreBtn}
+          accessibilityLabel="Ações da nota"
+        >
+          <Ionicons name="ellipsis-horizontal" size={18} color={colors.petroleum} />
+        </Pressable>
+      </View>
     );
   };
 
@@ -572,6 +549,16 @@ export default function NotasFiscaisIndexScreen() {
           />
         </View>
       ) : null}
+      {filtered.length > 0 ? (
+        <View style={styles.tableHead}>
+          <View style={styles.check} />
+          <Text style={[styles.th, styles.colNum]}>Nota</Text>
+          <Text style={[styles.th, styles.colCli]}>Cliente</Text>
+          <Text style={[styles.th, styles.colVal]}>Valor</Text>
+          <Text style={[styles.th, styles.colStatus]}>Status</Text>
+          <View style={styles.moreBtn} />
+        </View>
+      ) : null}
     </View>
   );
 
@@ -596,6 +583,14 @@ export default function NotasFiscaisIndexScreen() {
           }
         />
       )}
+
+      <AcoesMenuModal
+        visible={acoesNota != null}
+        title={acoesNota ? `NFS-e ${acoesNota.serie}/${acoesNota.numero}` : ''}
+        subtitle={acoesNota?.cliente?.nome_cliente ?? undefined}
+        items={acoesNota ? acoesDaNota(acoesNota) : []}
+        onClose={() => setAcoesNota(null)}
+      />
 
       <CancelarNotaFiscalModal
         visible={cancelTarget != null}
@@ -703,7 +698,37 @@ const styles = StyleSheet.create({
   loteCheck: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   loteCheckTxt: { flex: 1, fontSize: 13, fontWeight: '700', color: colors.petroleum },
   loteBtn: { minHeight: 44 },
-  check: { width: 28, paddingTop: 2 },
+  check: { width: 28, alignItems: 'center' },
+  tableHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.md,
+    paddingVertical: 8,
+    paddingRight: 8,
+    backgroundColor: colors.petroleum,
+    borderTopLeftRadius: radius.md,
+    borderTopRightRadius: radius.md,
+  },
+  th: { fontSize: 10, fontWeight: '800', color: colors.white, textTransform: 'uppercase' },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.md,
+    backgroundColor: colors.white,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: colors.gray100,
+    paddingVertical: 8,
+    paddingRight: 4,
+    gap: 4,
+  },
+  rowLast: { borderBottomLeftRadius: radius.md, borderBottomRightRadius: radius.md },
+  colNum: { width: 72 },
+  colCli: { flex: 1, minWidth: 0 },
+  colVal: { width: 88, textAlign: 'right', fontSize: 13, fontWeight: '700', color: colors.orange },
+  colStatus: { width: 78, textAlign: 'center' },
+  moreBtn: { width: 36, alignItems: 'center', justifyContent: 'center' },
   list: { padding: spacing.md, paddingBottom: spacing.xl * 2 },
   card: { marginBottom: spacing.md },
   cardTop: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },

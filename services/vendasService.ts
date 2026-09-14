@@ -160,6 +160,17 @@ export async function fetchVendasPage(params: {
   const f = params.filters;
   const idConstraintSets: string[][] = [];
 
+  let clienteIdsEmpresa: string[] | null = null;
+  if (f.empresaId) {
+    const { data: cliEmp, error: eEmp } = await supabase
+      .from('clientes')
+      .select('id')
+      .eq('emitente_nf_id', f.empresaId);
+    if (eEmp) throw new Error(eEmp.message);
+    clienteIdsEmpresa = [...new Set(((cliEmp ?? []) as { id: string }[]).map((c) => c.id))];
+    if (clienteIdsEmpresa.length === 0) return { rows: [], hasMore: false };
+  }
+
   if (f.formaPagamentoId !== 'todos') {
     const { data: parcRows, error: ep } = await supabase
       .from('parcelas_venda')
@@ -234,6 +245,8 @@ export async function fetchVendasPage(params: {
   }
   if (f.clienteId !== 'todos') {
     q = q.eq('cliente_id', f.clienteId);
+  } else if (clienteIdsEmpresa) {
+    q = q.in('cliente_id', clienteIdsEmpresa);
   }
   if (f.dataDe) {
     q = q.gte('created_at', `${f.dataDe}T00:00:00`);
@@ -348,7 +361,7 @@ export async function fetchVendaDetail(userId: string, vendaId: string): Promise
 
   const { data: cli, error: ec } = await supabase
     .from('clientes')
-    .select('id, nome_fantasia, nome, emite_nf')
+    .select('id, nome_fantasia, nome, emite_nf, emitente_nf_id')
     .eq('id', vr.cliente_id)
     .maybeSingle();
   if (ec) throw new Error(ec.message);
@@ -359,6 +372,7 @@ export async function fetchVendaDetail(userId: string, vendaId: string): Promise
     nome_cliente: join?.nome_cliente ?? '',
     nome_empresa: join?.nome_empresa ?? null,
     emite_nf: Boolean((cli as { emite_nf?: boolean | null }).emite_nf),
+    emitente_nf_id: (cli as { emitente_nf_id?: string | null }).emitente_nf_id ?? null,
   };
 
   const { data: parcelas, error: e2 } = await supabase
@@ -401,7 +415,7 @@ export async function fetchVendaDetail(userId: string, vendaId: string): Promise
 
   return {
     ...vr,
-    cliente: { id: cliente.id, nome_cliente: cliente.nome_cliente, nome_empresa: cliente.nome_empresa, emite_nf: cliente.emite_nf },
+    cliente,
     parcelas: parcelasNorm,
     pagamentos: (pagamentos as PagamentoVenda[] | null) ?? [],
     pagamento_parcelas: ppRows,
@@ -565,12 +579,31 @@ export async function registrarPagamentoVenda(
   });
 }
 
-export async function fetchVendaFinanceiroStats(userId: string): Promise<VendaFinanceiroStats> {
-  const { data: vendas, error: e1 } = await supabase
-    .from('vendas')
-    .select('id, valor_total, status')
-    .eq('user_id', userId)
-    .neq('status', 'cancelada');
+export async function fetchVendaFinanceiroStats(
+  userId: string,
+  opts?: { empresaId?: string | null },
+): Promise<VendaFinanceiroStats> {
+  let clienteIds: string[] | null = null;
+  if (opts?.empresaId) {
+    const { data: cliEmp, error: eEmp } = await supabase
+      .from('clientes')
+      .select('id')
+      .eq('emitente_nf_id', opts.empresaId);
+    if (eEmp) throw new Error(eEmp.message);
+    clienteIds = ((cliEmp ?? []) as { id: string }[]).map((c) => c.id);
+    if (!clienteIds.length) {
+      return {
+        totalVendido: 0,
+        totalRecebido: 0,
+        totalPendente: 0,
+        parcelasAtrasadas: 0,
+        vendasAbertas: 0,
+      };
+    }
+  }
+  let q = supabase.from('vendas').select('id, valor_total, status, cliente_id').eq('user_id', userId).neq('status', 'cancelada');
+  if (clienteIds) q = q.in('cliente_id', clienteIds);
+  const { data: vendas, error: e1 } = await q;
   if (e1) throw new Error(e1.message);
   const vs = (vendas as Pick<Venda, 'id' | 'valor_total' | 'status'>[] | null) ?? [];
   const ids = vs.map((v) => v.id);

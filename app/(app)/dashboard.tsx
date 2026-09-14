@@ -1,5 +1,6 @@
 import { HomeStatCardsGrid, type HomeStatCardItem } from '@/components/ui/HomeStatCardsGrid';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import { useTheme } from '@/context/ThemeContext';
 import { fetchDashboardOverview, type DashboardOverview } from '@/services/dashboardService';
 import { getHomeDashboardLayoutStyles } from '@/styles/homeDashboardLayoutStyles';
@@ -128,6 +129,7 @@ function Shortcut({
 
 export default function DashboardScreen() {
   const { user } = useAuth();
+  const { empresaId } = useEmpresaFiltro();
   const { theme } = useTheme();
   const router = useRouter();
   const { isPhone, isMobile } = useResponsiveLayout();
@@ -139,9 +141,11 @@ export default function DashboardScreen() {
 
   const load = useCallback(async () => {
     if (!user?.id) return;
-    const o = await fetchDashboardOverview(user.id);
+    const o = await fetchDashboardOverview(user.id, {
+      empresaId: empresaId === 'todos' ? null : empresaId,
+    });
     setData(o);
-  }, [user?.id]);
+  }, [user?.id, empresaId]);
 
   useEffect(() => {
     let alive = true;

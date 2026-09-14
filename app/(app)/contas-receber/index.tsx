@@ -5,6 +5,7 @@ import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmi
 import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { MarcarPagamentoMensalidadeGeradaModal } from '@/components/mensalidades/MarcarPagamentoMensalidadeGeradaModal';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import {
   fetchBoletoParcelaById,
@@ -76,10 +77,10 @@ const ORIGEM_OPTS: { id: OrigemFiltro; label: string }[] = [
 ];
 
 const SITUACAO_OPTS: { id: SituacaoFiltro; label: string }[] = [
-  { id: 'todos', label: 'Todos' },
   { id: 'aberto', label: 'Em aberto' },
   { id: 'pago', label: 'Pagos' },
   { id: 'cancelado', label: 'Cancelados' },
+  { id: 'todos', label: 'Todos' },
 ];
 
 function origemLabel(origem: ContaReceberOrigem): string {
@@ -115,6 +116,7 @@ function boletoRegistroLabel(
 
 export default function ContasReceberScreen() {
   const { user } = useAuth();
+  const { matchEmpresa, emitenteInicial } = useEmpresaFiltro();
   const router = useRouter();
   useHardwareBackToConsulta(CONSULTA.contasReceber);
 
@@ -124,12 +126,12 @@ export default function ContasReceberScreen() {
   const [vencimentoDe, setVencimentoDe] = useState<string | null>(null);
   const [vencimentoAte, setVencimentoAte] = useState<string | null>(null);
   const [origemFilter, setOrigemFilter] = useState<OrigemFiltro>('todos');
-  const [situacaoFilter, setSituacaoFilter] = useState<SituacaoFiltro>('todos');
+  const [situacaoFilter, setSituacaoFilter] = useState<SituacaoFiltro>('aberto');
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftVencDe, setDraftVencDe] = useState<string | null>(null);
   const [draftVencAte, setDraftVencAte] = useState<string | null>(null);
   const [draftOrigem, setDraftOrigem] = useState<OrigemFiltro>('todos');
-  const [draftSituacao, setDraftSituacao] = useState<SituacaoFiltro>('todos');
+  const [draftSituacao, setDraftSituacao] = useState<SituacaoFiltro>('aberto');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [pdfId, setPdfId] = useState<string | null>(null);
@@ -260,7 +262,7 @@ export default function ContasReceberScreen() {
   }, [allRows]);
 
   const filteredRows = useMemo(() => {
-    let list = allRows;
+    let list = allRows.filter((r) => matchEmpresa(r.emitente_id));
     const term = debouncedSearch.trim().toLowerCase();
     if (term) {
       list = list.filter(
@@ -283,7 +285,7 @@ export default function ContasReceberScreen() {
       list = list.filter((r) => r.data_vencimento <= vencimentoAte);
     }
     return list;
-  }, [allRows, debouncedSearch, origemFilter, situacaoFilter, vencimentoDe, vencimentoAte]);
+  }, [allRows, debouncedSearch, origemFilter, situacaoFilter, vencimentoDe, vencimentoAte, matchEmpresa]);
 
   const temFiltroAtivo =
     Boolean(search.trim()) ||
@@ -963,6 +965,7 @@ export default function ContasReceberScreen() {
         onDepois={() => !nfBusy && setNfConfirmItem(null)}
         competencia={nfConfirmCompetencia}
         discriminacaoInicial={nfConfirmDisc}
+        emitenteIdInicial={emitenteInicial()}
       />
 
       <ConfirmarEmitirNfseModal
@@ -972,6 +975,7 @@ export default function ContasReceberScreen() {
         onEmitir={(emitenteId, discriminacao) => void emitirNfPosPagamento(emitenteId, discriminacao)}
         onDepois={() => setNfPosPagamentoMensalidade(null)}
         competencia={nfPosPagamentoMensalidade?.competencia}
+        emitenteIdInicial={emitenteInicial(nfPosPagamentoMensalidade?.cliente_emitente_nf_id)}
       />
 
       <Modal visible={filterOpen} animationType="slide" transparent onRequestClose={() => setFilterOpen(false)}>

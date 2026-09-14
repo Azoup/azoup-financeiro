@@ -2,6 +2,7 @@
  * Fallback local: DANFSe no layout “Nota da Cidade” (Americana/SP).
  * Preferir o HTML gerado por POST /api/nfe/artefatos (dados completos).
  */
+import { azoupLogoImgHtml } from '@/utils/azoupLogo';
 
 function esc(s: unknown) {
   return String(s ?? '')
@@ -69,6 +70,7 @@ button{padding:10px 18px;font-size:14px;cursor:pointer;background:#1a3a4a;color:
 <div class="page">
 <table>
 <tr>
+<td class="pad2 br" style="width:52px;vertical-align:middle">${azoupLogoImgHtml(44)}</td>
 <td class="pad2 br" style="width:62%">
 <div class="tiny">SECRETARIA MUNICIPAL DE FAZENDA</div>
 <div class="header-title">NOTA FISCAL DE SERVIÇOS ELETRÔNICA - NFS-e</div>

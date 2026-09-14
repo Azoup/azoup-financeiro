@@ -5,6 +5,7 @@ import { buildVendaDetailExport } from '@/utils/exportReportBuilders';
 import { BaixaPagamentoModal } from '@/components/vendas/BaixaPagamentoModal';
 import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmitirNfseModal';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import {
   countBoletosVenda,
   regenerarCarneVenda,
@@ -62,6 +63,7 @@ function statusParcelaColor(s: string): string {
 export default function VendaDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
+  const { emitenteInicial } = useEmpresaFiltro();
   useHardwareBackToConsulta(CONSULTA.vendas);
   const [detail, setDetail] = useState<VendaDetail | null>(null);
   const [logs, setLogs] = useState<{ id: string; tipo: string; detalhe: unknown; created_at: string }[]>([]);
@@ -439,6 +441,7 @@ export default function VendaDetailScreen() {
         onEmitir={(emitenteId, discriminacao) => void executarEmitirNf(emitenteId, discriminacao)}
         onDepois={() => !emittingNf && setNfConfirmOpen(false)}
         discriminacaoInicial={detail ? vendaDescricaoLinhas(detail).join(' · ') : undefined}
+        emitenteIdInicial={emitenteInicial(detail?.cliente.emitente_nf_id)}
       />
     </View>
   );

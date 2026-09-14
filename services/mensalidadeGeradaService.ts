@@ -73,16 +73,22 @@ function nextDbStatusAfterPay(valor: number, valorPagoNovo: number): Mensalidade
 export async function fetchMensalidadesGeradasHistorico(userId: string): Promise<MensalidadeGerada[]> {
   const { data, error } = await supabase
     .from('mensalidades')
-    .select('*, clientes(nome_fantasia, nome)')
+    .select('*, clientes(nome_fantasia, nome, emitente_nf_id)')
     .eq('user_id', userId)
     .order('data_geracao', { ascending: false });
   if (error) throw new Error(error.message);
-  return ((data ?? []) as (MensalidadeGerada & { clientes?: { nome_fantasia?: string; nome?: string } | null })[]).map(
-    (row) => {
-      const { clientes, ...rest } = row;
-      return { ...rest, clientes: mapClienteJoinEmbed(clientes) };
-    },
-  );
+  return (
+    (data ?? []) as (MensalidadeGerada & {
+      clientes?: { nome_fantasia?: string; nome?: string; emitente_nf_id?: string | null } | null;
+    })[]
+  ).map((row) => {
+    const { clientes, ...rest } = row;
+    return {
+      ...rest,
+      clientes: mapClienteJoinEmbed(clientes),
+      cliente_emitente_nf_id: clientes?.emitente_nf_id ?? null,
+    };
+  });
 }
 
 export async function fetchMensalidadeGeradaById(

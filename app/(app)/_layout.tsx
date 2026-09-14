@@ -1,6 +1,8 @@
+import { AppHeaderTitle } from '@/components/AppHeaderTitle';
 import { AppSideNav, SidebarMenuButton } from '@/components/navigation/AppSideNav';
 import { NotificationBell } from '@/components/notificacoes/NotificationBell';
 import { useAuth } from '@/context/AuthContext';
+import { EmpresaFiltroProvider } from '@/context/EmpresaFiltroContext';
 import { NotificationsProvider } from '@/context/NotificationsContext';
 import { SidebarProvider, useSidebar } from '@/context/SidebarContext';
 import { useTheme } from '@/context/ThemeContext';
@@ -32,6 +34,7 @@ function AppShell() {
   );
 
   return (
+    <EmpresaFiltroProvider>
     <NotificationsProvider>
       <View style={styles.shell}>
         <AppSideNav />
@@ -54,11 +57,12 @@ function AppShell() {
                 letterSpacing: -0.2,
                 color: theme.headerText,
               },
+              headerTitle: ({ children }) => <AppHeaderTitle>{children}</AppHeaderTitle>,
               headerLeft: () => <SidebarMenuButton />,
               headerRight: () => <NotificationBell />,
             }}
           >
-            <Tabs.Screen name="dashboard" options={{ title: 'Início', headerTitle: 'Painel' }} />
+            <Tabs.Screen name="dashboard" options={{ title: 'Painel' }} />
             <Tabs.Screen name="azoup" options={{ title: 'Azoup - Web', headerShown: false }} />
             <Tabs.Screen name="clients" options={{ title: 'Clientes', headerShown: false }} />
             <Tabs.Screen
@@ -74,12 +78,13 @@ function AppShell() {
               name="notas-fiscais"
               options={{ title: 'Notas fiscais', headerShown: false }}
             />
-            <Tabs.Screen name="account" options={{ title: 'Conta', headerTitle: 'Minha conta' }} />
+            <Tabs.Screen name="account" options={{ title: 'Minha conta' }} />
             <Tabs.Screen name="configuracoes" options={{ href: null, headerShown: false }} />
           </Tabs>
         </View>
       </View>
     </NotificationsProvider>
+    </EmpresaFiltroProvider>
   );
 }
 

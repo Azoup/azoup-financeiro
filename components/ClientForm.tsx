@@ -20,6 +20,9 @@ import {
 import { validateClienteForm } from '@/utils/validation';
 import { isCnpjDigitsComplete, isZpfDocumento, CNPJ_INPUT_MASK } from '@/utils/cnpj';
 import { fetchCompanyByCnpj } from '@/services/cnpjLookup';
+import { useAuth } from '@/context/AuthContext';
+import { emitenteLabel, ensureEmitentes } from '@/services/nfseEmitenteService';
+import type { NfseEmitente } from '@/types/notaFiscal';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import MaskInput, { Masks } from 'react-native-mask-input';
@@ -54,6 +57,7 @@ export function getEmptyClienteForm(): ClienteFormValues {
     cancelado: false,
     cancelamento_justificativa: '',
     emite_nf: false,
+    emitente_nf_id: null,
     tipo_faturamento: 'mensal',
     parcelas_anuais: '12',
     proxima_geracao_mes: '',
@@ -92,6 +96,7 @@ export function clienteToFormValues(c: Cliente, contatos: ContatoClienteInput[])
     cancelado: Boolean(c.cancelado),
     cancelamento_justificativa: c.ultima_justificativa_cancelamento?.trim() ?? '',
     emite_nf: Boolean(c.emite_nf),
+    emitente_nf_id: c.emitente_nf_id ?? null,
     tipo_faturamento: normalizeTipoFaturamento(c.tipo_faturamento),
     parcelas_anuais: c.parcelas_anuais != null ? String(c.parcelas_anuais) : '12',
     proxima_geracao_mes: (() => {
@@ -143,10 +148,19 @@ function CompactToggle({
 }
 
 export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
+  const { user } = useAuth();
+  const [emitentes, setEmitentes] = useState<NfseEmitente[]>([]);
   const [values, setValues] = useState<ClienteFormValues>(initial ?? getEmptyClienteForm());
   const [loading, setLoading] = useState(false);
   const [buscandoCnpj, setBuscandoCnpj] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void ensureEmitentes(user.id)
+      .then(setEmitentes)
+      .catch(() => setEmitentes([]));
+  }, [user?.id]);
 
   const previewAnual = useMemo(
     () =>
@@ -340,6 +354,28 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
             activeColor="rgba(13, 59, 79, 0.35)"
           />
         </View>
+
+        <Text style={styles.emitenteLab}>Empresa que emite a NFS-e deste cliente</Text>
+        {emitentes.length === 0 ? (
+          <Text style={styles.emitenteHint}>Cadastre as empresas em Configurações › NFS-e.</Text>
+        ) : (
+          <View style={styles.emitenteRow}>
+            {emitentes.map((e) => {
+              const on = values.emitente_nf_id === e.id;
+              return (
+                <Pressable
+                  key={e.id}
+                  onPress={() => setValues((v) => ({ ...v, emitente_nf_id: e.id }))}
+                  style={[styles.emitenteOpt, on && styles.emitenteOptOn]}
+                >
+                  <Text style={[styles.emitenteOptTxt, on && styles.emitenteOptTxtOn]} numberOfLines={2}>
+                    {e.nome?.trim() || emitenteLabel(e)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
 
         {values.cancelado ? (
           <FormTextInput
@@ -705,6 +741,20 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.gray100,
   },
+  emitenteLab: { fontSize: 12, fontWeight: '700', color: colors.petroleum, marginTop: spacing.sm },
+  emitenteHint: { fontSize: 12, color: colors.gray600 },
+  emitenteRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  emitenteOpt: {
+    borderWidth: 1,
+    borderColor: colors.gray200,
+    borderRadius: radius.md,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    maxWidth: '100%',
+  },
+  emitenteOptOn: { borderColor: colors.orange, backgroundColor: 'rgba(232, 106, 36, 0.08)' },
+  emitenteOptTxt: { fontSize: 13, color: colors.gray800, fontWeight: '600' },
+  emitenteOptTxtOn: { color: colors.petroleum },
   toggleItem: {
     flex: 1,
     flexDirection: 'row',

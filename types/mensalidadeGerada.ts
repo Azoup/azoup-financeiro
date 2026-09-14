@@ -26,6 +26,8 @@ export interface MensalidadeGerada {
   parcela_numero?: number | null;
   parcela_total?: number | null;
   clientes?: { nome_cliente: string; nome_empresa: string | null } | null;
+  /** Empresa do cadastro do cliente (filtro do menu / emissão). */
+  cliente_emitente_nf_id?: string | null;
 }
 
 export interface PagamentoMensalidadeGerada {

@@ -3,6 +3,7 @@ import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { buildGerarMensalidadeExport } from '@/utils/exportReportBuilders';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import {
   applyReajusteMensalidadePercentual,
@@ -67,6 +68,7 @@ function targetsFromSelection(rows: ClienteListItem[], selected: Set<string>): s
 
 export default function GerarMensalidadeScreen() {
   const { user, loading: authLoading, session } = useAuth();
+  const { empresaId, emitenteInicial } = useEmpresaFiltro();
   const router = useRouter();
   useHardwareBackToConsulta(CONSULTA.mensalidades);
   const { cliente: clienteParam } = useLocalSearchParams<{ cliente?: string | string[] }>();
@@ -150,7 +152,9 @@ export default function GerarMensalidadeScreen() {
     setFetchError(null);
     try {
       const list = await fetchClientesParaGerarMensalidades(session.user.id, filters);
-      setRows(list);
+      setRows(
+        empresaId === 'todos' ? list : list.filter((c) => c.emitente_nf_id === empresaId),
+      );
     } catch (e) {
       const message = (e as Error).message;
       setFetchError(message);
@@ -159,7 +163,7 @@ export default function GerarMensalidadeScreen() {
     } finally {
       setLoading(false);
     }
-  }, [authLoading, session?.user?.id, filters]);
+  }, [authLoading, session?.user?.id, filters, empresaId]);
 
   useEffect(() => {
     fetchSegmentosCliente().then(setSegmentos);
@@ -1044,6 +1048,7 @@ export default function GerarMensalidadeScreen() {
         onMensalidadeComBoletoENf={(emitenteId, discriminacao) =>
           void executarEnvio(true, emitenteId, discriminacao)
         }
+        emitenteIdInicial={emitenteInicial()}
       />
     </View>
   );
