@@ -1,4 +1,5 @@
 import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmitirNfseModal';
+import { DatePickerField } from '@/components/DatePickerField';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
@@ -9,14 +10,13 @@ import { colors, radius, spacing } from '@/theme/colors';
 import { fonts } from '@/theme/typography';
 import type { AzoupFaturaResumo } from '@/types/azoupAdmin';
 import { formatBRL } from '@/utils/currency';
-import { formatMesAnoBR, toISODate } from '@/utils/date';
+import { formatBRDate, formatMesAnoBR, parseISODate, toISODate } from '@/utils/date';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -265,14 +265,15 @@ export default function FaturamentoScreen() {
   };
 
   const aplicarPeriodo = () => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(draftFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(draftTo)) {
-      setError('Informe o período no formato AAAA-MM-DD.');
+    if (!draftFrom || !draftTo) {
+      setError('Informe a data inicial e a data final.');
       return;
     }
     if (draftFrom > draftTo) {
       setError('A data inicial não pode ser maior que a final.');
       return;
     }
+    setError(null);
     setFrom(draftFrom);
     setTo(draftTo);
   };
@@ -409,25 +410,20 @@ export default function FaturamentoScreen() {
 
         <View style={styles.periodRow}>
           <View style={styles.periodField}>
-            <Text style={styles.lab}>De</Text>
-            <TextInput
-              style={styles.periodIn}
-              value={draftFrom}
-              onChangeText={setDraftFrom}
-              placeholder="AAAA-MM-DD"
-              placeholderTextColor={colors.gray400}
-              autoCapitalize="none"
+            <DatePickerField
+              compact
+              label="Data inicial"
+              value={parseISODate(draftFrom)}
+              onChange={(d) => setDraftFrom(d ? toISODate(d) : '')}
             />
           </View>
           <View style={styles.periodField}>
-            <Text style={styles.lab}>Até</Text>
-            <TextInput
-              style={styles.periodIn}
-              value={draftTo}
-              onChangeText={setDraftTo}
-              placeholder="AAAA-MM-DD"
-              placeholderTextColor={colors.gray400}
-              autoCapitalize="none"
+            <DatePickerField
+              compact
+              label="Data final"
+              value={parseISODate(draftTo)}
+              onChange={(d) => setDraftTo(d ? toISODate(d) : '')}
+              minimumDate={parseISODate(draftFrom) ?? undefined}
             />
           </View>
           <Pressable onPress={aplicarPeriodo} style={styles.applyBtn}>
@@ -442,11 +438,6 @@ export default function FaturamentoScreen() {
           <Pressable onPress={mesAnterior} style={styles.chip}>
             <Text style={styles.chipTxt}>Mês anterior</Text>
           </Pressable>
-          <Pressable onPress={toggleTodos} style={styles.chip} disabled={emitiveis.length === 0}>
-            <Text style={[styles.chipTxt, emitiveis.length === 0 && { color: colors.gray400 }]}>
-              {allSelected ? 'Limpar seleção' : 'Selecionar todos'}
-            </Text>
-          </Pressable>
         </View>
 
         <View style={styles.searchWrap}>
@@ -460,9 +451,36 @@ export default function FaturamentoScreen() {
           />
         </View>
 
+        <View style={styles.selectBar}>
+          <Pressable
+            onPress={toggleTodos}
+            style={[styles.selectAllBtn, emitiveis.length === 0 && styles.selectAllBtnOff]}
+            disabled={emitiveis.length === 0}
+          >
+            <Ionicons
+              name={allSelected ? 'checkbox' : 'square-outline'}
+              size={20}
+              color={emitiveis.length === 0 ? colors.gray300 : colors.orange}
+            />
+            <Text
+              style={[styles.selectAllTxt, emitiveis.length === 0 && { color: colors.gray400 }]}
+            >
+              {allSelected ? 'Desmarcar todas' : 'Selecionar todas'}
+            </Text>
+          </Pressable>
+          {selected.size > 0 ? (
+            <Text style={styles.batchTxt}>{selected.size} selecionada(s)</Text>
+          ) : (
+            <Text style={styles.selectHint}>
+              {emitiveis.length > 0
+                ? `${emitiveis.length} pronta(s) para emitir`
+                : 'Nenhuma fatura emitível nesta lista'}
+            </Text>
+          )}
+        </View>
+
         {selected.size > 0 ? (
           <View style={styles.batchBar}>
-            <Text style={styles.batchTxt}>{selected.size} selecionada(s)</Text>
             <PrimaryButton title="Emitir selecionadas" onPress={pedirEmitirSelecionados} />
           </View>
         ) : null}
@@ -483,7 +501,8 @@ export default function FaturamentoScreen() {
           ListEmptyComponent={<Text style={styles.empty}>Nenhuma fatura neste período.</Text>}
           ListFooterComponent={
             <Text style={styles.footer}>
-              {filtered.length} item(ns) · {from} a {to}
+              {filtered.length} item(ns) · {formatBRDate(parseISODate(from))} a{' '}
+              {formatBRDate(parseISODate(to))}
             </Text>
           }
         />
@@ -544,23 +563,13 @@ const styles = StyleSheet.create({
   tabTxt: { fontSize: 13, color: colors.gray500, fontWeight: '600' },
   tabTxtOn: { color: colors.petroleum, fontWeight: '700' },
   periodRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' },
-  periodField: { flexGrow: 1, minWidth: 120 },
-  lab: { fontSize: 11, color: colors.gray500, marginBottom: 4, fontWeight: '600' },
-  periodIn: {
-    borderWidth: 1,
-    borderColor: colors.gray200,
-    borderRadius: radius.md,
-    paddingHorizontal: 10,
-    paddingVertical: Platform.OS === 'web' ? 8 : 6,
-    fontSize: 14,
-    color: colors.gray800,
-    backgroundColor: '#fff',
-  },
+  periodField: { flexGrow: 1, minWidth: 140, flex: 1 },
   applyBtn: {
     backgroundColor: colors.petroleum,
     borderRadius: radius.md,
     paddingHorizontal: 14,
     paddingVertical: 10,
+    marginBottom: spacing.sm,
   },
   applyTxt: { color: '#fff', fontWeight: '700', fontSize: 13 },
   quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -581,14 +590,38 @@ const styles = StyleSheet.create({
     borderColor: colors.gray200,
     borderRadius: radius.md,
     paddingHorizontal: 10,
-    paddingVertical: Platform.OS === 'web' ? 8 : 6,
+    paddingVertical: 8,
     backgroundColor: '#fff',
   },
   searchIn: { flex: 1, fontSize: 14, color: colors.gray800, outlineStyle: 'none' } as object,
-  batchBar: {
+  selectBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  selectAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.orangeSoft,
+    backgroundColor: colors.orangeSoft,
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  selectAllBtnOff: {
+    borderColor: colors.gray200,
+    backgroundColor: colors.gray50,
+  },
+  selectAllTxt: { fontSize: 13, fontWeight: '700', color: colors.orangeDark },
+  selectHint: { fontSize: 12, color: colors.gray500, flexShrink: 1 },
+  batchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: 12,
     flexWrap: 'wrap',
   },
