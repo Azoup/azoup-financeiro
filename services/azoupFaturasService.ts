@@ -68,12 +68,13 @@ export async function fetchAzoupFaturas(params: FetchAzoupFaturasParams): Promis
   }
 
   const qs = new URLSearchParams({
+    resource: 'faturas',
     from: params.from,
     to: params.to,
     status: params.status ?? 'pago',
   });
 
-  const res = await fetch(`${base}/api/externo/azoup-faturas?${qs.toString()}`, {
+  const res = await fetch(`${base}/api/externo/azoup-dashboard?${qs.toString()}`, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${token}`,
