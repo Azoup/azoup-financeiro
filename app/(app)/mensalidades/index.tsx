@@ -332,10 +332,15 @@ export default function HistoricoMensalidadesGeradasScreen() {
       if (!emitente?.id) {
         throw new Error('Cadastre o CNPJ 05.320.214/0001-69 (C6) em Configurações › NFS-e.');
       }
-      await reemitirBoletosC6(user.id, emitente.id, [boleto.id]);
+      const lote = await reemitirBoletosC6(user.id, emitente.id, [boleto.id]);
       const map = await fetchBoletosPorMensalidadeIds(user.id, [mensalidadeId]);
       setBoletosPorMensalidade((prev) => ({ ...prev, ...map }));
-      showAppSuccess('Boleto real registrado no C6.');
+      const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
+      const emailMsg = resumoEmailBoletosLote(lote);
+      showAppSuccess(
+        'Boleto real registrado no C6.',
+        emailMsg || undefined,
+      );
       const updated = map[mensalidadeId];
       if (updated) await abrirDocumentoBoleto(updated);
     } catch (e) {

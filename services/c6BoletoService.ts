@@ -38,6 +38,9 @@ export async function emitirBoletosC6Lote(
   const erros: string[] = [];
   const resultados: EmitirBoletoC6Result[] = [];
   let emitidos = 0;
+  let emailsEnviados = 0;
+  let emailsIgnorados = 0;
+  let emailsErro = 0;
 
   // Um boleto por requisição evita 504 (timeout 60s) na Vercel.
   for (const boletoId of boletoIds) {
@@ -79,6 +82,9 @@ export async function emitirBoletosC6Lote(
       resultados.push(...body.resultados);
     }
     emitidos += body.emitidos ?? 0;
+    emailsEnviados += body.emails_enviados ?? 0;
+    emailsIgnorados += body.emails_ignorados ?? 0;
+    emailsErro += body.emails_erro ?? 0;
   }
 
   if (erros.length && emitidos === 0) {
@@ -90,6 +96,9 @@ export async function emitirBoletosC6Lote(
     emitidos,
     erros,
     resultados,
+    emails_enviados: emailsEnviados,
+    emails_ignorados: emailsIgnorados,
+    emails_erro: emailsErro,
   };
 }
 

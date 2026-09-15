@@ -241,7 +241,7 @@ export async function resolverVencimentoMensalidadeCliente(
 export async function criarMensalidadeGerada(
   userId: string,
   input: CriarMensalidadeGeradaInput,
-): Promise<{ id: string; avisoBoleto?: string }> {
+): Promise<{ id: string; avisoBoleto?: string; avisoEmail?: string }> {
   const dataVencimento =
     input.data_vencimento?.trim() ||
     (await resolverVencimentoMensalidadeCliente(userId, input.cliente_id));
@@ -264,7 +264,7 @@ export async function criarMensalidadeGerada(
   const mensalidadeId = data.id as string;
 
   try {
-    const { avisoSicoob } = await gerarBoletosParaMensalidades(userId, [
+    const { avisoSicoob, avisoEmail } = await gerarBoletosParaMensalidades(userId, [
       {
         id: mensalidadeId,
         cliente_id: input.cliente_id,
@@ -273,7 +273,7 @@ export async function criarMensalidadeGerada(
         competencia: input.competencia ?? null,
       },
     ]);
-    return { id: mensalidadeId, avisoBoleto: avisoSicoob };
+    return { id: mensalidadeId, avisoBoleto: avisoSicoob, avisoEmail };
   } catch (eb) {
     await supabase.from('mensalidades').delete().eq('id', mensalidadeId).eq('user_id', userId);
     throw new Error((eb as Error).message ?? 'Falha ao gerar carnê em contas a receber.');
@@ -303,6 +303,7 @@ export async function criarMensalidadesGeradasLote(params: {
   ignorados: number;
   semVencimento: number;
   avisoBoleto?: string;
+  avisoEmail?: string;
   nf?: { emitidas: number; rejeitadas: number; ignoradas: number; erros: string[] };
 }> {
   const comp = params.competencia?.trim() || null;
@@ -485,6 +486,7 @@ export async function criarMensalidadesGeradasLote(params: {
   }[];
 
   let avisoBoleto: string | undefined;
+  let avisoEmail: string | undefined;
   if (criadosRows.length) {
     try {
       const boletoRes = await gerarBoletosParaMensalidades(
@@ -499,6 +501,7 @@ export async function criarMensalidadesGeradasLote(params: {
         { emitenteId: params.emitenteId },
       );
       avisoBoleto = boletoRes.avisoBoleto ?? boletoRes.avisoSicoob;
+      avisoEmail = boletoRes.avisoEmail;
     } catch (eb) {
       const ids = criadosRows.map((m) => m.id);
       await supabase.from('mensalidades').delete().in('id', ids).eq('user_id', params.userId);
@@ -547,7 +550,7 @@ export async function criarMensalidadesGeradasLote(params: {
     }
   }
 
-  return { criados: criadosRows.length, ignorados, semVencimento, avisoBoleto, nf: nfResult };
+  return { criados: criadosRows.length, ignorados, semVencimento, avisoBoleto, avisoEmail, nf: nfResult };
 }
 
 export async function registrarPagamentoMensalidadeGerada(

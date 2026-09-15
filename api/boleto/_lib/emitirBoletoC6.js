@@ -136,6 +136,7 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint, opts = 
     return {
       success: true,
       boletoId,
+      emitido_agora: false,
       status_registro: 'registrado',
       linha_digitavel: boleto.linha_digitavel,
       codigo_barras: boleto.codigo_barras,
@@ -337,7 +338,8 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint, opts = 
     return {
       success: true,
       boletoId,
-      status_registro: 'registrado',
+      emitido_agora: true,
+      status_registro: updateRow.status_registro,
       linha_digitavel: c6.linha_digitavel,
       codigo_barras: c6.codigo_barras,
       nosso_numero_banco: c6.nosso_numero_banco,
@@ -377,4 +379,4 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint, opts = 
   }
 }
 
-module.exports = { emitirUmBoletoC6 };
+module.exports = { emitirUmBoletoC6, baixarESalvarPdfC6 };

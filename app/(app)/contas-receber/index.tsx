@@ -430,9 +430,16 @@ export default function ContasReceberScreen() {
       if (!emitente?.id) {
         throw new Error('Cadastre o CNPJ 05.320.214/0001-69 (C6) em Configurações › NFS-e.');
       }
-      await reemitirBoletosC6(user.id, emitente.id, [boletoId]);
+      const lote = await reemitirBoletosC6(user.id, emitente.id, [boletoId]);
       await refreshLista();
-      Toast.show({ type: 'success', text1: 'Boleto real registrado no C6.' });
+      const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
+      const emailMsg = resumoEmailBoletosLote(lote);
+      Toast.show({
+        type: 'success',
+        text1: 'Boleto real registrado no C6.',
+        text2: emailMsg || undefined,
+        visibilityTime: emailMsg ? 8000 : 4000,
+      });
       const updated = await fetchBoletoParcelaById(user.id, boletoId);
       if (updated) await abrirDocumentoBoleto(updated);
     } catch (e) {

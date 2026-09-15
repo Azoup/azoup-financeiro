@@ -33,6 +33,7 @@ async function emitirUmBoleto(admin, userId, boletoId) {
     return {
       success: true,
       boletoId,
+      emitido_agora: false,
       status_registro: 'registrado',
       linha_digitavel: boleto.linha_digitavel,
       codigo_barras: boleto.codigo_barras,
@@ -52,6 +53,7 @@ async function emitirUmBoleto(admin, userId, boletoId) {
     return {
       success: true,
       boletoId,
+      emitido_agora: false,
       status_registro: 'informativo',
       message: 'Sicoob inativo — carnê informativo mantido.',
     };
@@ -161,6 +163,7 @@ async function emitirUmBoleto(admin, userId, boletoId) {
     return {
       success: true,
       boletoId,
+      emitido_agora: true,
       status_registro: 'registrado',
       linha_digitavel: sicoob.linha_digitavel,
       codigo_barras: sicoob.codigo_barras,

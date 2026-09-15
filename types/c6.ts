@@ -31,6 +31,7 @@ export type C6ConfigInput = {
 export type EmitirBoletoC6Result = {
   success: boolean;
   boletoId: string;
+  emitido_agora?: boolean;
   status_registro?: string;
   linha_digitavel?: string | null;
   codigo_barras?: string | null;
@@ -38,4 +39,5 @@ export type EmitirBoletoC6Result = {
   c6_boleto_id?: string | null;
   pdf_url?: string | null;
   message?: string;
+  email?: import('@/types/sicoob').EmitirBoletoEmailResult;
 };

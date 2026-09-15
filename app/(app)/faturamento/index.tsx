@@ -85,7 +85,7 @@ export default function FaturamentoScreen() {
   const [to, setTo] = useState(fimMes);
   const [draftFrom, setDraftFrom] = useState(inicioMes);
   const [draftTo, setDraftTo] = useState(fimMes);
-  const [statusAba, setStatusAba] = useState<StatusAba>('pago');
+  const [statusAba, setStatusAba] = useState<StatusAba>('todos');
   const [rows, setRows] = useState<AzoupFaturaResumo[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

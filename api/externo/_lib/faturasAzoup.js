@@ -66,13 +66,39 @@ function statusPago(status) {
 }
 
 function normalizeStatusFiltro(raw) {
-  const s = `${raw ?? 'pago'}`.trim().toLowerCase();
-  if (!s || s === 'paid' || s === 'paga' || s === 'pagas') return 'pago';
-  if (s === 'todas' || s === 'all') return 'todos';
+  const s = `${raw ?? 'todos'}`.trim().toLowerCase();
+  if (!s || s === 'todas' || s === 'all') return 'todos';
+  if (s === 'paid' || s === 'paga' || s === 'pagas') return 'pago';
   if (s === 'provisoria' || s === 'provisórias' || s === 'provisorias') return 'draft';
   if (s === 'abertas' || s === 'aberta') return 'open';
   if (s === 'vencidas' || s === 'vencida') return 'overdue';
   return s;
+}
+
+/** Stripe só filtra por `created`; a tela usa pagamento. Inclui se qualquer data cair no período. */
+function invoiceTouchesPeriod(inv, fromUnix, toUnix) {
+  if (fromUnix == null && toUnix == null) return true;
+  const candidates = [
+    inv.status_transitions?.paid_at,
+    inv.created,
+    inv.period_start,
+    inv.period_end,
+    inv.due_date,
+  ]
+    .map((t) => (t == null ? null : Number(t)))
+    .filter((t) => t != null && Number.isFinite(t));
+  if (!candidates.length) return true;
+  return candidates.some((t) => {
+    if (fromUnix != null && t < fromUnix) return false;
+    if (toUnix != null && t > toUnix) return false;
+    return true;
+  });
+}
+
+function startOfDayUnixMinusDays(ymd, days) {
+  const base = startOfDayUnix(ymd);
+  if (base == null) return null;
+  return base - Math.max(0, days) * 24 * 60 * 60;
 }
 
 function statusLinhaMatches(statusLinha, dueUnix, filtro) {
@@ -281,83 +307,92 @@ async function listarFaturasAzoup(admin, opts = {}) {
   const byInvoice = new Map();
 
   const secret = stripeSecret();
-  if (secret) {
-    try {
-      const fromUnix = from ? startOfDayUnix(from) : null;
-      const toUnix = to ? endOfDayUnix(to) : null;
-      let stripeStatus = null;
-      if (statusFiltro === 'pago') stripeStatus = 'paid';
-      else if (statusFiltro === 'draft') stripeStatus = 'draft';
-      else if (statusFiltro === 'open' || statusFiltro === 'overdue') stripeStatus = 'open';
-      else if (statusFiltro === 'todos') stripeStatus = null;
-      else stripeStatus = statusFiltro;
+  if (!secret) {
+    throw new Error(
+      'AZOUP_STRIPE_SECRET_KEY não configurada na Vercel. Sem ela a lista de faturas fica vazia.',
+    );
+  }
 
-      const invoices = await listarFaturasStripe(secret, {
-        fromUnix,
-        toUnix,
-        status: stripeStatus,
+  try {
+    const fromUnix = from ? startOfDayUnix(from) : null;
+    const toUnix = to ? endOfDayUnix(to) : null;
+    // Busca created mais cedo: fatura pode ter sido criada no mês anterior e paga neste mês.
+    const fetchFromUnix = from ? startOfDayUnixMinusDays(from, 120) : null;
+    let stripeStatus = null;
+    if (statusFiltro === 'pago') stripeStatus = 'paid';
+    else if (statusFiltro === 'draft') stripeStatus = 'draft';
+    else if (statusFiltro === 'open' || statusFiltro === 'overdue') stripeStatus = 'open';
+    else if (statusFiltro === 'todos') stripeStatus = null;
+    else stripeStatus = statusFiltro;
+
+    const invoices = await listarFaturasStripe(secret, {
+      fromUnix: fetchFromUnix,
+      toUnix,
+      status: stripeStatus,
+    });
+
+    for (const inv of invoices) {
+      if (!invoiceTouchesPeriod(inv, fromUnix, toUnix)) continue;
+      if (!statusLinhaMatches(inv.status, inv.due_date, statusFiltro)) continue;
+
+      const customerId =
+        typeof inv.customer === 'string' ? inv.customer : inv.customer?.id ?? null;
+      const email = `${inv.customer_email ?? ''}`.trim().toLowerCase() || null;
+      const subId =
+        typeof inv.subscription === 'string'
+          ? inv.subscription
+          : inv.subscription?.id ?? null;
+
+      let clienteId =
+        (customerId && maps.byCustomer.get(customerId)) ||
+        (email && maps.byEmail.get(email)) ||
+        (subId && maps.bySubscription.get(subId)) ||
+        null;
+
+      const valorCentavos = Math.max(
+        0,
+        Math.round(Number(inv.amount_paid ?? inv.total ?? inv.amount_due ?? 0)) || 0,
+      );
+      const periodoInicio = inv.period_start
+        ? new Date(inv.period_start * 1000).toISOString()
+        : null;
+      const periodoFim = inv.period_end ? new Date(inv.period_end * 1000).toISOString() : null;
+      const dataPagamento = inv.status_transitions?.paid_at
+        ? new Date(inv.status_transitions.paid_at * 1000).toISOString()
+        : null;
+      const criadoEm = inv.created ? new Date(inv.created * 1000).toISOString() : null;
+      const vencimento = inv.due_date
+        ? new Date(inv.due_date * 1000).toISOString()
+        : null;
+      const competencia =
+        competenciaDeTs(inv.period_start) || competenciaDeTs(inv.created) || null;
+
+      const linha = montarLinha({
+        id: inv.id,
+        stripeInvoiceId: inv.id,
+        numero: inv.number,
+        clienteId,
+        clienteById: maps.clienteById,
+        empresaPorCliente: maps.empresaPorCliente,
+        emailFallback: inv.customer_email ?? null,
+        nomeFallback: inv.customer_name ?? null,
+        valorCentavos,
+        status: inv.status === 'paid' ? 'pago' : inv.status,
+        periodoInicio,
+        periodoFim,
+        dataPagamento,
+        criadoEm,
+        competencia,
+        frequencia: 'Mensal',
+        fonte: 'stripe',
+        vencimento,
       });
-
-      for (const inv of invoices) {
-        if (!statusLinhaMatches(inv.status, inv.due_date, statusFiltro)) continue;
-
-        const customerId =
-          typeof inv.customer === 'string' ? inv.customer : inv.customer?.id ?? null;
-        const email = `${inv.customer_email ?? ''}`.trim().toLowerCase() || null;
-        const subId =
-          typeof inv.subscription === 'string'
-            ? inv.subscription
-            : inv.subscription?.id ?? null;
-
-        let clienteId =
-          (customerId && maps.byCustomer.get(customerId)) ||
-          (email && maps.byEmail.get(email)) ||
-          (subId && maps.bySubscription.get(subId)) ||
-          null;
-
-        const valorCentavos = Math.max(
-          0,
-          Math.round(Number(inv.amount_paid ?? inv.total ?? inv.amount_due ?? 0)) || 0,
-        );
-        const periodoInicio = inv.period_start
-          ? new Date(inv.period_start * 1000).toISOString()
-          : null;
-        const periodoFim = inv.period_end ? new Date(inv.period_end * 1000).toISOString() : null;
-        const dataPagamento = inv.status_transitions?.paid_at
-          ? new Date(inv.status_transitions.paid_at * 1000).toISOString()
-          : null;
-        const criadoEm = inv.created ? new Date(inv.created * 1000).toISOString() : null;
-        const vencimento = inv.due_date
-          ? new Date(inv.due_date * 1000).toISOString()
-          : null;
-        const competencia =
-          competenciaDeTs(inv.period_start) || competenciaDeTs(inv.created) || null;
-
-        const linha = montarLinha({
-          id: inv.id,
-          stripeInvoiceId: inv.id,
-          numero: inv.number,
-          clienteId,
-          clienteById: maps.clienteById,
-          empresaPorCliente: maps.empresaPorCliente,
-          emailFallback: inv.customer_email ?? null,
-          nomeFallback: inv.customer_name ?? null,
-          valorCentavos,
-          status: inv.status === 'paid' ? 'pago' : inv.status,
-          periodoInicio,
-          periodoFim,
-          dataPagamento,
-          criadoEm,
-          competencia,
-          frequencia: 'Mensal',
-          fonte: 'stripe',
-          vencimento,
-        });
-        byInvoice.set(inv.id, linha);
-      }
-    } catch (e) {
-      console.warn('[azoup-faturas] Stripe list falhou:', e?.message ?? e);
+      byInvoice.set(inv.id, linha);
     }
+  } catch (e) {
+    const msg = e?.message ?? String(e);
+    console.warn('[azoup-faturas] Stripe list falhou:', msg);
+    throw new Error(`Falha ao listar faturas no Stripe: ${msg}`);
   }
 
   try {

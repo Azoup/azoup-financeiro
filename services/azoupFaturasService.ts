@@ -71,7 +71,7 @@ export async function fetchAzoupFaturas(params: FetchAzoupFaturasParams): Promis
     resource: 'faturas',
     from: params.from,
     to: params.to,
-    status: params.status ?? 'pago',
+    status: params.status ?? 'todos',
   });
 
   const res = await fetch(`${base}/api/externo/azoup-dashboard?${qs.toString()}`, {

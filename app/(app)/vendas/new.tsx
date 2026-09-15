@@ -255,6 +255,14 @@ export default function NovaVendaScreen() {
       } else {
         Toast.show({ type: 'success', text1: 'Venda registrada.' });
       }
+      if (result.avisoEmail) {
+        Toast.show({
+          type: 'info',
+          text1: 'E-mail do boleto',
+          text2: result.avisoEmail,
+          visibilityTime: 8000,
+        });
+      }
       router.replace(`/(app)/vendas/${result.id}`);
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });

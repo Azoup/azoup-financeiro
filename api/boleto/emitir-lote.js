@@ -2,6 +2,7 @@ const { getAdmin, getUserFromBearer } = require('../nfe/_lib/supabaseAdmin');
 const { emitirUmBoleto } = require('./_lib/emitirBoleto');
 const { emitirUmBoletoC6 } = require('./_lib/emitirBoletoC6');
 const { loadC6Credentials } = require('./_lib/c6Credentials');
+const { tentarEnviarEmailAposEmissao } = require('./_lib/enviarEmailBoleto');
 const {
   cleanupTemp,
   criarPixCobC6Api,
@@ -14,8 +15,9 @@ const {
 
 /**
  * Multiplex:
- * - padrão: emite boletos (Sicoob/C6)
+ * - padrão: emite boletos (Sicoob/C6) + e-mail automático do PDF
  * - action=pix-cob | pix-cobv | pix-get | pix-patch | receivables | transactions
+ * - action=enviar-email-boleto (reenvio pontual)
  * (evita nova serverless function no limite Hobby)
  */
 module.exports = async function handler(req, res) {
@@ -28,6 +30,20 @@ module.exports = async function handler(req, res) {
     const admin = getAdmin();
     const body = req.body ?? {};
     const action = String(body.action || '').trim();
+
+    if (action === 'enviar-email-boleto') {
+      const boletoId = body.boletoId;
+      if (!boletoId) {
+        return res.status(400).json({ success: false, message: 'Informe boletoId.' });
+      }
+      const email = await tentarEnviarEmailAposEmissao(admin, user.id, {
+        success: true,
+        boletoId,
+        emitido_agora: true,
+        status_registro: 'registrado',
+      });
+      return res.status(200).json({ success: true, email });
+    }
 
     if (action) {
       const emitenteId = body.emitenteId;
@@ -140,6 +156,9 @@ module.exports = async function handler(req, res) {
         const result = usarC6
           ? await emitirUmBoletoC6(admin, user.id, boletoId, emitenteId, c6Opts)
           : await emitirUmBoleto(admin, user.id, boletoId);
+        if (result.success && result.emitido_agora !== false) {
+          result.email = await tentarEnviarEmailAposEmissao(admin, user.id, result);
+        }
         resultados.push(result);
         if (result.status_registro === 'registrado' || result.c6_boleto_id) emitidos += 1;
       } catch (error) {
@@ -149,11 +168,18 @@ module.exports = async function handler(req, res) {
       }
     }
 
+    const emailsEnviados = resultados.filter((r) => r.email?.enviado).length;
+    const emailsIgnorados = resultados.filter((r) => r.email?.skipped).length;
+    const emailsErro = resultados.filter((r) => r.email && !r.email.enviado && !r.email.skipped).length;
+
     return res.status(200).json({
       success: erros.length === 0,
       emitidos,
       erros,
       resultados,
+      emails_enviados: emailsEnviados,
+      emails_ignorados: emailsIgnorados,
+      emails_erro: emailsErro,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message ?? 'Erro interno.' });

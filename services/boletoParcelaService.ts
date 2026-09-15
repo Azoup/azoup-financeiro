@@ -232,7 +232,7 @@ export async function gerarBoletosParaVendaCriada(
   userId: string,
   vendaId: string,
   opts: { descricao: string },
-): Promise<void> {
+): Promise<{ avisoEmail?: string }> {
   const { data: venda, error: e0 } = await supabase
     .from('vendas')
     .select('cliente_id')
@@ -289,11 +289,14 @@ export async function gerarBoletosParaVendaCriada(
   const boletoIds = ((inserted ?? []) as { id: string }[]).map((r) => r.id);
   if (boletoIds.length) {
     try {
-      await emitirBoletosSicoobLote(userId, boletoIds);
+      const lote = await emitirBoletosSicoobLote(userId, boletoIds);
+      const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
+      return { avisoEmail: resumoEmailBoletosLote(lote) ?? undefined };
     } catch {
       // Carnê informativo permanece em A receber; Sicoob pode ser reemitido depois.
     }
   }
+  return {};
 }
 
 export type MensalidadeParaBoleto = {
@@ -309,7 +312,7 @@ export async function gerarBoletosParaMensalidades(
   userId: string,
   mensalidades: MensalidadeParaBoleto[],
   opts?: { emitenteId?: string | null },
-): Promise<{ avisoSicoob?: string; avisoBoleto?: string }> {
+): Promise<{ avisoSicoob?: string; avisoBoleto?: string; avisoEmail?: string }> {
   if (!mensalidades.length) return {};
 
   const emitente = await resolveEmitenteCobranca(userId, opts?.emitenteId);
@@ -360,9 +363,12 @@ export async function gerarBoletosParaMensalidades(
 
   const boletoIds = ((inserted ?? []) as { id: string }[]).map((r) => r.id);
   if (boletoIds.length) {
+    const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
     if (banco === 'c6' && emitente?.id) {
       try {
-        await emitirBoletosC6Lote(userId, emitente.id, boletoIds, { modoRapido: true });
+        const lote = await emitirBoletosC6Lote(userId, emitente.id, boletoIds, { modoRapido: true });
+        const avisoEmail = resumoEmailBoletosLote(lote) ?? undefined;
+        return avisoEmail ? { avisoEmail } : {};
       } catch (e) {
         const msg =
           (e as Error).message ??
@@ -371,7 +377,9 @@ export async function gerarBoletosParaMensalidades(
       }
     } else {
       try {
-        await emitirBoletosSicoobLote(userId, boletoIds);
+        const lote = await emitirBoletosSicoobLote(userId, boletoIds);
+        const avisoEmail = resumoEmailBoletosLote(lote) ?? undefined;
+        return avisoEmail ? { avisoEmail } : {};
       } catch (e) {
         const msg =
           (e as Error).message ??

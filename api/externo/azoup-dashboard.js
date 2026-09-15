@@ -19,7 +19,7 @@ module.exports = async function handler(req, res) {
     if (resource === 'faturas' || resource === 'fatura' || resource === 'invoices') {
       const from = typeof q.from === 'string' ? q.from : null;
       const to = typeof q.to === 'string' ? q.to : null;
-      const status = typeof q.status === 'string' ? q.status : 'pago';
+      const status = typeof q.status === 'string' ? q.status : 'todos';
       const data = await listarFaturasAzoup(admin, { from, to, status });
       return res.status(200).json({ success: true, ...data });
     }

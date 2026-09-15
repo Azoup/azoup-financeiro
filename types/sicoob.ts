@@ -41,15 +41,26 @@ export type BoletoStatusRegistro =
 
 export type BoletoTipoEmissao = 'informativo' | 'sicoob' | 'c6';
 
+export type EmitirBoletoEmailResult = {
+  enviado?: boolean;
+  skipped?: boolean;
+  reason?: string;
+  to?: string;
+  error?: string;
+  id?: string | null;
+};
+
 export type EmitirBoletoSicoobResult = {
   success: boolean;
   boletoId: string;
+  emitido_agora?: boolean;
   status_registro?: BoletoStatusRegistro;
   linha_digitavel?: string | null;
   codigo_barras?: string | null;
   nosso_numero_banco?: string | null;
   pdf_url?: string | null;
   message?: string;
+  email?: EmitirBoletoEmailResult;
 };
 
 export type EmitirBoletoLoteResult = {
@@ -57,4 +68,7 @@ export type EmitirBoletoLoteResult = {
   emitidos: number;
   erros: string[];
   resultados: EmitirBoletoSicoobResult[];
+  emails_enviados?: number;
+  emails_ignorados?: number;
+  emails_erro?: number;
 };

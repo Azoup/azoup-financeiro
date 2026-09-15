@@ -479,7 +479,7 @@ export default function GerarMensalidadeScreen() {
         setPercentStr('');
         await load();
       }
-      const { criados, ignorados, semVencimento, avisoBoleto, nf } = await criarMensalidadesGeradasLote({
+      const { criados, ignorados, semVencimento, avisoBoleto, avisoEmail, nf } = await criarMensalidadesGeradasLote({
         userId: user.id,
         clienteIds: ids,
         valoresPorCliente: valoresTemporarios,
@@ -504,6 +504,14 @@ export default function GerarMensalidadeScreen() {
           text1: 'Boleto bancário pendente',
           text2: avisoBoleto,
           visibilityTime: 9000,
+        });
+      }
+      if (avisoEmail) {
+        Toast.show({
+          type: 'info',
+          text1: 'E-mail do boleto',
+          text2: avisoEmail,
+          visibilityTime: 8000,
         });
       }
       await sincronizarCarnesMensalidadesFaltantes(user.id).catch(() => undefined);
