@@ -140,7 +140,7 @@ function matchSearch(m: MensalidadeGerada, term: string): boolean {
 
 export default function HistoricoMensalidadesGeradasScreen() {
   const { user } = useAuth();
-  const { matchEmpresa, emitenteInicial } = useEmpresaFiltro();
+  const { matchEmpresa, emitenteInicial, empresaId } = useEmpresaFiltro();
   const router = useRouter();
   const { cliente: clienteParam } = useLocalSearchParams<{ cliente?: string | string[] }>();
   const clienteFiltro = Array.isArray(clienteParam) ? clienteParam[0] : clienteParam;
@@ -194,9 +194,12 @@ export default function HistoricoMensalidadesGeradasScreen() {
   );
 
   const filteredRows = useMemo(() => {
-    let list = allRows.filter((m) =>
-      matchEmpresa(m.cliente_emitente_nf_id, boletosPorMensalidade[m.id]?.emitente_id),
-    );
+    let list = allRows.filter((m) => {
+      const boletoEmitente = boletosPorMensalidade[m.id]?.emitente_id;
+      // Sem empresa no cliente/boleto: continua visível (evita lista vazia até preencher emitente_nf_id).
+      if (m.cliente_emitente_nf_id == null && boletoEmitente == null) return true;
+      return matchEmpresa(m.cliente_emitente_nf_id, boletoEmitente);
+    });
     if (clienteFiltro) {
       list = list.filter((m) => m.cliente_id === String(clienteFiltro));
     }
@@ -244,7 +247,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
 
   useEffect(() => {
     let alive = true;
-    const ids = idsFromHistItems(itemsPagina);
+    const ids = itemsPagina.map((m) => m.id).filter(Boolean);
     if (!user?.id || !ids.length) {
       setPagamentos({});
       setNfEmitidas({});
@@ -923,7 +926,9 @@ export default function HistoricoMensalidadesGeradasScreen() {
             <Text style={styles.empty}>
               {allRows.length === 0
                 ? 'Nenhuma mensalidade ainda. Use "Gerar mensalidade" para registrar a primeira geração.'
-                : 'Nenhum resultado para os filtros atuais.'}
+                : empresaId !== 'todos'
+                  ? 'Nenhuma mensalidade para a empresa selecionada no menu. Troque o filtro do menu para "Todas".'
+                  : 'Nenhum resultado para os filtros atuais.'}
             </Text>
           )
         }

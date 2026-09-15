@@ -71,24 +71,42 @@ function nextDbStatusAfterPay(valor: number, valorPagoNovo: number): Mensalidade
 }
 
 export async function fetchMensalidadesGeradasHistorico(userId: string): Promise<MensalidadeGerada[]> {
-  const { data, error } = await supabase
+  const mapRows = (
+    data: (MensalidadeGerada & {
+      clientes?: { nome_fantasia?: string; nome?: string; emitente_nf_id?: string | null } | null;
+    })[],
+  ): MensalidadeGerada[] =>
+    data.map((row) => {
+      const { clientes, ...rest } = row;
+      return {
+        ...rest,
+        clientes: mapClienteJoinEmbed(clientes),
+        cliente_emitente_nf_id: clientes?.emitente_nf_id ?? null,
+      };
+    });
+
+  const withEmitente = await supabase
     .from('mensalidades')
     .select('*, clientes(nome_fantasia, nome, emitente_nf_id)')
     .eq('user_id', userId)
     .order('data_geracao', { ascending: false });
-  if (error) throw new Error(error.message);
-  return (
-    (data ?? []) as (MensalidadeGerada & {
-      clientes?: { nome_fantasia?: string; nome?: string; emitente_nf_id?: string | null } | null;
-    })[]
-  ).map((row) => {
-    const { clientes, ...rest } = row;
-    return {
-      ...rest,
-      clientes: mapClienteJoinEmbed(clientes),
-      cliente_emitente_nf_id: clientes?.emitente_nf_id ?? null,
-    };
-  });
+
+  if (!withEmitente.error) {
+    return mapRows((withEmitente.data ?? []) as Parameters<typeof mapRows>[0]);
+  }
+
+  // Coluna emitente_nf_id ainda não existe (migration 048).
+  if (/emitente_nf_id/i.test(withEmitente.error.message)) {
+    const fallback = await supabase
+      .from('mensalidades')
+      .select('*, clientes(nome_fantasia, nome)')
+      .eq('user_id', userId)
+      .order('data_geracao', { ascending: false });
+    if (fallback.error) throw new Error(fallback.error.message);
+    return mapRows((fallback.data ?? []) as Parameters<typeof mapRows>[0]);
+  }
+
+  throw new Error(withEmitente.error.message);
 }
 
 export async function fetchMensalidadeGeradaById(
