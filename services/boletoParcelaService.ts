@@ -212,6 +212,7 @@ async function buildSnapshotBenefPag(
 async function resolveEmitenteCobranca(
   userId: string,
   emitenteId?: string | null,
+  banco?: 'sicoob' | 'c6' | null,
 ): Promise<NfseEmitente | null> {
   try {
     const list = await ensureEmitentes(userId);
@@ -219,6 +220,19 @@ async function resolveEmitenteCobranca(
     if (emitenteId) {
       const found = list.find((e) => e.id === emitenteId);
       if (found) return found;
+    }
+    if (banco === 'c6') {
+      return pickEmitenteC6(list) ?? list.find((e) => e.banco_cobranca === 'c6') ?? list[0] ?? null;
+    }
+    if (banco === 'sicoob') {
+      return (
+        list.find((e) => e.banco_cobranca === 'sicoob' && e.padrao) ??
+        list.find((e) => e.banco_cobranca === 'sicoob') ??
+        list.find((e) => e.banco_cobranca !== 'c6') ??
+        list.find((e) => e.padrao) ??
+        list[0] ??
+        null
+      );
     }
     // Sem seleção: CNPJ C6 (05.320.214/0001-69); senão o padrão (Sicoob).
     return pickEmitenteC6(list) ?? list.find((e) => e.padrao) ?? list[0] ?? null;
@@ -311,12 +325,17 @@ export type MensalidadeParaBoleto = {
 export async function gerarBoletosParaMensalidades(
   userId: string,
   mensalidades: MensalidadeParaBoleto[],
-  opts?: { emitenteId?: string | null },
+  opts?: { emitenteId?: string | null; banco?: 'sicoob' | 'c6' | null },
 ): Promise<{ avisoSicoob?: string; avisoBoleto?: string; avisoEmail?: string }> {
   if (!mensalidades.length) return {};
 
-  const emitente = await resolveEmitenteCobranca(userId, opts?.emitenteId);
-  const banco = emitente?.banco_cobranca === 'c6' ? 'c6' : 'sicoob';
+  const emitente = await resolveEmitenteCobranca(userId, opts?.emitenteId, opts?.banco);
+  const banco: 'sicoob' | 'c6' =
+    opts?.banco === 'c6' || opts?.banco === 'sicoob'
+      ? opts.banco
+      : emitente?.banco_cobranca === 'c6'
+        ? 'c6'
+        : 'sicoob';
   const perfil = await fetchPerfilCobranca(userId).catch(() => null);
   const snapCache = new Map<string, SnapshotBenefPag>();
   const rows: Record<string, unknown>[] = [];
@@ -348,6 +367,8 @@ export async function gerarBoletosParaMensalidades(
       numero_documento: numeroDocumentoMensalidade(m.id, comp),
       instrucoes: montarInstrucoesMensalidade(perfil, comp).slice(0, 4000),
       emitente_id: emitente?.id ?? null,
+      tipo_emissao: banco,
+      status_registro: 'pendente',
     });
   }
 
@@ -364,7 +385,13 @@ export async function gerarBoletosParaMensalidades(
   const boletoIds = ((inserted ?? []) as { id: string }[]).map((r) => r.id);
   if (boletoIds.length) {
     const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
-    if (banco === 'c6' && emitente?.id) {
+    if (banco === 'c6') {
+      if (!emitente?.id) {
+        return {
+          avisoBoleto:
+            'Mensalidade criada; falta emitente C6. Configure em Configurações › Boleto C6 ou use “Registrar no C6”.',
+        };
+      }
       try {
         const lote = await emitirBoletosC6Lote(userId, emitente.id, boletoIds, { modoRapido: true });
         const avisoEmail = resumoEmailBoletosLote(lote) ?? undefined;
@@ -375,17 +402,16 @@ export async function gerarBoletosParaMensalidades(
           'Mensalidade criada; registro C6 pendente. Use “Registrar no C6” na mensalidade.';
         return { avisoBoleto: msg };
       }
-    } else {
-      try {
-        const lote = await emitirBoletosSicoobLote(userId, boletoIds);
-        const avisoEmail = resumoEmailBoletosLote(lote) ?? undefined;
-        return avisoEmail ? { avisoEmail } : {};
-      } catch (e) {
-        const msg =
-          (e as Error).message ??
-          'Carnê informativo criado em A receber; registro bancário Sicoob não concluído.';
-        return { avisoSicoob: msg, avisoBoleto: msg };
-      }
+    }
+    try {
+      const lote = await emitirBoletosSicoobLote(userId, boletoIds, { exigirRegistro: true });
+      const avisoEmail = resumoEmailBoletosLote(lote) ?? undefined;
+      return avisoEmail ? { avisoEmail } : {};
+    } catch (e) {
+      const msg =
+        (e as Error).message ??
+        'Carnê informativo criado em A receber; registro bancário Sicoob não concluído.';
+      return { avisoSicoob: msg, avisoBoleto: msg };
     }
   }
   return {};

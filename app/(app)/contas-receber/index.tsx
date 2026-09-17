@@ -14,6 +14,7 @@ import {
   sincronizarCarnesVendasFaltantes,
 } from '@/services/boletoParcelaService';
 import { reemitirBoletosC6 } from '@/services/c6BoletoService';
+import { reemitirBoletosSicoob } from '@/services/sicoobBoletoService';
 import { pickEmitenteC6 } from '@/services/c6ConfigService';
 import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import {
@@ -46,7 +47,7 @@ import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate, toISODate } from '@/utils/date';
 import { CONSULTA, useHardwareBackToConsulta } from '@/utils/navigationConsulta';
 import {
-  abrirWhatsAppCobrancaNaConversa,
+  compartilharBoletoWhatsAppComFeedback,
   formatWhatsAppDisplay,
 } from '@/utils/whatsappCobranca';
 import { Ionicons } from '@expo/vector-icons';
@@ -136,8 +137,10 @@ export default function ContasReceberScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [pdfId, setPdfId] = useState<string | null>(null);
   const [emailBusyId, setEmailBusyId] = useState<string | null>(null);
+  const [whatsBusyId, setWhatsBusyId] = useState<string | null>(null);
   const [emailNotaBusyId, setEmailNotaBusyId] = useState<string | null>(null);
   const [c6BusyId, setC6BusyId] = useState<string | null>(null);
+  const [sicoobBusyId, setSicoobBusyId] = useState<string | null>(null);
   const [nomeBeneficiario, setNomeBeneficiario] = useState<string | null>(null);
   const [acoesItem, setAcoesItem] = useState<ContaReceberListRow | null>(null);
   const [payMensalidade, setPayMensalidade] = useState<MensalidadeGerada | null>(null);
@@ -322,13 +325,16 @@ export default function ContasReceberScreen() {
     setDraftSituacao('aberto');
   };
 
-  const enviarWhatsApp = (item: ContaReceberListRow) => {
+  const enviarWhatsApp = async (item: ContaReceberListRow) => {
+    setWhatsBusyId(item.id);
     try {
-      abrirWhatsAppCobrancaNaConversa(item, {
+      await compartilharBoletoWhatsAppComFeedback(item, {
         nomeBeneficiario: nomeBeneficiario ?? undefined,
       });
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setWhatsBusyId(null);
     }
   };
 
@@ -446,6 +452,29 @@ export default function ContasReceberScreen() {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setC6BusyId(null);
+    }
+  };
+
+  const registrarNoSicoob = async (boletoId: string) => {
+    if (!user?.id) return;
+    setSicoobBusyId(boletoId);
+    try {
+      const lote = await reemitirBoletosSicoob(user.id, [boletoId]);
+      await refreshLista();
+      const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
+      const emailMsg = resumoEmailBoletosLote(lote);
+      Toast.show({
+        type: 'success',
+        text1: 'Boleto registrado no Sicoob.',
+        text2: emailMsg || undefined,
+        visibilityTime: emailMsg ? 8000 : 4000,
+      });
+      const updated = await fetchBoletoParcelaById(user.id, boletoId);
+      if (updated) await abrirDocumentoBoleto(updated);
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setSicoobBusyId(null);
     }
   };
 
@@ -764,12 +793,16 @@ export default function ContasReceberScreen() {
             </Pressable>
           ) : null}
           <Pressable
-            style={[styles.acaoBtn, styles.acaoWa, !temWhats && styles.acaoBtnDisabled]}
-            onPress={() => enviarWhatsApp(item)}
-            disabled={!temWhats || pdfBusy}
+            style={[styles.acaoBtn, styles.acaoWa, (!temWhats || whatsBusyId === item.id) && styles.acaoBtnDisabled]}
+            onPress={() => void enviarWhatsApp(item)}
+            disabled={!temWhats || pdfBusy || whatsBusyId === item.id}
             accessibilityLabel="Enviar cobrança por WhatsApp"
           >
-            <Ionicons name="logo-whatsapp" size={18} color={temWhats ? colors.white : colors.gray400} />
+            {whatsBusyId === item.id ? (
+              <ActivityIndicator size="small" color={colors.white} />
+            ) : (
+              <Ionicons name="logo-whatsapp" size={18} color={temWhats ? colors.white : colors.gray400} />
+            )}
           </Pressable>
           <Pressable
             style={styles.acaoBtn}
@@ -925,8 +958,11 @@ export default function ContasReceberScreen() {
         onRegistrarC6={() => {
           if (acoesItem) void registrarNoC6(acoesItem.id);
         }}
+        onRegistrarSicoob={() => {
+          if (acoesItem) void registrarNoSicoob(acoesItem.id);
+        }}
         onWhatsApp={() => {
-          if (acoesItem) enviarWhatsApp(acoesItem);
+          if (acoesItem) void enviarWhatsApp(acoesItem);
         }}
         onEmail={() => {
           if (acoesItem) void enviarEmail(acoesItem);
@@ -939,8 +975,10 @@ export default function ContasReceberScreen() {
         nfBusy={nfBusy}
         pdfBusy={acoesItem != null && pdfId === acoesItem.id}
         c6Busy={acoesItem != null && c6BusyId === acoesItem.id}
+        sicoobBusy={acoesItem != null && sicoobBusyId === acoesItem.id}
         emailBusy={acoesItem != null && emailBusyId === acoesItem.id}
         emailNotaBusy={acoesItem != null && emailNotaBusyId === acoesItem.id}
+        whatsBusy={acoesItem != null && whatsBusyId === acoesItem.id}
       />
 
       <MarcarPagamentoMensalidadeGeradaModal

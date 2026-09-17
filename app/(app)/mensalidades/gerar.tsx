@@ -405,7 +405,10 @@ export default function GerarMensalidadeScreen() {
     }
   };
 
-  const executarEnvio = async (gerarNotaFiscal: boolean, emitenteId?: string, discriminacao?: string) => {
+  const executarEnvio = async (
+    gerarNotaFiscal: boolean,
+    opts?: { emitenteId?: string; banco?: 'sicoob' | 'c6'; discriminacao?: string },
+  ) => {
     if (!user?.id) return;
     const ids = targetIds;
     if (!ids.length) {
@@ -423,6 +426,10 @@ export default function GerarMensalidadeScreen() {
       return;
     }
     const proximaGeracaoMes = primeiroDiaDoMes(proxParsed.year, proxParsed.month);
+
+    const emitenteId = opts?.emitenteId;
+    const discriminacao = opts?.discriminacao;
+    const banco = opts?.banco;
 
     const clientesSelecionados = clientesSelecionadosResolvidos(ids);
     if (gerarNotaFiscal) {
@@ -487,6 +494,7 @@ export default function GerarMensalidadeScreen() {
         competencia: competencia.trim() || null,
         gerarNotaFiscal,
         emitenteId: emitenteId || null,
+        banco: banco || null,
         descricaoServico: discriminacao?.trim() || null,
         proximaGeracaoMes,
       });
@@ -1052,10 +1060,8 @@ export default function GerarMensalidadeScreen() {
         visible={enviarModalOpen}
         loading={busy}
         onClose={() => setEnviarModalOpen(false)}
-        onMensalidadeComBoleto={(emitenteId) => void executarEnvio(false, emitenteId)}
-        onMensalidadeComBoletoENf={(emitenteId, discriminacao) =>
-          void executarEnvio(true, emitenteId, discriminacao)
-        }
+        onMensalidadeComBoleto={(opts) => void executarEnvio(false, opts)}
+        onMensalidadeComBoletoENf={(opts) => void executarEnvio(true, opts)}
         emitenteIdInicial={emitenteInicial()}
       />
     </View>

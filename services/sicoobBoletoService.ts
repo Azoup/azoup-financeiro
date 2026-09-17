@@ -7,13 +7,22 @@ export function boletoApiBaseUrl(): string {
   return nfeApiBaseUrl();
 }
 
-export async function emitirBoletosSicoobLote(userId: string, boletoIds: string[]): Promise<EmitirBoletoLoteResult> {
+export async function emitirBoletosSicoobLote(
+  userId: string,
+  boletoIds: string[],
+  opts?: { exigirRegistro?: boolean },
+): Promise<EmitirBoletoLoteResult> {
   if (!boletoIds.length) {
     return { success: true, emitidos: 0, erros: [], resultados: [] };
   }
 
   const config = await fetchSicoobConfig(userId);
   if (!config?.ativo) {
+    if (opts?.exigirRegistro) {
+      throw new Error(
+        'Sicoob inativo. Ative e preencha Client ID / convênio em Configurações › Boleto Sicoob.',
+      );
+    }
     return { success: true, emitidos: 0, erros: [], resultados: [] };
   }
 
@@ -67,6 +76,10 @@ export async function vincularNotaFiscalAoBoletoVenda(
     .update({ nota_fiscal_id: notaFiscalId })
     .eq('venda_id', vendaId);
   if (error) throw new Error(error.message);
+}
+
+export async function reemitirBoletosSicoob(userId: string, boletoIds: string[]): Promise<EmitirBoletoLoteResult> {
+  return emitirBoletosSicoobLote(userId, boletoIds, { exigirRegistro: true });
 }
 
 export async function sincronizarBoletosPendentes(): Promise<{

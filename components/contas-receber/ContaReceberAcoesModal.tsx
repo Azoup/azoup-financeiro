@@ -15,6 +15,7 @@ type Props = {
   onVerNota: () => void;
   onPdf: () => void;
   onRegistrarC6?: () => void;
+  onRegistrarSicoob?: () => void;
   onWhatsApp: () => void;
   onEmail: () => void;
   onEmailNota?: () => void;
@@ -23,8 +24,10 @@ type Props = {
   nfBusy?: boolean;
   pdfBusy?: boolean;
   c6Busy?: boolean;
+  sicoobBusy?: boolean;
   emailBusy?: boolean;
   emailNotaBusy?: boolean;
+  whatsBusy?: boolean;
 };
 
 function origemLabel(origem: ContaReceberListRow['origem']): string {
@@ -90,6 +93,7 @@ export function ContaReceberAcoesModal({
   onVerNota,
   onPdf,
   onRegistrarC6,
+  onRegistrarSicoob,
   onWhatsApp,
   onEmail,
   onEmailNota,
@@ -98,8 +102,10 @@ export function ContaReceberAcoesModal({
   nfBusy,
   pdfBusy,
   c6Busy,
+  sicoobBusy,
   emailBusy,
   emailNotaBusy,
+  whatsBusy,
 }: Props) {
   if (!item) return null;
 
@@ -108,12 +114,19 @@ export function ContaReceberAcoesModal({
   const temWhats = Boolean(item.whatsapp?.trim());
   const temEmail = Boolean(item.email?.trim());
   const venc = formatBRDate(parseISODate(item.data_vencimento)) || item.data_vencimento;
-  const precisaC6 =
+  const precisaRegistro =
+    item.status_registro === 'erro' ||
+    item.status_registro === 'informativo' ||
+    item.status_registro === 'pendente' ||
+    (item.tipo_emissao === 'c6' && !item.pdf_url && !item.linha_digitavel);
+  const registrarNoC6 =
+    precisaRegistro &&
     Boolean(onRegistrarC6) &&
-    (item.status_registro === 'erro' ||
-      item.status_registro === 'informativo' ||
-      item.status_registro === 'pendente' ||
-      (item.tipo_emissao === 'c6' && !item.pdf_url && !item.linha_digitavel));
+    (item.tipo_emissao === 'c6' || item.tipo_emissao === 'informativo');
+  const registrarNoSicoob =
+    precisaRegistro &&
+    Boolean(onRegistrarSicoob) &&
+    (item.tipo_emissao === 'sicoob' || item.tipo_emissao === 'informativo');
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -169,7 +182,7 @@ export function ContaReceberAcoesModal({
               />
             ) : null}
 
-            {precisaC6 ? (
+            {registrarNoC6 ? (
               <AcaoRow
                 icon="cloud-upload-outline"
                 label={c6Busy ? 'Registrando no C6…' : 'Registrar boleto real no C6'}
@@ -178,6 +191,18 @@ export function ContaReceberAcoesModal({
                 disabled={c6Busy}
                 busy={c6Busy}
                 accent="#1a1a2e"
+              />
+            ) : null}
+
+            {registrarNoSicoob ? (
+              <AcaoRow
+                icon="cloud-upload-outline"
+                label={sicoobBusy ? 'Registrando no Sicoob…' : 'Registrar boleto no Sicoob'}
+                sub="Gera PDF e linha digitável via API do Sicoob"
+                onPress={onRegistrarSicoob!}
+                disabled={sicoobBusy}
+                busy={sicoobBusy}
+                accent={colors.petroleum}
               />
             ) : null}
 
@@ -197,10 +222,11 @@ export function ContaReceberAcoesModal({
 
             <AcaoRow
               icon="logo-whatsapp"
-              label="Enviar cobrança por WhatsApp"
+              label={whatsBusy ? 'Preparando PDF…' : 'Enviar cobrança por WhatsApp'}
               sub={temWhats ? formatWhatsAppDisplay(item.whatsapp!) : 'Sem WhatsApp no cadastro'}
               onPress={onWhatsApp}
-              disabled={!temWhats}
+              disabled={!temWhats || whatsBusy}
+              busy={whatsBusy}
               accent={temWhats ? '#25D366' : undefined}
             />
 

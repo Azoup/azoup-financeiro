@@ -11,6 +11,7 @@ import { useDebounce } from '@/hooks/useDebounce';
 import { sincronizarCarnesMensalidadesFaltantes, fetchBoletosPorMensalidadeIds, fetchBoletoParcelaById } from '@/services/boletoParcelaService';
 import { abrirDocumentoBoleto } from '@/utils/openBoletoDocumento';
 import { reemitirBoletosC6 } from '@/services/c6BoletoService';
+import { reemitirBoletosSicoob } from '@/services/sicoobBoletoService';
 import { pickEmitenteC6 } from '@/services/c6ConfigService';
 import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import type { BoletoParcelaVendaRow } from '@/types/contasReceber';
@@ -163,6 +164,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
   >({});
   const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
   const [c6BusyId, setC6BusyId] = useState<string | null>(null);
+  const [sicoobBusyId, setSicoobBusyId] = useState<string | null>(null);
   const [pagina, setPagina] = useState(1);
   const [lotesExpandidos, setLotesExpandidos] = useState<Set<string>>(new Set());
   const [acoesM, setAcoesM] = useState<MensalidadeGerada | null>(null);
@@ -350,6 +352,30 @@ export default function HistoricoMensalidadesGeradasScreen() {
       showAppError((e as Error).message);
     } finally {
       setC6BusyId(null);
+    }
+  };
+
+  const registrarNoSicoob = async (mensalidadeId: string) => {
+    if (!user?.id) return;
+    const boleto = boletosPorMensalidade[mensalidadeId];
+    if (!boleto) {
+      showAppInfo('Boleto não encontrado para registrar.');
+      return;
+    }
+    setSicoobBusyId(mensalidadeId);
+    try {
+      const lote = await reemitirBoletosSicoob(user.id, [boleto.id]);
+      const map = await fetchBoletosPorMensalidadeIds(user.id, [mensalidadeId]);
+      setBoletosPorMensalidade((prev) => ({ ...prev, ...map }));
+      const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
+      const emailMsg = resumoEmailBoletosLote(lote);
+      showAppSuccess('Boleto registrado no Sicoob.', emailMsg || undefined);
+      const updated = map[mensalidadeId];
+      if (updated) await abrirDocumentoBoleto(updated);
+    } catch (e) {
+      showAppError((e as Error).message);
+    } finally {
+      setSicoobBusyId(null);
     }
   };
 
@@ -561,23 +587,41 @@ export default function HistoricoMensalidadesGeradasScreen() {
           {(() => {
             const b = boletosPorMensalidade[m.id];
             if (!b) return null;
-            const precisaC6 =
+            const precisaRegistro =
               b.status_registro === 'erro' ||
               b.status_registro === 'informativo' ||
               b.status_registro === 'pendente' ||
               (b.tipo_emissao === 'c6' && !b.pdf_url && !b.linha_digitavel);
-            if (!precisaC6) return null;
+            if (!precisaRegistro) return null;
+            const showC6 = b.tipo_emissao === 'c6' || b.tipo_emissao === 'informativo';
+            const showSicoob = b.tipo_emissao === 'sicoob' || b.tipo_emissao === 'informativo';
             return (
-              <Pressable
-                style={styles.btnSmC6}
-                onPress={() => void registrarNoC6(m.id)}
-                disabled={c6BusyId === m.id}
-              >
-                <Ionicons name="cloud-upload-outline" size={13} color={colors.white} />
-                <Text style={styles.btnSmPagoTxt} numberOfLines={1}>
-                  {c6BusyId === m.id ? 'Registrando…' : 'Registrar no C6'}
-                </Text>
-              </Pressable>
+              <>
+                {showC6 ? (
+                  <Pressable
+                    style={styles.btnSmC6}
+                    onPress={() => void registrarNoC6(m.id)}
+                    disabled={c6BusyId === m.id}
+                  >
+                    <Ionicons name="cloud-upload-outline" size={13} color={colors.white} />
+                    <Text style={styles.btnSmPagoTxt} numberOfLines={1}>
+                      {c6BusyId === m.id ? 'Registrando…' : 'Registrar no C6'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {showSicoob ? (
+                  <Pressable
+                    style={styles.btnSmSicoob}
+                    onPress={() => void registrarNoSicoob(m.id)}
+                    disabled={sicoobBusyId === m.id}
+                  >
+                    <Ionicons name="cloud-upload-outline" size={13} color={colors.white} />
+                    <Text style={styles.btnSmPagoTxt} numberOfLines={1}>
+                      {sicoobBusyId === m.id ? 'Registrando…' : 'Registrar no Sicoob'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </>
             );
           })()}
           {showPay ? (
@@ -857,18 +901,27 @@ export default function HistoricoMensalidadesGeradasScreen() {
         busy: pdfBusyId === m.id,
         onPress: () => void abrirPdfBoleto(m.id),
       });
-      const precisaC6 =
+      const precisaRegistro =
         boleto.status_registro === 'erro' ||
         boleto.status_registro === 'informativo' ||
         boleto.status_registro === 'pendente' ||
         (boleto.tipo_emissao === 'c6' && !boleto.pdf_url && !boleto.linha_digitavel);
-      if (precisaC6) {
+      if (precisaRegistro && (boleto.tipo_emissao === 'c6' || boleto.tipo_emissao === 'informativo')) {
         itens.push({
           key: 'c6',
           label: c6BusyId === m.id ? 'Registrando…' : 'Registrar no C6',
           icon: 'cloud-upload-outline',
           busy: c6BusyId === m.id,
           onPress: () => void registrarNoC6(m.id),
+        });
+      }
+      if (precisaRegistro && (boleto.tipo_emissao === 'sicoob' || boleto.tipo_emissao === 'informativo')) {
+        itens.push({
+          key: 'sicoob',
+          label: sicoobBusyId === m.id ? 'Registrando…' : 'Registrar no Sicoob',
+          icon: 'cloud-upload-outline',
+          busy: sicoobBusyId === m.id,
+          onPress: () => void registrarNoSicoob(m.id),
         });
       }
     }
@@ -1239,6 +1292,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
     backgroundColor: '#1a1a2e',
+    paddingVertical: 6,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.sm,
+    minHeight: 30,
+    borderWidth: 1,
+    borderColor: colors.orange,
+  },
+  btnSmSicoob: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    backgroundColor: colors.petroleum,
     paddingVertical: 6,
     paddingHorizontal: spacing.xs,
     borderRadius: radius.sm,
