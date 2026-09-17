@@ -22,6 +22,8 @@ export function buildCorpoEmailBoleto(row: ContaReceberListRow): string {
     'O boleto segue em anexo.',
     '',
     'Qualquer dúvida, estamos à disposição.',
+    'WhatsApp: (19) 98111-1724',
+    '',
     'Atenciosamente.',
   ].filter((l): l is string => l != null);
   return linhas.join('\n');

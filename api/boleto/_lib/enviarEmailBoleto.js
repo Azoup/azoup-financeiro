@@ -106,6 +106,8 @@ function buildCorpo({ nomeCliente, referencia, valor, vencimento, numeroDocument
     'O boleto segue em anexo.',
     '',
     'Qualquer dúvida, estamos à disposição.',
+    'WhatsApp: (19) 98111-1724',
+    '',
     'Atenciosamente.',
     'Azoup',
   ].filter((l) => l != null);
