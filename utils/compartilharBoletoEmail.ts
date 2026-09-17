@@ -1,20 +1,10 @@
-import { fetchEmailCliente } from '@/services/clienteContatoService';
+import { supabase } from '@/lib/supabase';
+import { boletoApiBaseUrl } from '@/services/sicoobBoletoService';
 import type { ContaReceberListRow } from '@/types/contasReceber';
-import { buildBoletoCobrancaHtml } from '@/utils/boletoCobrancaHtml';
-import {
-  compartilharComEmail,
-  type CompartilharResultado,
-} from '@/utils/compartilharDocumento';
+import type { EmitirBoletoEmailResult } from '@/types/sicoob';
 import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate } from '@/utils/date';
-import { resolveBoletoPdfUrl } from '@/utils/openBoletoDocumento';
 import { safeTrim } from '@/utils/safeTrim';
-import * as Print from 'expo-print';
-import { Platform } from 'react-native';
-
-function isWeb(): boolean {
-  return Platform.OS === 'web' || (typeof document !== 'undefined' && typeof window !== 'undefined');
-}
 
 export function buildCorpoEmailBoleto(row: ContaReceberListRow): string {
   const venc = formatBRDate(parseISODate(row.data_vencimento)) || row.data_vencimento;
@@ -37,125 +27,121 @@ export function buildCorpoEmailBoleto(row: ContaReceberListRow): string {
   return linhas.join('\n');
 }
 
-async function fetchPdfBlob(url: string): Promise<Blob> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Não foi possível baixar o PDF do boleto.');
-  const blob = await res.blob();
-  if (blob.type === 'application/pdf') return blob;
-  return new Blob([await blob.arrayBuffer()], { type: 'application/pdf' });
-}
+/** Envia o PDF do boleto direto via Resend (mesmo fluxo da emissão). Não abre Outlook/.eml. */
+export async function enviarBoletoPorEmailDireto(boletoId: string): Promise<EmitirBoletoEmailResult> {
+  const id = safeTrim(boletoId);
+  if (!id) throw new Error('Boleto não identificado.');
 
-async function htmlParaPdfBlob(html: string): Promise<{ blob: Blob; uri?: string }> {
-  const { uri } = await Print.printToFileAsync({ html });
-  if (isWeb() && typeof fetch !== 'undefined') {
-    const res = await fetch(uri);
-    const blob = await res.blob();
-    const pdfBlob =
-      blob.type === 'application/pdf'
-        ? blob
-        : new Blob([await blob.arrayBuffer()], { type: 'application/pdf' });
-    return { blob: pdfBlob, uri };
+  const { data: session } = await supabase.auth.getSession();
+  const token = session.session?.access_token;
+  if (!token) throw new Error('Sessão expirada. Faça login novamente.');
+
+  const base = boletoApiBaseUrl();
+  if (!base) {
+    throw new Error('URL da API não configurada (use a mesma origem web ou EXPO_PUBLIC_NFE_API_URL).');
   }
-  const FileSystem = await import('expo-file-system/legacy');
-  const base64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
+
+  const res = await fetch(`${base}/api/boleto/emitir-lote`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ action: 'enviar-email-boleto', boletoId: id }),
   });
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return { blob: new Blob([bytes], { type: 'application/pdf' }), uri };
+
+  const body = (await res.json().catch(() => ({}))) as {
+    success?: boolean;
+    message?: string;
+    email?: EmitirBoletoEmailResult;
+  };
+
+  if (!res.ok || body.success === false) {
+    throw new Error(body.message ?? `Falha ao enviar e-mail (${res.status}).`);
+  }
+
+  return body.email ?? { skipped: true, reason: 'sem_resposta' };
 }
 
+function mensagemEmailResultado(email: EmitirBoletoEmailResult): { type: 'success' | 'info' | 'error'; text1: string; text2?: string } {
+  if (email.enviado && email.to) {
+    return {
+      type: 'success',
+      text1: 'Boleto enviado por e-mail.',
+      text2: `Destinatário: ${email.to}`,
+    };
+  }
+  if (email.skipped) {
+    const reason = email.reason ?? '';
+    if (reason === 'sem_email_cadastro') {
+      return {
+        type: 'info',
+        text1: 'Cliente sem e-mail no cadastro.',
+        text2: 'Cadastre um contato tipo e-mail no cliente e tente de novo.',
+      };
+    }
+    if (reason === 'sem_pdf') {
+      return {
+        type: 'info',
+        text1: 'PDF do boleto ainda indisponível.',
+        text2: email.to
+          ? 'Use “Registrar no C6” (ou aguarde o PDF) e envie de novo.'
+          : 'Gere o PDF do boleto e tente novamente.',
+      };
+    }
+    if (reason === 'email_nao_configurado') {
+      return {
+        type: 'error',
+        text1: 'Envio automático não configurado.',
+        text2: 'Configure RESEND_API_KEY na Vercel e verifique o domínio no Resend.',
+      };
+    }
+    return {
+      type: 'info',
+      text1: 'E-mail não enviado.',
+      text2: reason || 'Não foi possível enviar agora.',
+    };
+  }
+  return {
+    type: 'error',
+    text1: 'E-mail não enviado.',
+    text2: email.error || 'Falha no Resend.',
+  };
+}
+
+/** Compat: mesmo nome usado pela tela Contas a receber — agora envia direto. */
 export async function compartilharBoletoPorEmail(row: ContaReceberListRow): Promise<{
   email: string | null;
-  resultado: CompartilharResultado;
+  resultado: 'enviado' | 'ignorado' | 'erro';
 }> {
-  if (!row.cliente_id) {
-    throw new Error('Cliente não identificado para este boleto.');
-  }
-  const email = await fetchEmailCliente(row.cliente_id);
-  const pdfUrl = await resolveBoletoPdfUrl(row);
-  const subject = `Boleto — ${safeTrim(row.referencia_label) || 'cobrança'}`;
-  const body = buildCorpoEmailBoleto(row);
-  const filename = `boleto_${safeTrim(row.numero_documento) || row.id}.pdf`;
-
-  if (pdfUrl) {
-    if (isWeb()) {
-      const blob = await fetchPdfBlob(pdfUrl);
-      const resultado = await compartilharComEmail({
-        to: email,
-        subject,
-        body,
-        arquivo: { blob, filename, mimeType: 'application/pdf' },
-      });
-      return { email, resultado };
-    }
-
-    const FileSystem = await import('expo-file-system/legacy');
-    const path = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}boleto_${row.id}.pdf`;
-    const dl = await FileSystem.downloadAsync(pdfUrl, path);
-    const resultado = await compartilharComEmail({
-      to: email,
-      subject,
-      body,
-      arquivo: {
-        uri: dl.uri,
-        filename,
-        mimeType: 'application/pdf',
-      },
-    });
-    return { email, resultado };
-  }
-
-  if (row.tipo_emissao === 'c6' && !row.linha_digitavel) {
+  if (!row.id) throw new Error('Boleto não identificado.');
+  if (row.tipo_emissao === 'c6' && !row.linha_digitavel && !row.pdf_url) {
     throw new Error(
       safeTrim(row.mensagem_erro_registro) ||
-        'Boleto C6 ainda não registrado. Use “Registrar no C6” antes de compartilhar.',
+        'Boleto C6 ainda não registrado. Use “Registrar no C6” antes de enviar.',
     );
   }
-
-  const html = buildBoletoCobrancaHtml(row);
-  const { blob, uri } = await htmlParaPdfBlob(html);
-  const resultado = await compartilharComEmail({
-    to: email,
-    subject,
-    body,
-    arquivo: {
-      uri,
-      blob,
-      filename,
-      mimeType: 'application/pdf',
-    },
-  });
-  return { email, resultado };
+  const result = await enviarBoletoPorEmailDireto(row.id);
+  if (result.enviado) return { email: result.to ?? null, resultado: 'enviado' };
+  if (result.skipped) return { email: result.to ?? null, resultado: 'ignorado' };
+  throw new Error(result.error || 'Falha ao enviar e-mail do boleto.');
 }
 
 export async function compartilharBoletoComFeedback(row: ContaReceberListRow): Promise<void> {
-  const { email, resultado } = await compartilharBoletoPorEmail(row);
   const Toast = (await import('react-native-toast-message')).default;
-  if (resultado === 'eml') {
-    Toast.show({
-      type: 'success',
-      text1: 'E-mail com boleto em anexo baixado.',
-      text2: email
-        ? `Abra o arquivo .eml no Outlook (para ${email}) e clique em Enviar.`
-        : 'Abra o arquivo .eml no Outlook, confira o destinatário e envie.',
-    });
-    return;
+  if (!row.id) throw new Error('Boleto não identificado.');
+  if (row.tipo_emissao === 'c6' && !row.linha_digitavel && !row.pdf_url) {
+    throw new Error(
+      safeTrim(row.mensagem_erro_registro) ||
+        'Boleto C6 ainda não registrado. Use “Registrar no C6” antes de enviar.',
+    );
   }
-  if (!email) {
-    Toast.show({
-      type: 'info',
-      text1: 'E-mail do cliente não cadastrado.',
-      text2: 'Preencha o destinatário no app de e-mail ou cadastre em Contatos do cliente.',
-    });
-  } else if (resultado === 'email') {
-    Toast.show({
-      type: 'success',
-      text1: 'E-mail aberto.',
-      text2: `Destinatário sugerido: ${email}`,
-    });
-  } else {
-    Toast.show({ type: 'success', text1: 'Compartilhamento iniciado com anexo.' });
-  }
+  const result = await enviarBoletoPorEmailDireto(row.id);
+  const msg = mensagemEmailResultado(result);
+  Toast.show({
+    type: msg.type,
+    text1: msg.text1,
+    text2: msg.text2,
+    visibilityTime: 8000,
+  });
 }

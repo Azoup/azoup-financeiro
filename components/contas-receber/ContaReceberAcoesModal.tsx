@@ -206,10 +206,10 @@ export function ContaReceberAcoesModal({
 
             <AcaoRow
               icon="mail-outline"
-              label={emailBusy ? 'Abrindo e-mail…' : 'Compartilhar boleto por e-mail'}
-              sub={temEmail ? item.email! : 'Sem e-mail no cadastro — preencha no envio'}
+              label={emailBusy ? 'Enviando…' : 'Enviar boleto por e-mail'}
+              sub={temEmail ? item.email! : 'Sem e-mail no cadastro'}
               onPress={onEmail}
-              disabled={emailBusy}
+              disabled={emailBusy || !temEmail}
               busy={emailBusy}
               accent={temEmail ? colors.orange : undefined}
             />
