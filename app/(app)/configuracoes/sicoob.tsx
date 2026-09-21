@@ -59,6 +59,16 @@ export default function SicoobConfigScreen() {
     void load();
   }, [load]);
 
+  const webhookUrl = useMemo(() => {
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      return `${window.location.origin}/api/boleto/webhook-sicoob`;
+    }
+    const base = process.env.EXPO_PUBLIC_NFE_API_URL ?? '';
+    return base ? `${base}/api/boleto/webhook-sicoob` : '/api/boleto/webhook-sicoob';
+  }, []);
+
+  const patch = (p: Partial<SicoobConfigInput>) => setValues((v) => ({ ...v, ...p }));
+
   const save = async () => {
     if (!user?.id) return;
     if (values.ativo) {
@@ -98,16 +108,6 @@ export default function SicoobConfigScreen() {
       </View>
     );
   }
-
-  const patch = (p: Partial<SicoobConfigInput>) => setValues((v) => ({ ...v, ...p }));
-
-  const webhookUrl = useMemo(() => {
-    if (typeof window !== 'undefined' && window.location?.origin) {
-      return `${window.location.origin}/api/boleto/webhook-sicoob`;
-    }
-    const base = process.env.EXPO_PUBLIC_NFE_API_URL ?? '';
-    return base ? `${base}/api/boleto/webhook-sicoob` : '/api/boleto/webhook-sicoob';
-  }, []);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
