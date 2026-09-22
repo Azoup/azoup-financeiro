@@ -1,6 +1,8 @@
 const {
   C6_ACTIVE,
   C6_SANDBOX,
+  C6_PROD,
+  C6_CNPJ_AZFS,
   bundledCertPaths,
   onlyDigits,
 } = require('./c6SandboxDefaults');
@@ -18,8 +20,9 @@ async function resolveEmitenteCnpj(admin, emitenteId) {
 
 /**
  * Carrega config_c6 + mTLS.
- * Preferência: upload em Configurações › Boleto C6 (por CNPJ).
- * Fallback: certs bundled (AZFS → azfs-*.txt; outro → prod-*.txt).
+ * Preferência: upload + credenciais em Configurações › Boleto C6 (por CNPJ).
+ * Fallback de certificado: AZFS → azfs-*.txt; outro → prod-*.txt.
+ * Não mistura Client ID do CNPJ antigo com certificado AZFS.
  */
 async function loadC6Credentials(admin, userId, emitenteId) {
   let config = null;
@@ -44,14 +47,35 @@ async function loadC6Credentials(admin, userId, emitenteId) {
   }
 
   const emitenteCnpj = await resolveEmitenteCnpj(admin, emitenteId || config?.emitente_id);
+  const isAzfs = emitenteCnpj === C6_CNPJ_AZFS;
 
-  const temCredenciaisSalvas = Boolean(
-    (config?.client_id || '').trim() && (config?.client_secret || '').trim(),
-  );
+  const clientIdSalvo = (config?.client_id || '').trim();
+  const secretSalvo = (config?.client_secret || '').trim();
+  const temCredenciaisSalvas = Boolean(clientIdSalvo && secretSalvo);
+
+  // Credenciais hardcoded (C6_PROD) são do app do CNPJ antigo — NÃO usar no AZFS.
+  if (isAzfs && !temCredenciaisSalvas) {
+    throw new Error(
+      'CNPJ AZFS (66.639.480/0001-43) sem Client ID/Secret. ' +
+        'Em Configurações › Boleto C6, selecione esse CNPJ e informe as credenciais do aplicativo C6 AZFS ' +
+        '(as mesmas do portal que gerou o certificado).',
+    );
+  }
+
+  if (
+    isAzfs &&
+    temCredenciaisSalvas &&
+    (clientIdSalvo === C6_PROD.client_id || clientIdSalvo === C6_SANDBOX.client_id)
+  ) {
+    throw new Error(
+      'O Client ID salvo no AZFS é o do outro CNPJ/sandbox. ' +
+        'Troque pelo Client ID e Secret do aplicativo C6 do CNPJ 66.639.480/0001-43.',
+    );
+  }
 
   let ambiente = (config?.ambiente || '').trim() || C6_ACTIVE.ambiente;
-  let client_id = (config?.client_id || '').trim();
-  let client_secret = (config?.client_secret || '').trim();
+  let client_id = clientIdSalvo;
+  let client_secret = secretSalvo;
   let billing_scheme = (config?.billing_scheme || '').trim();
 
   if (!temCredenciaisSalvas) {
@@ -64,6 +88,7 @@ async function loadC6Credentials(admin, userId, emitenteId) {
   }
 
   if (
+    !isAzfs &&
     temCredenciaisSalvas &&
     C6_ACTIVE.ambiente === 'producao' &&
     client_id === C6_SANDBOX.client_id

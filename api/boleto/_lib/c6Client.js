@@ -162,8 +162,28 @@ function resolveC6AmountFromBoleto(boleto) {
 
 function extractC6ApiError(res) {
   const j = res.json;
-  if (j?.detail && typeof j.detail === 'string') return j.detail;
-  if (j?.title && j?.detail) return `${j.title} ${j.detail}`;
+  const type = String(j?.type || '');
+  const title = typeof j?.title === 'string' ? j.title : '';
+  const detail = typeof j?.detail === 'string' ? j.detail : '';
+  const status = res.status ?? j?.status;
+
+  if (
+    status === 403 ||
+    /acess_denied|access_denied|acesso negado/i.test(`${type} ${title} ${detail}`)
+  ) {
+    return (
+      'C6 negou o acesso (403). Client ID, Client Secret e certificado mTLS precisam ser do mesmo ' +
+      'aplicativo no portal C6, neste CNPJ. Abra Configurações › Boleto C6, selecione o CNPJ cobrador ' +
+      'e confira as credenciais (não use as do outro CNPJ).'
+    );
+  }
+  if (status === 401 || /unauthorized|invalid_client|invalid_grant/i.test(`${type} ${title} ${detail}`)) {
+    return (
+      'C6 não autenticou (401). Verifique Client ID/Secret e se o certificado .crt+.key é deste aplicativo.'
+    );
+  }
+  if (detail && title) return `${title} ${detail}`;
+  if (detail) return detail;
   if (j?.message) return j.message;
   if (j?.error_description) return j.error_description;
   if (j?.error) return typeof j.error === 'string' ? j.error : JSON.stringify(j.error);
