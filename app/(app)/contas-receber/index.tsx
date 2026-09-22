@@ -19,6 +19,7 @@ import { pickEmitenteC6 } from '@/services/c6ConfigService';
 import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import {
   fetchMensalidadeGeradaById,
+  cancelarMensalidadeGerada,
   registrarPagamentoMensalidadeGerada,
 } from '@/services/mensalidadeGeradaService';
 import {
@@ -30,6 +31,7 @@ import {
 import { sincronizarBoletosPendentes } from '@/services/sicoobBoletoService';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
 import {
+  cancelarParcelaVenda,
   fetchParcelaVendaById,
   fetchVendaParaNotaFiscal,
   registrarPagamentoVenda,
@@ -38,6 +40,7 @@ import type { MensalidadeGerada } from '@/types/mensalidadeGerada';
 import { centavosParaReais, reaisParaCentavos } from '@/utils/vendasParcelas';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { ContaReceberListRow, ContaReceberOrigem } from '@/types/contasReceber';
+import { confirmDestructive } from '@/utils/confirmDialog';
 import type { ContaReceberSituacao } from '@/utils/contaReceberCobranca';
 import { buildContasReceberExport } from '@/utils/exportReportBuilders';
 import { abrirDocumentoBoleto } from '@/utils/openBoletoDocumento';
@@ -141,6 +144,7 @@ export default function ContasReceberScreen() {
   const [emailNotaBusyId, setEmailNotaBusyId] = useState<string | null>(null);
   const [c6BusyId, setC6BusyId] = useState<string | null>(null);
   const [sicoobBusyId, setSicoobBusyId] = useState<string | null>(null);
+  const [cancelBusyId, setCancelBusyId] = useState<string | null>(null);
   const [nomeBeneficiario, setNomeBeneficiario] = useState<string | null>(null);
   const [acoesItem, setAcoesItem] = useState<ContaReceberListRow | null>(null);
   const [payMensalidade, setPayMensalidade] = useState<MensalidadeGerada | null>(null);
@@ -475,6 +479,35 @@ export default function ContasReceberScreen() {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setSicoobBusyId(null);
+    }
+  };
+
+  const cancelarBoleto = async (itemOverride?: ContaReceberListRow) => {
+    const item = itemOverride ?? acoesItem;
+    if (!user?.id || !item || item.situacao_cobranca !== 'aberto') return;
+    const ok = await confirmDestructive(
+      'Cancelar boleto',
+      item.origem === 'mensalidade'
+        ? 'O mês ficará como cancelado (não pago). O carnê deixa de constar em aberto. Continuar?'
+        : 'Esta parcela ficará cancelada (não paga) e o boleto sai de aberto. Continuar?',
+    );
+    if (!ok) return;
+    fecharAcoes();
+    setCancelBusyId(item.id);
+    try {
+      if (item.origem === 'mensalidade' && item.mensalidade_id) {
+        await cancelarMensalidadeGerada(user.id, item.mensalidade_id);
+      } else if (item.origem === 'venda' && item.parcela_id) {
+        await cancelarParcelaVenda(user.id, item.parcela_id);
+      } else {
+        throw new Error('Não foi possível identificar a cobrança para cancelar.');
+      }
+      await refreshLista();
+      Toast.show({ type: 'success', text1: 'Boleto cancelado.' });
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setCancelBusyId(null);
     }
   };
 
@@ -947,6 +980,7 @@ export default function ContasReceberScreen() {
         item={acoesItem}
         onClose={fecharAcoes}
         onPagar={() => void iniciarPagamento()}
+        onCancelar={() => void cancelarBoleto()}
         onEmitirNf={() => acoesItem && solicitarEmitirNf(acoesItem)}
         onVerNota={() => {
           fecharAcoes();
@@ -979,6 +1013,7 @@ export default function ContasReceberScreen() {
         emailBusy={acoesItem != null && emailBusyId === acoesItem.id}
         emailNotaBusy={acoesItem != null && emailNotaBusyId === acoesItem.id}
         whatsBusy={acoesItem != null && whatsBusyId === acoesItem.id}
+        cancelBusy={acoesItem != null && cancelBusyId === acoesItem.id}
       />
 
       <MarcarPagamentoMensalidadeGeradaModal

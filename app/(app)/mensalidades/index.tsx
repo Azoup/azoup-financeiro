@@ -16,9 +16,11 @@ import { pickEmitenteC6 } from '@/services/c6ConfigService';
 import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import type { BoletoParcelaVendaRow } from '@/types/contasReceber';
 import {
+  cancelarMensalidadeGerada,
   fetchMensalidadesGeradasHistorico,
   fetchPagamentosMensalidadesPorIds,
   mensalidadeGeradaStatusVisual,
+  podeCancelarMensalidadeGerada,
   podeRegistrarPagamentoMensalidadeGerada,
   registrarPagamentoMensalidadeGerada,
 } from '@/services/mensalidadeGeradaService';
@@ -54,6 +56,7 @@ import {
   View,
 } from 'react-native';
 import { showAppError, showAppInfo, showAppSuccess } from '@/utils/appToast';
+import { confirmDestructive } from '@/utils/confirmDialog';
 import { compartilharDanfseComFeedback } from '@/utils/danfseDocumento';
 
 type StatusFiltro = 'todos' | MensalidadeGeradaStatusVisual;
@@ -376,6 +379,27 @@ export default function HistoricoMensalidadesGeradasScreen() {
       showAppError((e as Error).message);
     } finally {
       setSicoobBusyId(null);
+    }
+  };
+
+  const cancelarMensalidade = async (m: MensalidadeGerada) => {
+    if (!user?.id) return;
+    if (!podeCancelarMensalidadeGerada(m)) {
+      showAppInfo('Só é possível cancelar mensalidade em aberto sem pagamento.');
+      return;
+    }
+    const ok = await confirmDestructive(
+      'Cancelar boleto / mês',
+      'O mês ficará como cancelado (não pago) e o boleto sai de aberto. Continuar?',
+    );
+    if (!ok) return;
+    setAcoesM(null);
+    try {
+      await cancelarMensalidadeGerada(user.id, m.id);
+      showAppSuccess('Mensalidade cancelada.');
+      await load();
+    } catch (e) {
+      showAppError((e as Error).message);
     }
   };
 
@@ -939,6 +963,14 @@ export default function HistoricoMensalidadesGeradasScreen() {
         icon: 'checkmark-circle-outline',
         disabled: true,
         onPress: () => undefined,
+      });
+    }
+    if (podeCancelarMensalidadeGerada(m)) {
+      itens.push({
+        key: 'cancelar',
+        label: 'Cancelar boleto / mês',
+        icon: 'close-circle-outline',
+        onPress: () => void cancelarMensalidade(m),
       });
     }
     if (nfEmitida) {

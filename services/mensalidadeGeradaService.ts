@@ -62,6 +62,15 @@ export function podeRegistrarPagamentoMensalidadeGerada(
   return vis === 'pendente' || vis === 'parcial' || vis === 'atrasado';
 }
 
+/** Mensalidade em aberto, sem pagamento — pode cancelar o mês (não vira pago). */
+export function podeCancelarMensalidadeGerada(
+  m: Pick<MensalidadeGerada, 'status' | 'valor' | 'valor_pago'>,
+): boolean {
+  if (m.status === 'cancelado' || m.status === 'pago') return false;
+  if (cents(m.valor_pago) > 0) return false;
+  return true;
+}
+
 function nextDbStatusAfterPay(valor: number, valorPagoNovo: number): MensalidadeGeradaStatusDb {
   const vc = cents(valor);
   const pc = cents(valorPagoNovo);
@@ -628,6 +637,56 @@ export async function registrarPagamentoMensalidadeGerada(
     .eq('mensalidade_id', mensalidadeId)
     .eq('user_id', userId)
     .in('status_registro', ['registrado', 'pendente', 'informativo']);
+}
+
+/**
+ * Cancela o mês da mensalidade (status cancelado, não pago) e marca o carnê/boleto como baixado.
+ * Não registra pagamento. Boleto já liquidado no banco pode continuar cobrável lá até baixa manual no portal.
+ */
+export async function cancelarMensalidadeGerada(userId: string, mensalidadeId: string): Promise<void> {
+  const { data: b, error: e0 } = await supabase
+    .from('mensalidades')
+    .select('*')
+    .eq('id', mensalidadeId)
+    .eq('user_id', userId)
+    .single();
+  if (e0 || !b) throw new Error(e0?.message ?? 'Mensalidade não encontrada.');
+  const row = b as MensalidadeGerada;
+  if (row.status === 'cancelado') throw new Error('Mensalidade já está cancelada.');
+  if (row.status === 'pago' || cents(row.valor_pago) > 0) {
+    throw new Error('Não é possível cancelar mensalidade com pagamento registrado. Estorne o pagamento antes.');
+  }
+
+  const { error: e1 } = await supabase
+    .from('mensalidades')
+    .update({ status: 'cancelado' })
+    .eq('id', mensalidadeId)
+    .eq('user_id', userId);
+  if (e1) throw new Error(e1.message);
+
+  await supabase
+    .from('boletos_parcela_venda')
+    .update({ status_registro: 'baixado' })
+    .eq('mensalidade_id', mensalidadeId)
+    .eq('user_id', userId)
+    .in('status_registro', ['registrado', 'pendente', 'informativo', 'erro']);
+
+  const { data: bols } = await supabase
+    .from('boletos_parcela_venda')
+    .select('id')
+    .eq('mensalidade_id', mensalidadeId)
+    .eq('user_id', userId);
+  if (bols?.length) {
+    await supabase.from('historico_boleto_sicoob').insert(
+      (bols as { id: string }[]).map((bol) => ({
+        boleto_id: bol.id,
+        acao: 'CANCELAMENTO_MANUAL',
+        usuario_id: userId,
+        detalhes: 'Mensalidade cancelada no sistema (mês não cobrado / não pago).',
+        payload_resposta: null,
+      })),
+    );
+  }
 }
 
 export async function fetchResumoMensalidadesGeradasDashboard(userId: string): Promise<{

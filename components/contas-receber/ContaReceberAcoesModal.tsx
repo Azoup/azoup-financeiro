@@ -11,6 +11,7 @@ type Props = {
   item: ContaReceberListRow | null;
   onClose: () => void;
   onPagar: () => void;
+  onCancelar?: () => void;
   onEmitirNf: () => void;
   onVerNota: () => void;
   onPdf: () => void;
@@ -28,6 +29,7 @@ type Props = {
   emailBusy?: boolean;
   emailNotaBusy?: boolean;
   whatsBusy?: boolean;
+  cancelBusy?: boolean;
 };
 
 function origemLabel(origem: ContaReceberListRow['origem']): string {
@@ -89,6 +91,7 @@ export function ContaReceberAcoesModal({
   item,
   onClose,
   onPagar,
+  onCancelar,
   onEmitirNf,
   onVerNota,
   onPdf,
@@ -106,6 +109,7 @@ export function ContaReceberAcoesModal({
   emailBusy,
   emailNotaBusy,
   whatsBusy,
+  cancelBusy,
 }: Props) {
   if (!item) return null;
 
@@ -127,6 +131,7 @@ export function ContaReceberAcoesModal({
     precisaRegistro &&
     Boolean(onRegistrarSicoob) &&
     (item.tipo_emissao === 'sicoob' || item.tipo_emissao === 'informativo');
+  const podeCancelar = aberto && Boolean(onCancelar);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -156,6 +161,21 @@ export function ContaReceberAcoesModal({
           <View style={styles.actions}>
             {aberto ? (
               <AcaoRow icon="cash-outline" label="Marcar como pago" onPress={onPagar} accent={colors.orange} />
+            ) : null}
+
+            {podeCancelar ? (
+              <AcaoRow
+                icon="close-circle-outline"
+                label={cancelBusy ? 'Cancelando…' : 'Cancelar boleto'}
+                sub={
+                  item.origem === 'mensalidade'
+                    ? 'Marca o mês como cancelado (não pago)'
+                    : 'Cancela esta parcela sem marcar como pago'
+                }
+                onPress={onCancelar!}
+                disabled={cancelBusy}
+                busy={cancelBusy}
+              />
             ) : null}
 
             {temNota ? (

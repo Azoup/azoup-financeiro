@@ -71,6 +71,19 @@ async function jaQuitadoNoSistema(admin, boleto) {
   return false;
 }
 
+async function tituloCanceladoNoSistema(admin, boleto) {
+  if (boleto.status_registro === 'baixado') return true;
+  if (boleto.mensalidade_id) {
+    const { data } = await admin.from('mensalidades').select('status').eq('id', boleto.mensalidade_id).maybeSingle();
+    return data?.status === 'cancelado';
+  }
+  if (boleto.parcela_id) {
+    const { data } = await admin.from('parcelas_venda').select('status').eq('id', boleto.parcela_id).maybeSingle();
+    return data?.status === 'cancelado';
+  }
+  return false;
+}
+
 async function registrarBaixaMensalidade(admin, userId, boleto, { dataPagamento, valorPago, origem, payload }) {
   const { data: mens, error } = await admin.from('mensalidades').select('*').eq('id', boleto.mensalidade_id).eq('user_id', userId).single();
   if (error || !mens) throw new Error('Mensalidade não encontrada para baixa automática.');
@@ -78,6 +91,9 @@ async function registrarBaixaMensalidade(admin, userId, boleto, { dataPagamento,
   const forma = formaPagamentoBanco(origem);
   const valorCent = reaisParaCentavos(mens.valor);
   const pagoCent = reaisParaCentavos(mens.valor_pago);
+  if (mens.status === 'cancelado') {
+    return { baixado: false, motivo: 'mensalidade_cancelada' };
+  }
   if (pagoCent >= valorCent) {
     await admin.from('boletos_parcela_venda').update({ status_registro: 'pago', data_liquidacao_sicoob: dataPagamento }).eq('id', boleto.id);
     return { baixado: false, motivo: 'mensalidade_ja_quitada' };
@@ -206,8 +222,12 @@ async function registrarBaixaVenda(admin, userId, boleto, { dataPagamento, valor
 }
 
 async function aplicarBaixaBoleto(admin, userId, boleto, dadosPagamento) {
-  if (boleto.status_registro === 'pago') {
+  if (boleto.status_registro === 'pago' || boleto.status_registro === 'baixado') {
     return { baixado: false, motivo: 'boleto_ja_baixado' };
+  }
+
+  if (await tituloCanceladoNoSistema(admin, boleto)) {
+    return { baixado: false, motivo: 'titulo_cancelado' };
   }
 
   const quitado = await jaQuitadoNoSistema(admin, boleto);
