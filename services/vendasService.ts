@@ -701,7 +701,7 @@ export async function cancelarVenda(userId: string, vendaId: string): Promise<vo
   if (eLog) throw new Error(eLog.message);
 }
 
-/** Cancela uma parcela em aberto (boleto da venda) sem marcar como pago. */
+/** Cancela uma parcela em aberto (boleto da venda) sem marcar como pago. Baixa no banco se registrado. */
 export async function cancelarParcelaVenda(userId: string, parcelaId: string): Promise<void> {
   const { data: p, error: e0 } = await supabase
     .from('parcelas_venda')
@@ -724,6 +724,35 @@ export async function cancelarParcelaVenda(userId: string, parcelaId: string): P
     throw new Error('Não é possível cancelar parcela com pagamento registrado.');
   }
 
+  const { data: bols, error: eBol } = await supabase
+    .from('boletos_parcela_venda')
+    .select('id, status_registro, tipo_emissao, c6_boleto_id, nosso_numero_banco')
+    .eq('parcela_id', parcelaId)
+    .eq('user_id', userId);
+  if (eBol) throw new Error(eBol.message);
+
+  const paraBanco = ((bols ?? []) as {
+    id: string;
+    status_registro: string;
+    c6_boleto_id: string | null;
+    nosso_numero_banco: string | null;
+  }[]).filter(
+    (bol) =>
+      bol.status_registro === 'registrado' ||
+      Boolean(bol.c6_boleto_id) ||
+      Boolean(bol.nosso_numero_banco),
+  );
+
+  if (paraBanco.length) {
+    const { cancelarBoletosNoBanco } = await import('@/services/cancelarBoletoBancoService');
+    const bancoRes = await cancelarBoletosNoBanco(paraBanco.map((x) => x.id));
+    if (bancoRes.erros.length) {
+      throw new Error(
+        `Não foi possível cancelar no banco. O sistema não foi alterado.\n${bancoRes.erros.join('\n')}`,
+      );
+    }
+  }
+
   const { error: e1 } = await supabase
     .from('parcelas_venda')
     .update({ status: 'cancelado' })
@@ -739,22 +768,83 @@ export async function cancelarParcelaVenda(userId: string, parcelaId: string): P
 
   await atualizarStatusVenda(parc.venda_id, userId);
 
-  const { data: bols } = await supabase
-    .from('boletos_parcela_venda')
-    .select('id')
-    .eq('parcela_id', parcelaId)
-    .eq('user_id', userId);
   if (bols?.length) {
     await supabase.from('historico_boleto_sicoob').insert(
       (bols as { id: string }[]).map((bol) => ({
         boleto_id: bol.id,
         acao: 'CANCELAMENTO_MANUAL',
         usuario_id: userId,
-        detalhes: 'Parcela/boleto cancelado no sistema (não pago).',
+        detalhes: paraBanco.length
+          ? 'Parcela cancelada no sistema após baixa/cancelamento no banco.'
+          : 'Parcela/boleto cancelado no sistema (sem registro bancário).',
         payload_resposta: null,
       })),
     );
   }
+}
+
+/** Reabre parcela cancelada só no sistema (não altera o banco). */
+export async function reativarParcelaVenda(userId: string, parcelaId: string): Promise<void> {
+  const { data: p, error: e0 } = await supabase
+    .from('parcelas_venda')
+    .select('id, venda_id, valor_pago, status')
+    .eq('id', parcelaId)
+    .maybeSingle();
+  if (e0 || !p) throw new Error(e0?.message ?? 'Parcela não encontrada.');
+  const parc = p as { id: string; venda_id: string; valor_pago: number; status: string };
+
+  const { data: v, error: eV } = await supabase
+    .from('vendas')
+    .select('id')
+    .eq('id', parc.venda_id)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (eV || !v) throw new Error('Venda não encontrada ou sem permissão.');
+
+  if (parc.status !== 'cancelado') throw new Error('Parcela não está cancelada.');
+  if (reaisParaCentavos(parc.valor_pago) > 0) {
+    throw new Error('Parcela tem pagamento — não reative por este fluxo.');
+  }
+
+  const { error: e1 } = await supabase
+    .from('parcelas_venda')
+    .update({ status: 'pendente' })
+    .eq('id', parcelaId);
+  if (e1) throw new Error(e1.message);
+
+  const { data: bols } = await supabase
+    .from('boletos_parcela_venda')
+    .select('id, linha_digitavel, pdf_url, nosso_numero_banco, c6_boleto_id, tipo_emissao')
+    .eq('parcela_id', parcelaId)
+    .eq('user_id', userId);
+
+  for (const bol of (bols ?? []) as {
+    id: string;
+    linha_digitavel: string | null;
+    pdf_url: string | null;
+    nosso_numero_banco: string | null;
+    c6_boleto_id: string | null;
+    tipo_emissao: string | null;
+  }[]) {
+    const registrado =
+      Boolean(bol.linha_digitavel || bol.pdf_url || bol.nosso_numero_banco || bol.c6_boleto_id) &&
+      (bol.tipo_emissao === 'sicoob' || bol.tipo_emissao === 'c6');
+    await supabase
+      .from('boletos_parcela_venda')
+      .update({ status_registro: registrado ? 'registrado' : 'pendente' })
+      .eq('id', bol.id)
+      .eq('user_id', userId);
+
+    await supabase.from('historico_boleto_sicoob').insert({
+      boleto_id: bol.id,
+      acao: 'REATIVACAO_MANUAL',
+      usuario_id: userId,
+      detalhes: 'Parcela reaberta no sistema (boleto permanece ativo no banco se não foi baixado lá).',
+      payload_resposta: null,
+    });
+  }
+
+  await atualizarStatusVenda(parc.venda_id, userId);
 }
 
 export function parcelaStatusVisual(p: ParcelaVenda): ParcelaVendaStatus {

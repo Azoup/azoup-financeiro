@@ -341,20 +341,48 @@ export type MensalidadeParaBoleto = {
 };
 
 /** Um carnê em contas a receber por mensalidade gerada.
- * Beneficiário / banco: CNPJ da empresa no cadastro do cliente (`emitente_nf_id`).
- * `opts.emitenteId` / `opts.banco` só entram como fallback se o cliente não tiver empresa.
+ * Padrão: CNPJ da empresa no cadastro do cliente (`emitente_nf_id`).
+ * Se `usarEmitenteDoCliente === false` e houver `emitenteId`, força esse CNPJ/banco para todos.
  */
 export async function gerarBoletosParaMensalidades(
   userId: string,
   mensalidades: MensalidadeParaBoleto[],
-  opts?: { emitenteId?: string | null; banco?: 'sicoob' | 'c6' | null },
+  opts?: {
+    emitenteId?: string | null;
+    banco?: 'sicoob' | 'c6' | null;
+    usarEmitenteDoCliente?: boolean;
+  },
 ): Promise<{ avisoSicoob?: string; avisoBoleto?: string; avisoEmail?: string }> {
   if (!mensalidades.length) return {};
+
+  const usarDoCliente = opts?.usarEmitenteDoCliente !== false;
+  const forcarEmitente = !usarDoCliente && Boolean(opts?.emitenteId);
+
+  // Uma mensalidade = no máximo um carnê (índice único no banco; evita reprocessar).
+  const vistos = new Set<string>();
+  const unicos = mensalidades.filter((m) => {
+    if (vistos.has(m.id)) return false;
+    vistos.add(m.id);
+    return true;
+  });
+  const idsMen = unicos.map((m) => m.id);
+  const { data: jaTemBoleto, error: eJa } = await supabase
+    .from('boletos_parcela_venda')
+    .select('mensalidade_id')
+    .in('mensalidade_id', idsMen);
+  if (eJa) throw wrapBoletoDbError(eJa);
+  const comBoleto = new Set(
+    ((jaTemBoleto ?? []) as { mensalidade_id: string | null }[])
+      .map((b) => b.mensalidade_id)
+      .filter(Boolean) as string[],
+  );
+  const mensalidadesNovas = unicos.filter((m) => !comBoleto.has(m.id));
+  if (!mensalidadesNovas.length) return {};
 
   const emitentesList = await ensureEmitentes(userId).catch(() => [] as NfseEmitente[]);
   const emitenteById = new Map(emitentesList.map((e) => [e.id, e]));
 
-  const clienteIds = [...new Set(mensalidades.map((m) => m.cliente_id))];
+  const clienteIds = [...new Set(mensalidadesNovas.map((m) => m.cliente_id))];
   const { data: clientesRows, error: eCli } = await supabase
     .from('clientes')
     .select('id, emitente_nf_id')
@@ -370,19 +398,26 @@ export async function gerarBoletosParaMensalidades(
   const perfil = await fetchPerfilCobranca(userId).catch(() => null);
   const snapCache = new Map<string, SnapshotBenefPag>();
   const rows: Record<string, unknown>[] = [];
-  /** Índice alinhado a `rows` / mensalidades processadas — para agrupar emissão. */
   const meta: { banco: 'sicoob' | 'c6'; emitenteId: string | null }[] = [];
 
-  for (const m of mensalidades) {
+  for (const m of mensalidadesNovas) {
     const emitenteClienteId = emitenteNfPorCliente.get(m.cliente_id) ?? null;
-    const emitente =
-      (emitenteClienteId ? emitenteById.get(emitenteClienteId) : undefined) ??
-      (await resolveEmitenteCobranca(
-        userId,
-        emitenteClienteId || opts?.emitenteId,
-        emitenteClienteId ? null : opts?.banco,
-      ));
-    const banco = bancoDoEmitente(emitente, emitenteClienteId ? null : opts?.banco);
+    let emitente: NfseEmitente | null = null;
+    let banco: 'sicoob' | 'c6';
+
+    if (forcarEmitente) {
+      emitente = await resolveEmitenteCobranca(userId, opts?.emitenteId, opts?.banco);
+      banco = bancoDoEmitente(emitente, opts?.banco);
+    } else {
+      emitente =
+        (emitenteClienteId ? emitenteById.get(emitenteClienteId) : undefined) ??
+        (await resolveEmitenteCobranca(
+          userId,
+          emitenteClienteId || opts?.emitenteId,
+          emitenteClienteId ? null : opts?.banco,
+        ));
+      banco = bancoDoEmitente(emitente, emitenteClienteId ? null : opts?.banco);
+    }
 
     let snap = snapCache.get(`${m.cliente_id}:${emitente?.id ?? ''}`);
     if (!snap) {
@@ -433,7 +468,7 @@ export async function gerarBoletosParaMensalidades(
   if (!insertedRows.length) return {};
 
   const metaPorMensalidade = new Map<string, { banco: 'sicoob' | 'c6'; emitenteId: string | null }>();
-  mensalidades.forEach((m, i) => {
+  mensalidadesNovas.forEach((m, i) => {
     metaPorMensalidade.set(m.id, meta[i]!);
   });
 

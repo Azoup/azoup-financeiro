@@ -204,9 +204,11 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint, opts = 
     } else {
       payload = buildC6Payload({ boleto: boletoComValor, config: creds.config, cliente });
       let lastErr = null;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
+      // No máx. 2 tentativas e só em erro de rede/timeout — se o C6 já criou o boleto
+      // e a resposta falhou, um novo POST geraria duplicata no banco.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
-          if (attempt > 0) await sleep(2000 * attempt);
+          if (attempt > 0) await sleep(2500);
           c6 = await emitirBoletoC6Api({
             config: creds.config,
             certPath: creds.certPath,
@@ -218,10 +220,10 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint, opts = 
         } catch (e) {
           lastErr = e;
           const msg = String(e.message || '');
-          // CIP / transitório
-          if (!/400|422|timeout|ECONN|tempor|CIP|pending|process/i.test(msg) && attempt > 0) {
-            break;
-          }
+          const redeOuTimeout = /timeout|ECONN|ENOTFOUND|EAI_AGAIN|socket|network|504|502|503/i.test(
+            msg,
+          );
+          if (!redeOuTimeout || attempt > 0) break;
         }
       }
       if (lastErr) throw lastErr;

@@ -17,6 +17,7 @@ import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import type { BoletoParcelaVendaRow } from '@/types/contasReceber';
 import {
   cancelarMensalidadeGerada,
+  reativarMensalidadeGerada,
   fetchMensalidadesGeradasHistorico,
   fetchPagamentosMensalidadesPorIds,
   mensalidadeGeradaStatusVisual,
@@ -390,13 +391,31 @@ export default function HistoricoMensalidadesGeradasScreen() {
     }
     const ok = await confirmDestructive(
       'Cancelar boleto / mês',
-      'O mês ficará como cancelado (não pago) e o boleto sai de aberto. Continuar?',
+      'O mês ficará cancelado (não pago) e o boleto será baixado/cancelado no banco se estiver registrado. Continuar?',
     );
     if (!ok) return;
     setAcoesM(null);
     try {
       await cancelarMensalidadeGerada(user.id, m.id);
-      showAppSuccess('Mensalidade cancelada.');
+      showAppSuccess('Mensalidade cancelada (sistema + banco quando registrado).');
+      await load();
+    } catch (e) {
+      showAppError((e as Error).message);
+    }
+  };
+
+  const reativarMensalidade = async (m: MensalidadeGerada) => {
+    if (!user?.id) return;
+    if (m.status !== 'cancelado') return;
+    const ok = await confirmDestructive(
+      'Reativar mês',
+      'A mensalidade volta para em aberto no sistema. O boleto no banco não é alterado por esta ação.',
+    );
+    if (!ok) return;
+    setAcoesM(null);
+    try {
+      await reativarMensalidadeGerada(user.id, m.id);
+      showAppSuccess('Mensalidade reativada (em aberto).');
       await load();
     } catch (e) {
       showAppError((e as Error).message);
@@ -971,6 +990,14 @@ export default function HistoricoMensalidadesGeradasScreen() {
         label: 'Cancelar boleto / mês',
         icon: 'close-circle-outline',
         onPress: () => void cancelarMensalidade(m),
+      });
+    }
+    if (m.status === 'cancelado') {
+      itens.push({
+        key: 'reativar',
+        label: 'Reativar mês',
+        icon: 'refresh-outline',
+        onPress: () => void reativarMensalidade(m),
       });
     }
     if (nfEmitida) {

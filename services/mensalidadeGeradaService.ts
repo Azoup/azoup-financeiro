@@ -321,6 +321,8 @@ export async function criarMensalidadesGeradasLote(params: {
   emitenteId?: string | null;
   /** Banco do boleto escolhido na geração (sobrescreve o padrão do emitente). */
   banco?: 'sicoob' | 'c6' | null;
+  /** true (padrão) = CNPJ do cadastro do cliente; false = força emitenteId/banco para todos. */
+  usarEmitenteDoCliente?: boolean;
   descricaoServico?: string | null;
   /**
    * 1º dia do mês (ISO) — agenda quando o cliente volta a aparecer em Gerar mensalidades.
@@ -331,6 +333,8 @@ export async function criarMensalidadesGeradasLote(params: {
   criados: number;
   ignorados: number;
   semVencimento: number;
+  /** Já havia mensalidade em aberto com o mesmo vencimento (ou mesma competência). */
+  duplicados: number;
   avisoBoleto?: string;
   avisoEmail?: string;
   nf?: { emitidas: number; rejeitadas: number; ignoradas: number; erros: string[] };
@@ -341,6 +345,49 @@ export async function criarMensalidadesGeradasLote(params: {
 
   let semVencimento = 0;
   let ignorados = 0;
+  let duplicados = 0;
+
+  /** Evita 2º carnê/boleto se o usuário regenerar após timeout (ex.: 504 no C6). */
+  const existentesAbertos = new Map<string, { vencimentos: Set<string>; competencias: Set<string> }>();
+  if (params.clienteIds.length) {
+    const { data: jaTem, error: eDup } = await supabase
+      .from('mensalidades')
+      .select('cliente_id, data_vencimento, competencia, status')
+      .eq('user_id', params.userId)
+      .in('cliente_id', params.clienteIds)
+      .neq('status', 'cancelado');
+    if (eDup) throw new Error(eDup.message);
+    for (const r of jaTem ?? []) {
+      const cid = r.cliente_id as string;
+      let bucket = existentesAbertos.get(cid);
+      if (!bucket) {
+        bucket = { vencimentos: new Set(), competencias: new Set() };
+        existentesAbertos.set(cid, bucket);
+      }
+      const venc = String(r.data_vencimento ?? '').slice(0, 10);
+      if (venc) bucket.vencimentos.add(venc);
+      const c = (r.competencia as string | null)?.trim();
+      if (c) bucket.competencias.add(c);
+    }
+  }
+
+  const jaExisteCobranca = (clienteId: string, dataVenc: string): boolean => {
+    const bucket = existentesAbertos.get(clienteId);
+    if (!bucket) return false;
+    if (bucket.vencimentos.has(dataVenc.slice(0, 10))) return true;
+    if (comp && bucket.competencias.has(comp)) return true;
+    return false;
+  };
+
+  const marcarComoExistente = (clienteId: string, dataVenc: string) => {
+    let bucket = existentesAbertos.get(clienteId);
+    if (!bucket) {
+      bucket = { vencimentos: new Set(), competencias: new Set() };
+      existentesAbertos.set(clienteId, bucket);
+    }
+    bucket.vencimentos.add(dataVenc.slice(0, 10));
+    if (comp) bucket.competencias.add(comp);
+  };
 
   for (const clienteId of params.clienteIds) {
     const { data: c, error: e0 } = await supabase
@@ -416,6 +463,10 @@ export async function criarMensalidadesGeradasLote(params: {
       }
       const loteId = newLoteId();
       for (const p of plano) {
+        if (jaExisteCobranca(clienteId, p.data_vencimento)) {
+          duplicados += 1;
+          continue;
+        }
         rows.push({
           user_id: params.userId,
           cliente_id: clienteId,
@@ -428,6 +479,7 @@ export async function criarMensalidadesGeradasLote(params: {
           parcela_numero: p.parcela_numero,
           parcela_total: p.parcela_total,
         });
+        marcarComoExistente(clienteId, p.data_vencimento);
       }
       continue;
     }
@@ -462,6 +514,10 @@ export async function criarMensalidadesGeradasLote(params: {
       }
       const loteId = newLoteId();
       for (const p of plano) {
+        if (jaExisteCobranca(clienteId, p.data_vencimento)) {
+          duplicados += 1;
+          continue;
+        }
         rows.push({
           user_id: params.userId,
           cliente_id: clienteId,
@@ -474,7 +530,13 @@ export async function criarMensalidadesGeradasLote(params: {
           parcela_numero: p.parcela_numero,
           parcela_total: p.parcela_total,
         });
+        marcarComoExistente(clienteId, p.data_vencimento);
       }
+      continue;
+    }
+
+    if (jaExisteCobranca(clienteId, dataVenc)) {
+      duplicados += 1;
       continue;
     }
 
@@ -487,9 +549,15 @@ export async function criarMensalidadesGeradasLote(params: {
       competencia: comp,
       status: 'pendente',
     });
+    marcarComoExistente(clienteId, dataVenc);
   }
   if (!rows.length) {
-    return { criados: 0, ignorados: params.clienteIds.length, semVencimento };
+    return {
+      criados: 0,
+      ignorados,
+      semVencimento,
+      duplicados,
+    };
   }
 
   const { data: inserted, error } = await supabase
@@ -514,53 +582,8 @@ export async function criarMensalidadesGeradasLote(params: {
     competencia: string | null;
   }[];
 
-  let avisoBoleto: string | undefined;
-  let avisoEmail: string | undefined;
-  if (criadosRows.length) {
-    try {
-      const boletoRes = await gerarBoletosParaMensalidades(
-        params.userId,
-        criadosRows.map((m) => ({
-          id: m.id,
-          cliente_id: m.cliente_id,
-          valor: m.valor,
-          data_vencimento: m.data_vencimento,
-          competencia: m.competencia,
-        })),
-        { emitenteId: params.emitenteId, banco: params.banco },
-      );
-      avisoBoleto = boletoRes.avisoBoleto ?? boletoRes.avisoSicoob;
-      avisoEmail = boletoRes.avisoEmail;
-    } catch (eb) {
-      const ids = criadosRows.map((m) => m.id);
-      await supabase.from('mensalidades').delete().in('id', ids).eq('user_id', params.userId);
-      throw new Error((eb as Error).message ?? 'Falha ao gerar carnês em contas a receber.');
-    }
-  }
-
-  let nfResult;
-  if (params.gerarNotaFiscal && criadosRows.length) {
-    try {
-      nfResult = await gerarNotasFiscaisParaMensalidades(
-        params.userId,
-        criadosRows.map((m) => ({
-          id: m.id,
-          cliente_id: m.cliente_id,
-          valor: m.valor,
-          competencia: m.competencia,
-        })),
-        { emitenteId: params.emitenteId, descricaoServico: params.descricaoServico },
-      );
-    } catch (e) {
-      nfResult = {
-        emitidas: 0,
-        rejeitadas: criadosRows.length,
-        ignoradas: 0,
-        erros: [(e as Error).message],
-      };
-    }
-  }
-
+  // Agenda próxima geração antes do registro bancário — se o C6 der timeout,
+  // o cliente some da lista e um 2º clique não gera carnê/boleto de novo.
   const proxMes = params.proximaGeracaoMes?.trim().slice(0, 10) || null;
   if (proxMes && criadosRows.length) {
     const idsOk = [...new Set(criadosRows.map((m) => m.cliente_id))];
@@ -579,7 +602,58 @@ export async function criarMensalidadesGeradasLote(params: {
     }
   }
 
-  return { criados: criadosRows.length, ignorados, semVencimento, avisoBoleto, avisoEmail, nf: nfResult };
+  let avisoBoleto: string | undefined;
+  let avisoEmail: string | undefined;
+  if (criadosRows.length) {
+    try {
+      const boletoRes = await gerarBoletosParaMensalidades(
+        params.userId,
+        criadosRows.map((m) => ({
+          id: m.id,
+          cliente_id: m.cliente_id,
+          valor: m.valor,
+          data_vencimento: m.data_vencimento,
+          competencia: m.competencia,
+        })),
+        { emitenteId: params.emitenteId, banco: params.banco, usarEmitenteDoCliente: params.usarEmitenteDoCliente },
+      );
+      avisoBoleto = boletoRes.avisoBoleto ?? boletoRes.avisoSicoob;
+      avisoEmail = boletoRes.avisoEmail;
+    } catch (eb) {
+      // Não apaga mensalidades: o C6 pode ter registrado boletos órfãos no banco.
+      // Mantém carnês para o usuário concluir com “Registrar no C6” / cancelar.
+      avisoBoleto = (eb as Error).message ?? 'Falha ao gerar carnês em contas a receber.';
+    }
+  }
+
+  let nfResult;
+  if (params.gerarNotaFiscal && criadosRows.length) {
+    try {
+      nfResult = await gerarNotasFiscaisParaMensalidades(
+        params.userId,
+        criadosRows.map((m) => ({
+          id: m.id,
+          cliente_id: m.cliente_id,
+          valor: m.valor,
+          competencia: m.competencia,
+        })),
+        {
+          emitenteId: params.emitenteId,
+          descricaoServico: params.descricaoServico,
+          usarEmitenteDoCliente: params.usarEmitenteDoCliente,
+        },
+      );
+    } catch (e) {
+      nfResult = {
+        emitidas: 0,
+        rejeitadas: criadosRows.length,
+        ignoradas: 0,
+        erros: [(e as Error).message],
+      };
+    }
+  }
+
+  return { criados: criadosRows.length, ignorados, semVencimento, duplicados, avisoBoleto, avisoEmail, nf: nfResult };
 }
 
 export async function registrarPagamentoMensalidadeGerada(
@@ -641,7 +715,7 @@ export async function registrarPagamentoMensalidadeGerada(
 
 /**
  * Cancela o mês da mensalidade (status cancelado, não pago) e marca o carnê/boleto como baixado.
- * Não registra pagamento. Boleto já liquidado no banco pode continuar cobrável lá até baixa manual no portal.
+ * Se o boleto estiver registrado no banco (Sicoob/C6), baixa/cancela lá antes — senão não altera o sistema.
  */
 export async function cancelarMensalidadeGerada(userId: string, mensalidadeId: string): Promise<void> {
   const { data: b, error: e0 } = await supabase
@@ -655,6 +729,36 @@ export async function cancelarMensalidadeGerada(userId: string, mensalidadeId: s
   if (row.status === 'cancelado') throw new Error('Mensalidade já está cancelada.');
   if (row.status === 'pago' || cents(row.valor_pago) > 0) {
     throw new Error('Não é possível cancelar mensalidade com pagamento registrado. Estorne o pagamento antes.');
+  }
+
+  const { data: bols, error: eBol } = await supabase
+    .from('boletos_parcela_venda')
+    .select('id, status_registro, tipo_emissao, c6_boleto_id, nosso_numero_banco')
+    .eq('mensalidade_id', mensalidadeId)
+    .eq('user_id', userId);
+  if (eBol) throw new Error(eBol.message);
+
+  const paraBanco = ((bols ?? []) as {
+    id: string;
+    status_registro: string;
+    tipo_emissao: string | null;
+    c6_boleto_id: string | null;
+    nosso_numero_banco: string | null;
+  }[]).filter(
+    (bol) =>
+      bol.status_registro === 'registrado' ||
+      Boolean(bol.c6_boleto_id) ||
+      Boolean(bol.nosso_numero_banco),
+  );
+
+  if (paraBanco.length) {
+    const { cancelarBoletosNoBanco } = await import('@/services/cancelarBoletoBancoService');
+    const bancoRes = await cancelarBoletosNoBanco(paraBanco.map((x) => x.id));
+    if (bancoRes.erros.length) {
+      throw new Error(
+        `Não foi possível cancelar no banco. O sistema não foi alterado.\n${bancoRes.erros.join('\n')}`,
+      );
+    }
   }
 
   const { error: e1 } = await supabase
@@ -671,21 +775,73 @@ export async function cancelarMensalidadeGerada(userId: string, mensalidadeId: s
     .eq('user_id', userId)
     .in('status_registro', ['registrado', 'pendente', 'informativo', 'erro']);
 
-  const { data: bols } = await supabase
-    .from('boletos_parcela_venda')
-    .select('id')
-    .eq('mensalidade_id', mensalidadeId)
-    .eq('user_id', userId);
   if (bols?.length) {
     await supabase.from('historico_boleto_sicoob').insert(
       (bols as { id: string }[]).map((bol) => ({
         boleto_id: bol.id,
         acao: 'CANCELAMENTO_MANUAL',
         usuario_id: userId,
-        detalhes: 'Mensalidade cancelada no sistema (mês não cobrado / não pago).',
+        detalhes: paraBanco.length
+          ? 'Mensalidade cancelada no sistema após baixa/cancelamento no banco.'
+          : 'Mensalidade cancelada no sistema (carnê sem registro bancário).',
         payload_resposta: null,
       })),
     );
+  }
+}
+
+/** Reabre mensalidade cancelada só no sistema (boleto volta a em aberto / registrado). Não altera o banco. */
+export async function reativarMensalidadeGerada(userId: string, mensalidadeId: string): Promise<void> {
+  const { data: b, error: e0 } = await supabase
+    .from('mensalidades')
+    .select('*')
+    .eq('id', mensalidadeId)
+    .eq('user_id', userId)
+    .single();
+  if (e0 || !b) throw new Error(e0?.message ?? 'Mensalidade não encontrada.');
+  const row = b as MensalidadeGerada;
+  if (row.status !== 'cancelado') throw new Error('Mensalidade não está cancelada.');
+  if (cents(row.valor_pago) > 0) {
+    throw new Error('Mensalidade tem pagamento — não reative por este fluxo.');
+  }
+
+  const { error: e1 } = await supabase
+    .from('mensalidades')
+    .update({ status: 'pendente' })
+    .eq('id', mensalidadeId)
+    .eq('user_id', userId);
+  if (e1) throw new Error(e1.message);
+
+  const { data: bols } = await supabase
+    .from('boletos_parcela_venda')
+    .select('id, linha_digitavel, pdf_url, nosso_numero_banco, c6_boleto_id, tipo_emissao')
+    .eq('mensalidade_id', mensalidadeId)
+    .eq('user_id', userId);
+
+  for (const bol of (bols ?? []) as {
+    id: string;
+    linha_digitavel: string | null;
+    pdf_url: string | null;
+    nosso_numero_banco: string | null;
+    c6_boleto_id: string | null;
+    tipo_emissao: string | null;
+  }[]) {
+    const registrado =
+      Boolean(bol.linha_digitavel || bol.pdf_url || bol.nosso_numero_banco || bol.c6_boleto_id) &&
+      (bol.tipo_emissao === 'sicoob' || bol.tipo_emissao === 'c6');
+    await supabase
+      .from('boletos_parcela_venda')
+      .update({ status_registro: registrado ? 'registrado' : 'pendente' })
+      .eq('id', bol.id)
+      .eq('user_id', userId);
+
+    await supabase.from('historico_boleto_sicoob').insert({
+      boleto_id: bol.id,
+      acao: 'REATIVACAO_MANUAL',
+      usuario_id: userId,
+      detalhes: 'Cobrança reaberta no sistema (boleto permanece ativo no banco se não foi baixado lá).',
+      payload_resposta: null,
+    });
   }
 }
 

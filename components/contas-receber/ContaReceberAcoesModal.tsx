@@ -12,6 +12,7 @@ type Props = {
   onClose: () => void;
   onPagar: () => void;
   onCancelar?: () => void;
+  onReativar?: () => void;
   onEmitirNf: () => void;
   onVerNota: () => void;
   onPdf: () => void;
@@ -30,6 +31,7 @@ type Props = {
   emailNotaBusy?: boolean;
   whatsBusy?: boolean;
   cancelBusy?: boolean;
+  reativarBusy?: boolean;
 };
 
 function origemLabel(origem: ContaReceberListRow['origem']): string {
@@ -92,6 +94,7 @@ export function ContaReceberAcoesModal({
   onClose,
   onPagar,
   onCancelar,
+  onReativar,
   onEmitirNf,
   onVerNota,
   onPdf,
@@ -110,6 +113,7 @@ export function ContaReceberAcoesModal({
   emailNotaBusy,
   whatsBusy,
   cancelBusy,
+  reativarBusy,
 }: Props) {
   if (!item) return null;
 
@@ -132,6 +136,7 @@ export function ContaReceberAcoesModal({
     Boolean(onRegistrarSicoob) &&
     (item.tipo_emissao === 'sicoob' || item.tipo_emissao === 'informativo');
   const podeCancelar = aberto && Boolean(onCancelar);
+  const podeReativar = cancelado && Boolean(onReativar);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -167,14 +172,22 @@ export function ContaReceberAcoesModal({
               <AcaoRow
                 icon="close-circle-outline"
                 label={cancelBusy ? 'Cancelando…' : 'Cancelar boleto'}
-                sub={
-                  item.origem === 'mensalidade'
-                    ? 'Marca o mês como cancelado (não pago)'
-                    : 'Cancela esta parcela sem marcar como pago'
-                }
+                sub="Cancela no sistema e baixar/cancela no banco (Sicoob/C6) se estiver registrado"
                 onPress={onCancelar!}
                 disabled={cancelBusy}
                 busy={cancelBusy}
+              />
+            ) : null}
+
+            {podeReativar ? (
+              <AcaoRow
+                icon="refresh-outline"
+                label={reativarBusy ? 'Reativando…' : 'Reativar cobrança'}
+                sub="Volta para em aberto no sistema (use se cancelou só no app e o banco ainda está ativo)"
+                onPress={onReativar!}
+                disabled={reativarBusy}
+                busy={reativarBusy}
+                accent={colors.petroleum}
               />
             ) : null}
 

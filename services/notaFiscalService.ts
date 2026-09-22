@@ -31,7 +31,12 @@ type VendaNfInput = {
   descricao: string;
 };
 
-type EmitOpts = { emitenteId?: string | null; descricaoServico?: string | null };
+type EmitOpts = {
+  emitenteId?: string | null;
+  descricaoServico?: string | null;
+  /** false = força o emitenteId do modal (ignora emitente_nf_id do cliente). Padrão: true. */
+  usarEmitenteDoCliente?: boolean;
+};
 
 function onlyDigits(s: string): string {
   return s.replace(/\D/g, '');
@@ -229,6 +234,7 @@ async function validarPreEmissaoNfse(
   userId: string,
   clienteId: string,
   emitenteId?: string | null,
+  opts?: Pick<EmitOpts, 'usarEmitenteDoCliente'>,
 ): Promise<{ emitente: NfseEmitente }> {
   await ensureEmitentes(userId);
 
@@ -249,7 +255,10 @@ async function validarPreEmissaoNfse(
   }
 
   let emitente: NfseEmitente | null = null;
-  const preferId = clienteRow.emitente_nf_id || emitenteId || null;
+  const forcarEmitente = opts?.usarEmitenteDoCliente === false && Boolean(emitenteId);
+  const preferId = forcarEmitente
+    ? emitenteId || null
+    : clienteRow.emitente_nf_id || emitenteId || null;
   if (preferId) {
     emitente = await fetchEmitenteById(userId, preferId);
   }
@@ -403,7 +412,7 @@ export async function criarNotaFiscalRascunhoMensalidade(
     }
     const custom = opts?.descricaoServico?.trim();
     if (custom) {
-      const { emitente } = await validarPreEmissaoNfse(userId, mensalidade.cliente_id, opts?.emitenteId);
+      const { emitente } = await validarPreEmissaoNfse(userId, mensalidade.cliente_id, opts?.emitenteId, opts);
       await atualizarDescricaoItem(
         existente.id,
         resolverDescricaoServico(opts, mensalidade.competencia, emitente.descricao_servico_padrao),
@@ -412,7 +421,7 @@ export async function criarNotaFiscalRascunhoMensalidade(
     return existente.id;
   }
 
-  const { emitente } = await validarPreEmissaoNfse(userId, mensalidade.cliente_id, opts?.emitenteId);
+  const { emitente } = await validarPreEmissaoNfse(userId, mensalidade.cliente_id, opts?.emitenteId, opts);
 
   const numero = emitente.proximo_numero;
   const descricao = resolverDescricaoServico(
@@ -468,7 +477,7 @@ export async function criarNotaFiscalRascunhoVenda(
     return existente.id;
   }
 
-  const { emitente } = await validarPreEmissaoNfse(userId, venda.cliente_id, opts?.emitenteId);
+  const { emitente } = await validarPreEmissaoNfse(userId, venda.cliente_id, opts?.emitenteId, opts);
 
   const numero = emitente.proximo_numero;
   const descricao =
@@ -559,7 +568,7 @@ export async function criarNotaFiscalRascunhoAvulsa(
   input: AvulsaNfInput,
   opts?: EmitOpts,
 ): Promise<string> {
-  const { emitente } = await validarPreEmissaoNfse(userId, input.cliente_id, opts?.emitenteId);
+  const { emitente } = await validarPreEmissaoNfse(userId, input.cliente_id, opts?.emitenteId, opts);
 
   const numero = emitente.proximo_numero;
   const descricao =

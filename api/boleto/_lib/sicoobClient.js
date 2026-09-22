@@ -87,7 +87,7 @@ async function getSicoobAccessToken({ config, certPath, senha }) {
     grant_type: 'client_credentials',
     client_id: config.client_id,
     scope:
-      'cobranca_boletos_consultar cobranca_boletos_incluir cobranca_boletos_alterar cobranca_boletos_pagador',
+      'cobranca_boletos_consultar cobranca_boletos_incluir cobranca_boletos_alterar cobranca_boletos_pagador cobranca_boletos_baixa',
   }).toString();
 
   const res = await httpsRequest(authUrl(config.ambiente), {
@@ -198,11 +198,14 @@ async function emitirBoletoSicoobApi({ config, certPath, senha, payload, ambient
   const token = await getSicoobAccessToken({ config, certPath, senha });
   const agent = createMtlsAgent(certPath, senha);
   const body = JSON.stringify(payload);
+  const amb = ambiente ?? config.ambiente;
 
-  const res = await httpsRequest(`${apiBaseUrl(ambiente)}/boletos`, {
+  const res = await httpsRequest(`${apiBaseUrl(amb)}/boletos`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
+      client_id: config.client_id,
+      Accept: 'application/json',
       'Content-Type': 'application/json',
       'Content-Length': Buffer.byteLength(body),
     },
@@ -268,7 +271,11 @@ async function consultarBoletoSicoobApi({ config, certPath, senha, boleto }) {
 
   const res = await httpsRequest(`${apiBaseUrl(config.ambiente)}/boletos?${params.toString()}`, {
     method: 'GET',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      client_id: config.client_id,
+      Accept: 'application/json',
+    },
     agent,
   });
 
@@ -294,9 +301,48 @@ async function consultarBoletoSicoobApi({ config, certPath, senha, boleto }) {
   };
 }
 
+/** Baixa/cancela título registrado no Sicoob (não é liquidação por pagamento). */
+async function baixarBoletoSicoobApi({ config, certPath, senha, nossoNumero }) {
+  const nn = Number(onlyDigits(nossoNumero));
+  if (!nn) throw new Error('Nosso número inválido para baixa no Sicoob.');
+
+  const token = await getSicoobAccessToken({ config, certPath, senha });
+  const agent = createMtlsAgent(certPath, senha);
+  const body = JSON.stringify({
+    numeroCliente: Number(config.numero_cliente),
+    codigoModalidade: Number(config.codigo_modalidade ?? 1),
+  });
+
+  const res = await httpsRequest(`${apiBaseUrl(config.ambiente)}/boletos/${nn}/baixar`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      client_id: config.client_id,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+    },
+    body,
+    agent,
+  });
+
+  if (res.status < 200 || res.status >= 300) {
+    const msg =
+      res.json?.mensagens?.map((m) => m.mensagem).join(' · ') ??
+      res.json?.message ??
+      res.json?.error_description ??
+      res.raw ??
+      `Sicoob rejeitou a baixa do boleto (${res.status}).`;
+    throw new Error(msg);
+  }
+
+  return { success: true, status: res.status, raw: res.json ?? res.raw };
+}
+
 module.exports = {
   apiBaseUrl,
   authUrl,
+  baixarBoletoSicoobApi,
   buildPagadorFromCliente,
   buildSicoobPayload,
   cleanupCert,

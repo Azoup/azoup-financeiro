@@ -3,6 +3,7 @@ const { emitirUmBoleto } = require('./_lib/emitirBoleto');
 const { emitirUmBoletoC6 } = require('./_lib/emitirBoletoC6');
 const { loadC6Credentials } = require('./_lib/c6Credentials');
 const { tentarEnviarEmailAposEmissao } = require('./_lib/enviarEmailBoleto');
+const { cancelarUmBoletoNoBanco } = require('./_lib/cancelarBoletoRegistrado');
 const {
   cleanupTemp,
   criarPixCobC6Api,
@@ -18,6 +19,7 @@ const {
  * - padrão: emite boletos (Sicoob/C6) + e-mail automático do PDF
  * - action=pix-cob | pix-cobv | pix-get | pix-patch | receivables | transactions
  * - action=enviar-email-boleto (reenvio pontual)
+ * - action=cancelar-boletos (baixa/cancelamento no banco)
  * (evita nova serverless function no limite Hobby)
  */
 module.exports = async function handler(req, res) {
@@ -30,6 +32,30 @@ module.exports = async function handler(req, res) {
     const admin = getAdmin();
     const body = req.body ?? {};
     const action = String(body.action || '').trim();
+
+    if (action === 'cancelar-boletos') {
+      const boletoIds = Array.isArray(body.boletoIds) ? body.boletoIds.filter(Boolean) : [];
+      if (!boletoIds.length) {
+        return res.status(400).json({ success: false, message: 'Informe boletoIds.' });
+      }
+      const resultados = [];
+      const erros = [];
+      for (const boletoId of boletoIds) {
+        try {
+          const result = await cancelarUmBoletoNoBanco(admin, user.id, boletoId);
+          resultados.push(result);
+        } catch (error) {
+          const msg = `${boletoId}: ${error.message}`;
+          erros.push(msg);
+          resultados.push({ success: false, boletoId, message: error.message });
+        }
+      }
+      return res.status(erros.length ? 400 : 200).json({
+        success: erros.length === 0,
+        erros,
+        resultados,
+      });
+    }
 
     if (action === 'enviar-email-boleto') {
       const boletoId = body.boletoId;

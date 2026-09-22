@@ -203,8 +203,8 @@ function buildC6Payload({ boleto, config, cliente }) {
   const zip = onlyDigits(cliente.cep ?? '00000000').padStart(8, '0').slice(0, 8);
 
   const ourNumber = onlyDigits(boleto.nosso_numero || boleto.id).slice(-10) || '1';
-  // C6 exige no máx. 10 alfanuméricos e únicos por cliente
-  const externalId = String(boleto.numero_documento || boleto.id.replace(/-/g, ''))
+  // Estável por carnê (id) — evita colisão SEM-COMP e permite idempotência no C6.
+  const externalId = String(boleto.id || '')
     .replace(/[^a-zA-Z0-9]/g, '')
     .slice(-10);
   if (!externalId) {
@@ -349,6 +349,35 @@ async function consultarBoletoC6Api({ config, certPath, keyPath, c6BoletoId }) {
     dataPagamento: extractC6DataPagamento(resultado),
     valorPago: extractC6ValorPago(resultado, null),
   };
+}
+
+/** Cancela/baixa boleto no C6 (PUT …/cancel). HTTP 204 = sucesso. */
+async function cancelarBoletoC6Api({ config, certPath, keyPath, c6BoletoId }) {
+  if (!c6BoletoId) throw new Error('Boleto sem ID C6 para cancelamento.');
+  const token = await getC6AccessToken({ config, certPath, keyPath });
+  const agent = createMtlsAgent(certPath, keyPath);
+
+  const res = await httpsRequest(`${apiBaseUrl(config.ambiente)}/v1/bank_slips/${c6BoletoId}/cancel`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'partner-software-name': 'SistemaJessica',
+      'partner-software-version': '1.0.0',
+      Accept: 'application/json',
+    },
+    agent,
+  });
+
+  if (res.status === 204 || (res.status >= 200 && res.status < 300)) {
+    return { success: true, status: res.status, raw: res.json ?? null };
+  }
+
+  const msg =
+    extractC6ApiError(res) ||
+    res.json?.message ||
+    res.raw ||
+    `C6 rejeitou o cancelamento (${res.status}).`;
+  throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
 }
 
 async function obterPdfBoletoC6Api({ config, certPath, keyPath, c6BoletoId }) {
@@ -588,6 +617,7 @@ module.exports = {
   buildC6Payload,
   C6_AMOUNT_MIN,
   C6_AMOUNT_MAX,
+  cancelarBoletoC6Api,
   cleanupTemp,
   consultarBoletoC6Api,
   consultarPixC6Api,

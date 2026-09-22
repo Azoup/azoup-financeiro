@@ -20,6 +20,7 @@ import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import {
   fetchMensalidadeGeradaById,
   cancelarMensalidadeGerada,
+  reativarMensalidadeGerada,
   registrarPagamentoMensalidadeGerada,
 } from '@/services/mensalidadeGeradaService';
 import {
@@ -32,6 +33,7 @@ import { sincronizarBoletosPendentes } from '@/services/sicoobBoletoService';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
 import {
   cancelarParcelaVenda,
+  reativarParcelaVenda,
   fetchParcelaVendaById,
   fetchVendaParaNotaFiscal,
   registrarPagamentoVenda,
@@ -145,6 +147,7 @@ export default function ContasReceberScreen() {
   const [c6BusyId, setC6BusyId] = useState<string | null>(null);
   const [sicoobBusyId, setSicoobBusyId] = useState<string | null>(null);
   const [cancelBusyId, setCancelBusyId] = useState<string | null>(null);
+  const [reativarBusyId, setReativarBusyId] = useState<string | null>(null);
   const [nomeBeneficiario, setNomeBeneficiario] = useState<string | null>(null);
   const [acoesItem, setAcoesItem] = useState<ContaReceberListRow | null>(null);
   const [payMensalidade, setPayMensalidade] = useState<MensalidadeGerada | null>(null);
@@ -488,8 +491,8 @@ export default function ContasReceberScreen() {
     const ok = await confirmDestructive(
       'Cancelar boleto',
       item.origem === 'mensalidade'
-        ? 'O mês ficará como cancelado (não pago). O carnê deixa de constar em aberto. Continuar?'
-        : 'Esta parcela ficará cancelada (não paga) e o boleto sai de aberto. Continuar?',
+        ? 'O mês ficará cancelado (não pago) e o boleto será baixado/cancelado no banco se estiver registrado. Continuar?'
+        : 'A parcela ficará cancelada e o boleto será baixado/cancelado no banco se estiver registrado. Continuar?',
     );
     if (!ok) return;
     fecharAcoes();
@@ -503,11 +506,38 @@ export default function ContasReceberScreen() {
         throw new Error('Não foi possível identificar a cobrança para cancelar.');
       }
       await refreshLista();
-      Toast.show({ type: 'success', text1: 'Boleto cancelado.' });
+      Toast.show({ type: 'success', text1: 'Boleto cancelado no sistema e no banco (quando aplicável).' });
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setCancelBusyId(null);
+    }
+  };
+
+  const reativarBoleto = async (itemOverride?: ContaReceberListRow) => {
+    const item = itemOverride ?? acoesItem;
+    if (!user?.id || !item || item.situacao_cobranca !== 'cancelado') return;
+    const ok = await confirmDestructive(
+      'Reativar cobrança',
+      'A cobrança volta para em aberto no sistema. O boleto no banco não é alterado por esta ação.',
+    );
+    if (!ok) return;
+    fecharAcoes();
+    setReativarBusyId(item.id);
+    try {
+      if (item.origem === 'mensalidade' && item.mensalidade_id) {
+        await reativarMensalidadeGerada(user.id, item.mensalidade_id);
+      } else if (item.origem === 'venda' && item.parcela_id) {
+        await reativarParcelaVenda(user.id, item.parcela_id);
+      } else {
+        throw new Error('Não foi possível identificar a cobrança para reativar.');
+      }
+      await refreshLista();
+      Toast.show({ type: 'success', text1: 'Cobrança reativada (em aberto).' });
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setReativarBusyId(null);
     }
   };
 
@@ -981,6 +1011,7 @@ export default function ContasReceberScreen() {
         onClose={fecharAcoes}
         onPagar={() => void iniciarPagamento()}
         onCancelar={() => void cancelarBoleto()}
+        onReativar={() => void reativarBoleto()}
         onEmitirNf={() => acoesItem && solicitarEmitirNf(acoesItem)}
         onVerNota={() => {
           fecharAcoes();
@@ -1014,6 +1045,7 @@ export default function ContasReceberScreen() {
         emailNotaBusy={acoesItem != null && emailNotaBusyId === acoesItem.id}
         whatsBusy={acoesItem != null && whatsBusyId === acoesItem.id}
         cancelBusy={acoesItem != null && cancelBusyId === acoesItem.id}
+        reativarBusy={acoesItem != null && reativarBusyId === acoesItem.id}
       />
 
       <MarcarPagamentoMensalidadeGeradaModal

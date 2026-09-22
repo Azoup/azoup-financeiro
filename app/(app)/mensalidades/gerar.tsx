@@ -95,6 +95,7 @@ export default function GerarMensalidadeScreen() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [enviarModalOpen, setEnviarModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const envioEmAndamento = useRef(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   /** Mantém dados dos clientes selecionados mesmo se saírem do filtro. */
   const [selectedCache, setSelectedCache] = useState<Map<string, ClienteListItem>>(new Map());
@@ -407,9 +408,22 @@ export default function GerarMensalidadeScreen() {
 
   const executarEnvio = async (
     gerarNotaFiscal: boolean,
-    opts?: { emitenteId?: string; banco?: 'sicoob' | 'c6'; discriminacao?: string },
+    opts?: {
+      emitenteId?: string;
+      banco?: 'sicoob' | 'c6';
+      discriminacao?: string;
+      usarEmitenteDoCliente?: boolean;
+    },
   ) => {
     if (!user?.id) return;
+    if (envioEmAndamento.current || busy) {
+      Toast.show({
+        type: 'info',
+        text1: 'Geração já em andamento',
+        text2: 'Aguarde terminar para evitar boletos duplicados no banco.',
+      });
+      return;
+    }
     const ids = targetIds;
     if (!ids.length) {
       Toast.show({ type: 'error', text1: 'Não há clientes na lista para gerar mensalidade.' });
@@ -430,6 +444,7 @@ export default function GerarMensalidadeScreen() {
     const emitenteId = opts?.emitenteId;
     const discriminacao = opts?.discriminacao;
     const banco = opts?.banco;
+    const usarEmitenteDoCliente = opts?.usarEmitenteDoCliente !== false;
 
     const clientesSelecionados = clientesSelecionadosResolvidos(ids);
     if (gerarNotaFiscal) {
@@ -444,19 +459,32 @@ export default function GerarMensalidadeScreen() {
         return;
       }
       try {
-        const emitentes = await ensureEmitentes(user.id);
-        const eid = emitenteId || emitentes.find((e) => e.padrao)?.id || emitentes[0]?.id;
-        const cert = eid
-          ? await fetchCertificadoAtivoEmitente(user.id, eid)
-          : await fetchCertificadoAtivo(user.id);
-        if (!cert) {
-          Toast.show({
-            type: 'error',
-            text1: 'Certificado A1 não cadastrado',
-            text2: 'Vá em Configurações › NFS-e e envie o certificado do CNPJ escolhido.',
-            visibilityTime: 10000,
-          });
-          return;
+        if (!usarEmitenteDoCliente) {
+          const emitentes = await ensureEmitentes(user.id);
+          const eid = emitenteId || emitentes.find((e) => e.padrao)?.id || emitentes[0]?.id;
+          const cert = eid
+            ? await fetchCertificadoAtivoEmitente(user.id, eid)
+            : await fetchCertificadoAtivo(user.id);
+          if (!cert) {
+            Toast.show({
+              type: 'error',
+              text1: 'Certificado A1 não cadastrado',
+              text2: 'Vá em Configurações › NFS-e e envie o certificado do CNPJ escolhido.',
+              visibilityTime: 10000,
+            });
+            return;
+          }
+        } else {
+          const cert = await fetchCertificadoAtivo(user.id);
+          if (!cert) {
+            Toast.show({
+              type: 'error',
+              text1: 'Certificado A1 não cadastrado',
+              text2: 'Cadastre o certificado A1 de cada CNPJ em Configurações › NFS-e.',
+              visibilityTime: 10000,
+            });
+            return;
+          }
         }
       } catch (e) {
         Toast.show({ type: 'error', text1: (e as Error).message, visibilityTime: 9000 });
@@ -473,6 +501,8 @@ export default function GerarMensalidadeScreen() {
     }
 
     setBusy(true);
+    envioEmAndamento.current = true;
+    setEnviarModalOpen(false);
     try {
       const pctRaw = percentStr.trim().replace(',', '.');
       if (pctRaw) {
@@ -480,13 +510,15 @@ export default function GerarMensalidadeScreen() {
         if (!Number.isFinite(pct) || pct === 0) {
           Toast.show({ type: 'error', text1: 'Percentual de reajuste inválido.' });
           setBusy(false);
+          envioEmAndamento.current = false;
           return;
         }
         await applyReajusteMensalidadePercentual(user.id, ids, pct);
         setPercentStr('');
         await load();
       }
-      const { criados, ignorados, semVencimento, avisoBoleto, avisoEmail, nf } = await criarMensalidadesGeradasLote({
+      const { criados, ignorados, semVencimento, duplicados, avisoBoleto, avisoEmail, nf } =
+        await criarMensalidadesGeradasLote({
         userId: user.id,
         clienteIds: ids,
         valoresPorCliente: valoresTemporarios,
@@ -495,12 +527,16 @@ export default function GerarMensalidadeScreen() {
         gerarNotaFiscal,
         emitenteId: emitenteId || null,
         banco: banco || null,
+        usarEmitenteDoCliente,
         descricaoServico: discriminacao?.trim() || null,
         proximaGeracaoMes,
       });
       const extras: string[] = [];
       if (ignorados > 0) extras.push(`${ignorados} sem valor de mensalidade`);
       if (semVencimento > 0) extras.push(`${semVencimento} sem dia de vencimento no cadastro`);
+      if (duplicados > 0) {
+        extras.push(`${duplicados} já tinham cobrança neste vencimento (não duplicado)`);
+      }
       if (gerarNotaFiscal && nf) {
         extras.push(`${nf.emitidas} NFS-e autorizada(s)`);
         if (nf.rejeitadas > 0) extras.push(`${nf.rejeitadas} NF rejeitada(s) — veja em Notas fiscais`);
@@ -550,6 +586,7 @@ export default function GerarMensalidadeScreen() {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setBusy(false);
+      envioEmAndamento.current = false;
     }
   };
 

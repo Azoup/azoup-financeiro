@@ -1,0 +1,589 @@
+EVIDÊNCIAS SICOOB — piloto sandbox (liberação nacional)
+Empresa parceira: Azoup Tecnologia LTDA
+Software: SistemaJessica / Azoup Financeiro
+Cooperativa liberada (parceira): 5004
+Ambiente: sandbox
+Gerado em: 2026-09-22T14:32:44.372Z
+
+========== CREDENCIAIS (Portal Developers › Sandbox) ==========
+client_id: 9b5e603e428cc477a2841e2683c92d21
+access_token: (Bearer do portal — valor omitido no resumo; usado nas requests)
+numeroCliente / convênio teste: 2554645
+numeroContaCorrente teste: 12345
+certificado A1: cadastrado no sistema (produção/OAuth); sandbox usa token Bearer do portal
+
+========== ENDPOINTS SANDBOX TESTADOS ==========
+- cobranca: https://sandbox.sicoob.com.br/sicoob/sandbox/cobranca-bancaria/v3
+- cobrancaPagamentos: https://sandbox.sicoob.com.br/sicoob/sandbox/cobranca-bancaria-pagamentos/v3
+- contaCorrente: https://sandbox.sicoob.com.br/sicoob/sandbox/conta-corrente/v4
+- pixRecebimentos: https://sandbox.sicoob.com.br/sicoob/sandbox/pix/api/v2
+- pixPagamentos: https://sandbox.sicoob.com.br/sicoob/sandbox/pix-pagamentos/v2
+- poupanca: https://sandbox.sicoob.com.br/sicoob/sandbox/poupanca/v3
+- spb: https://sandbox.sicoob.com.br/sicoob/sandbox/spb/v2
+
+APIs liberadas na parceira Azoup: Cobrança Bancária, Cobrança Bancária Pagamentos,
+Conta Corrente, Pix Pagamentos, Pix Recebimentos, Poupança, SPB Transferências.
+
+========================================================================
+AT_01 – AUTENTICAÇÃO (Access token sandbox)
+------------------------------------------------------------------------
+COMO PEGAR: Portal Developers › Sandbox › Access token (Bearer) + header client_id
+
+Request enviado (referência):
+{
+  "source": "Portal Developers › Sandbox › Access token (Bearer)",
+  "client_id": "9b5e603e428cc477a2841e2683c92d21"
+}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "access_token": "1301865f-c6b…(redacted)…bcfc59c3",
+  "token_type": "Bearer",
+  "expires_note": "Token sandbox do Portal Developers (não é OAuth de produção)."
+}
+
+========================================================================
+CB_01 – Cobrança Bancária · INCLUSÃO BOLETO
+------------------------------------------------------------------------
+COMO PEGAR: POST https://sandbox.sicoob.com.br/sicoob/sandbox/cobranca-bancaria/v3/boletos
+
+Request enviado (referência):
+{
+  "numeroCliente": 2554645,
+  "codigoModalidade": 1,
+  "numeroContaCorrente": 12345,
+  "codigoEspecieDocumento": "DM",
+  "dataEmissao": "2020-01-20",
+  "nossoNumero": 258861,
+  "seuNumero": "1235512",
+  "identificacaoBoletoEmpresa": "4562",
+  "identificacaoEmissaoBoleto": 1,
+  "identificacaoDistribuicaoBoleto": 1,
+  "valor": 156.23,
+  "dataVencimento": "2020-01-20",
+  "dataLimitePagamento": "2020-01-20",
+  "tipoDesconto": 0,
+  "tipoMulta": 0,
+  "tipoJurosMora": 0,
+  "numeroParcela": 1,
+  "aceite": true,
+  "codigoNegativacao": 0,
+  "codigoProtesto": 3,
+  "gerarPdf": true,
+  "pagador": {
+    "numeroCpfCnpj": "98765432185",
+    "nome": "Marcelo dos Santos",
+    "endereco": "Rua 87 Quadra 1 Lote 1 casa 1",
+    "bairro": "Santa Rosa",
+    "cidade": "Luziania",
+    "cep": "72320000",
+    "uf": "DF",
+    "email": "pagador@dominio.com.br"
+  },
+  "mensagensInstrucao": [
+    "Homologacao Azoup Tecnologia LTDA — SistemaJessica"
+  ]
+}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "resultado": {
+    "numeroCliente": 25546454,
+    "codigoModalidade": 1,
+    "numeroContaCorrente": -2147483648,
+    "codigoEspecieDocumento": "DM",
+    "dataEmissao": "2018-09-20",
+    "nossoNumero": -2147483648,
+    "seuNumero": "1235512",
+    "identificacaoBoletoEmpresa": "4562",
+    "codigoBarras": "07092501614004706610157633070651479470000006500",
+    "linhaDigitavel": "42297115040000195441184217468127172300000023124",
+    "identificacaoEmissaoBoleto": 1,
+    "identificacaoDistribuicaoBoleto": 1,
+    "valor": 156.23,
+    "dataVencimento": "2018-09-20",
+    "dataLimitePagamento": "2018-09-20",
+    "valorAbatimento": 1,
+    "tipoDesconto": 1,
+    "dataPrimeiroDesconto": "2018-09-20",
+    "valorPrimeiroDesconto": 1,
+    "dataSegundoDesconto": "2018-09-20",
+    "valorSegundoDesconto": 0,
+    "dataTerceiroDesconto": "2018-09-20",
+    "valorTerceiroDesconto": 0,
+    "tipoMulta": 1,
+    "dataMulta": "2018-09-20",
+    "valorMulta": 5,
+    "tipoJurosMora": 1,
+    "dataJurosMora": "2018-09-20",
+    "valorJurosMora": 4,
+    "numeroParcela": 1,
+    "aceite": true,
+    "codigoNegativacao": 2,
+    "numeroDiasNegativacao": 60,
+    "codigoProtesto": 1,
+    "numeroDiasProtesto": 30,
+    "quantidadeDiasFloat": 2,
+    "pagador": {
+      "numeroCpfCnpj": "98765432185",
+      "nome": "Marcelo dos Santos",
+      "endereco": "Rua 87 Quadra 1 Lote 1 casa 1",
+      "bairro": "Santa Rosa",
+      "cidade": "Luziânia",
+      "cep": "72320000",
+      "uf": "DF",
+      "email": "pagador@dominio.com.br"
+    },
+    "beneficiarioFinal": {
+      "numeroCpfCnpj": "98784978699",
+      "nome": "Lucas de Lima"
+    },
+    "mensagensInstrucao": [
+      "Descrição da Instrução 1",
+      "Descrição da Instrução 2",
+      "Descrição da Instrução 3",
+      "Descrição da Instrução 4",
+      "Descrição da Instrução 5"
+    ],
+    "rateioCreditos": [
+      {
+        "numeroBanco": 756,
+        "numeroAgencia": 4027,
+        "numeroContaCorrente": "987654",
+        "contaPrincipal": true,
+        "codigoTipoValorRateio": 1,
+        "valorRateio": "100",
+        "codigoTipoCalculoRateio": 1,
+        "numeroCpfCnpjTitular": "98765432185",
+        "nomeTitular": "Marcelo dos Santos",
+        "codigoFinalidadeTed": "10",
+        "codigoTipoContaDestinoTed": "CC",
+        "quantidadeDiasFloat": 1,
+        "dataFloatCredito": "2020-12-30"
+      }
+    ],
+    "pdfBoleto": "JVBERi0xLjQKJeLjz9MKMyAwIG9iago8PC9UeXBlL1hPYmplY3QvU3VidHlwZS9JbWFnZS9XaWR0aCA1Nzgv+PgolaVRleHQtNS41LjExCnN0YXJ0eHJlZgoyNzAxOQolJUVPRgo=",
+    "qrCode": "00020101021226950014br.gov.bcb.pix2573pix.sicoob.com.br/qr/payload/v2/cobv/e736df1b-1389-4b96-a070-c8dddac768de5204000053039865802BR5924JULIO PEREIRA DE OLIVEIRA6008Brasilia62070503***630435A3",
+    "numeroContratoCobranca": 1,
+    "descricaoRejeicaoPix": "Modalidade não permitida para geração de QR Code."
+  }
+}
+
+========================================================================
+CB_02 – Cobrança Bancária · CONSULTA BOLETO
+------------------------------------------------------------------------
+COMO PEGAR: GET https://sandbox.sicoob.com.br/sicoob/sandbox/cobranca-bancaria/v3/boletos?...
+
+Request enviado (referência):
+{
+  "numeroCliente": "2554645",
+  "codigoModalidade": "1",
+  "nossoNumero": "-2147483648"
+}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "resultado": {
+    "numeroCliente": 25546454,
+    "codigoModalidade": 1,
+    "numeroContaCorrente": -2147483648,
+    "codigoEspecieDocumento": "DM",
+    "dataEmissao": "2018-09-20",
+    "nossoNumero": -2147483648,
+    "seuNumero": "1235512",
+    "identificacaoBoletoEmpresa": "4562",
+    "codigoBarras": "07092501614004706610157633070651479470000006500",
+    "linhaDigitavel": "42297115040000195441184217468127172300000023124",
+    "identificacaoEmissaoBoleto": 1,
+    "identificacaoDistribuicaoBoleto": 1,
+    "valor": 156.23,
+    "dataVencimento": "2018-09-20",
+    "dataLimitePagamento": "2018-09-20",
+    "valorAbatimento": 1,
+    "tipoDesconto": 1,
+    "dataPrimeiroDesconto": "2018-09-20",
+    "valorPrimeiroDesconto": 1,
+    "dataSegundoDesconto": "2018-09-20",
+    "valorSegundoDesconto": 0,
+    "dataTerceiroDesconto": "2018-09-20",
+    "valorTerceiroDesconto": 0,
+    "tipoMulta": 1,
+    "dataMulta": "2018-09-20",
+    "valorMulta": 5,
+    "tipoJurosMora": 1,
+    "dataJurosMora": "2018-09-20",
+    "valorJurosMora": 4,
+    "numeroParcela": 1,
+    "aceite": true,
+    "numeroDiasNegativacao": 60,
+    "numeroDiasProtesto": 30,
+    "quantidadeDiasFloat": 2,
+    "pagador": {
+      "numeroCpfCnpj": "98765432185",
+      "nome": "Marcelo dos Santos",
+      "endereco": "Rua 87 Quadra 1 Lote 1 casa 1",
+      "bairro": "Santa Rosa",
+      "cidade": "Luziânia",
+      "cep": "72320000",
+      "uf": "DF",
+      "email": "pagador@dominio.com.br"
+    },
+    "beneficiarioFinal": {
+      "numeroCpfCnpj": "98784978699",
+      "nome": "Lucas de Lima"
+    },
+    "mensagensInstrucao": [
+      "Descrição da Instrução 1",
+      "Descrição da Instrução 2",
+      "Descrição da Instrução 3",
+      "Descrição da Instrução 4",
+      "Descrição da Instrução 5"
+    ],
+    "listaHistorico": [
+      {
+        "dataHistorico": "2019-05-31",
+        "tipoHistorico": 1,
+        "descricaoHistorico": "TARIFA - TAR. MANUTENÇÃO DE TÍTULO VENCIDO - R$ 0,75"
+      }
+    ],
+    "situacaoBoleto": "Em Aberto",
+    "rateioCreditos": [
+      {
+        "numeroBanco": 756,
+        "numeroAgencia": 4027,
+        "numeroContaCorrente": "987654",
+        "contaPrincipal": true,
+        "codigoTipoValorRateio": 1,
+        "valorRateio": "100",
+        "codigoTipoCalculoRateio": 1,
+        "numeroCpfCnpjTitular": "98765432185",
+        "nomeTitular": "Marcelo dos Santos",
+        "codigoFinalidadeTed": "10",
+        "codigoTipoContaDestinoTed": "CC",
+        "quantidadeDiasFloat": 1,
+        "dataFloatCredito": "2020-12-30"
+      }
+    ],
+    "qrCode": "00020101021226950014br.gov.bcb.pix2573pix.sicoob.com.br/qr/payload/v2/cobv/e736df1b-1389-4b96-a070-c8dddac768de5204000053039865802BR5924JULIO PEREIRA DE OLIVEIRA6008Brasilia62070503***630435A3",
+    "numeroContratoCobranca": 1
+  }
+}
+
+========================================================================
+CC_01 – Conta Corrente · SALDO
+------------------------------------------------------------------------
+COMO PEGAR: GET https://sandbox.sicoob.com.br/sicoob/sandbox/conta-corrente/v4/saldo?numeroContaCorrente=
+
+Request enviado (referência):
+{
+  "numeroContaCorrente": 12345
+}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "saldo": 93894076.71259525,
+  "saldoBloqueado": -11504269.282197833,
+  "saldoLimite": -94095407.52825993
+}
+
+========================================================================
+PIX_R_01 – Pix Recebimentos · LISTAR COB
+------------------------------------------------------------------------
+COMO PEGAR: GET https://sandbox.sicoob.com.br/sicoob/sandbox/pix/api/v2/cob?inicio&fim
+
+Request enviado (referência):
+{
+  "inicio": "2020-01-01T00:00:00.00-03:00",
+  "fim": "2020-12-31T23:59:59.00-03:00"
+}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "_truncated": true,
+  "preview": "{\n  \"cobs\": [\n    {\n      \"status\": \"REMOVIDA_PELO_USUARIO_RECEBEDOR\",\n      \"valor\": {\n        \"original\": \"1.19\",\n        \"modalidadeAlteracao\": 0\n      },\n      \"chave\": \"est dolor tempor adipisicing\",\n      \"calendario\": {\n        \"expiracao\": 89436183,\n        \"criacao\": \"2023-03-23T00:00:00.0Z\"\n      },\n      \"txid\": \"i6EijMexrftoMlV1elmBxP30XywTM\",\n      \"revisao\": -714339095,\n      \"pix\": [\n        {\n          \"endToEndId\": \"cr2Iu4ArwLVj4eaHLfDhot8ZypSALL2o\",\n          \"valor\": \"0881461.53\",\n          \"horario\": \"1990-07-07T00:00:00.0Z\",\n          \"chave\": \"esse quis\",\n          \"devolucoes\": [\n            {\n              \"id\": \"1mN\",\n              \"rtrId\": \"ciz2mZ7IzXORglCUTIveysj64DPPUFfW\",\n              \"valor\": \"589341331.19\",\n              \"horario\": {\n                \"liquidacao\": \"1977-01-19T00:00:00.0Z\",\n                \"solicitacao\": \"2016-04-26T00:00:00.0Z\"\n              },\n              \"status\": \"NAO_REALIZADO\",\n              \"motivo\": \"dolor consequat adipisicing anim Duis\"\n            },\n            {\n              \"id\": \"pCejn4g1ng3Qk\",\n              \"rtrId\": \"7RqgIkXDtfteruTqxaXwDY2OpPsuehz0\",\n              \"valor\": \"9.90\",\n              \"horario\": {\n                \"solicitacao\": \"2001-07-30T00:00:00.0Z\",\n                \"liquidacao\": \"1987-04-14T00:00:00.0Z\"\n              },\n              \"status\": \"NAO_REALIZADO\",\n              \"motivo\": \"Ut voluptate \"\n            }\n          ],\n          \"txid\": \"7DKMBiGC7o3XGh2OpkTli0Wf9jXCVT\",\n          \"infoPagador\": \"ea irure s\"\n        },\n        {\n          \"endToEndId\": \"uKDKtuG089ed8mW1oxJWRyLGpT8FdSYt\",\n          \"valor\": \"06933.33\",\n          \"horario\": \"1949-05-28T00:00:00.0Z\",\n          \"infoPagador\": \"dolor in elit Ut fugiat\",\n          \"chave\": \"ipsum dolor\",\n          \"devolucoes\": [\n            {\n              \"id\": \"daHUyaXboa\",\n              \"rtrId\": \"6G9UMWt6zufdScGILfxqoSphvnJUrlVX\",\n              \"valor\": \"379446735.22\",\n              \"horario\": {\n                \"solicitacao\": \"2019-02-15T00:00:00.0Z\",\n                \"liquidacao\": \"1950-07-29T00:00:00.0Z\"\n              },\n              \"status\": \"DEVOLVIDO\",\n              \"motivo\": \"consequat magna voluptate\"\n            },\n            {\n              \"id\": \"8a7kvgZjF8gmQZENAJFWGzO6XOeAw9s2ZR\",\n              \"rtrId\": \"uwrnetgIu8z777iE68F9V7DgG8ANZROz\",\n              \"valor\": \"336398.44\",\n              \"horario\": {\n                \"solicitacao\": \"2010-09-02T00:00:00.0Z\",\n                \"liquidacao\": \"2006-05-02T00:00:00.0Z\"\n              },\n              \"status\": \"EM_PROCESSAMENTO\",\n              \"motivo\": \"ullamco aliquip irure in\"\n            },\n            {\n              \"id\": \"vjwldk4EirnE3RCNaLFM7nDPnc\",\n              \"rtrId\": \"SLtbdwKHxxuibh3fiwkErpLikXp7qYAo\",\n              \"valor\": \"645409421.31\",\n              \"horario\": {\n                \"liquidacao\": \"1997-08-24T00:00:00.0Z\",\n                \"solicitacao\": \"1947-06-16T00:00:00.0Z\"\n              },\n              \"status\": \"DEVOLVIDO\",\n              \"motivo\": \"irure pariatur non officia anim\"\n            },\n            {\n              \"id\": \"wcNQENxyAoVrzM6A\",\n              \"rtrId\": \"f9CMDRpq7ivrMDHmIjLveo45DsY78akK\",\n              \"valor\": \"6.88\",\n              \"horario\": {\n                \"liquidacao\": \"1970-07-16T00:00:00.0Z\",\n                \"solicitacao\": \"1948-12-25T00:00:00.0Z\"\n              },\n              \"status\": \"EM_PROCESSAMENTO\",\n              \"motivo\": \"aliquip deserunt eu\"\n            },\n            {\n              \"id\": \"SB\n…(truncado na evidência)"
+}
+
+========================================================================
+PIX_R_02 – Pix Recebimentos · CRIAR COB
+------------------------------------------------------------------------
+COMO PEGAR: POST https://sandbox.sicoob.com.br/sicoob/sandbox/pix/api/v2/cob
+
+Request enviado (referência):
+{
+  "calendario": {
+    "expiracao": 3600
+  },
+  "valor": {
+    "original": "1.00"
+  },
+  "chave": "homologacao@azoup.com.br",
+  "solicitacaoPagador": "Homologacao Azoup Tecnologia LTDA"
+}
+
+>>> Status Code - Retornado:
+201
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "brcode": "cupidatat est occaecat minim fugiat",
+  "calendario": {
+    "criacao": "1956-02-17T00:00:00.0Z",
+    "expiracao": 176192234
+  },
+  "chave": "ad dolore voluptate",
+  "devedor": {
+    "cnpj": "16788183023122",
+    "nome": "nulla deserunt esse cupidatat ea"
+  },
+  "infoAdicionais": [
+    {
+      "nome": "dolore",
+      "valor": "dolore enim est ipsum"
+    },
+    {
+      "nome": "dolor ullamco",
+      "valor": "aliquip voluptate"
+    },
+    {
+      "nome": "ullamco dolore cupidatat Except",
+      "valor": "nulla"
+    },
+    {
+      "nome": "Excepteur ut exercitation",
+      "valor": "labore Duis do culpa"
+    },
+    {
+      "nome": "id et voluptate",
+      "valor": "minim ut inc"
+    }
+  ],
+  "loc": {
+    "brcode": "sed",
+    "criacao": "2004-02-28T00:00:00.0Z",
+    "id": 8069643508099899000,
+    "location": "https://fnzOmCAexTYvcCSTWphU.bowmPnbobUFlU61if8sONnpKasxL5MyXlREra",
+    "tipoCob": "cob",
+    "txid": true
+  },
+  "location": "https://DVeoLqqTkqiFPtVvzhVDh.axzGNe0CDmWcs1hnFpTTR5,KMWDsUxI189Tf7WM.jujcZwT",
+  "revisao": -465857247,
+  "solicitacaoPagador": "sint est dolore nulla reprehenderit",
+  "status": "REMOVIDA_PELO_PSP",
+  "txid": "1EXlMLm5s71Nn5lsvt8WMAZlzLGcr1k",
+  "valor": {
+    "modalidadeAlteracao": 0,
+    "original": "3256113.55"
+  }
+}
+
+========================================================================
+PIX_R_03 – Pix Recebimentos · LISTAR PIX
+------------------------------------------------------------------------
+COMO PEGAR: GET https://sandbox.sicoob.com.br/sicoob/sandbox/pix/api/v2/pix?inicio&fim
+
+Request enviado (referência):
+{
+  "inicio": "2020-01-01T00:00:00.00-03:00",
+  "fim": "2020-12-31T23:59:59.00-03:00"
+}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "parametros": {
+    "cnpj": "/45318736017186/",
+    "cpf": "/31521246411/",
+    "devolucaoPresente": true,
+    "fim": "1997-05-14T00:00:00.0Z",
+    "inicio": "1962-04-22T00:00:00.0Z",
+    "paginacao": {
+      "itensPorPagina": 14842300,
+      "paginaAtual": 85101821,
+      "quantidadeDePaginas": 31197843,
+      "quantidadeTotalDeItens": 33489003
+    },
+    "txIdPresente": true,
+    "txid": "aw1W26Gpnw0w2VQ6e9mGg9TJ345X9H2roO"
+  },
+  "pix": [
+    {
+      "endToEndId": "e1lWsnqSKEz2QTIdg7iQj6vu4DPpemhL",
+      "valor": "37828.79",
+      "horario": "1995-01-27T00:00:00.0Z",
+      "devolucoes": [
+        {
+          "id": "dxNc0hOLFvFQyzmu18UUUUEIGD",
+          "rtrId": "jivwjZ4mrxdsmwMTJjxysMb9Tur8sjrj",
+          "valor": "50034889.84",
+          "horario": {
+            "solicitacao": "1957-01-31T00:00:00.0Z",
+            "liquidacao": "2021-07-19T00:00:00.0Z"
+          },
+          "status": "EM_PROCESSAMENTO",
+          "motivo": "nisi Excepteur"
+        }
+      ],
+      "txid": "tntNWTUqO9ei2hMNQ97wD",
+      "chave": "ex dolore proident magna officia",
+      "infoPagador": ""
+    },
+    {
+      "endToEndId": "ljid3Kv1VzyOjCv8I6f8uKqIU71v0R0s",
+      "valor": "7963621.25",
+      "horario": "2019-03-31T00:00:00.0Z",
+      "chave": "deserunt Lorem l",
+      "txid": "tUd6IL9OInOQCqOgzViMTFU",
+      "devolucoes": [
+        {
+          "id": "dWUPG",
+          "rtrId": "DQQexWdQVx24Xt4GMQ76NZlUvQQ9AoOU",
+          "valor": "0573.98",
+          "horario": {
+            "solicitacao": "1950-09-02T00:00:00.0Z",
+            "liquidacao": "1991-12-03T00:00:00.0Z"
+          },
+          "status": "NAO_REALIZADO",
+          "motivo": "mollit cillum do minim"
+        },
+        {
+          "id": "REtT0iTkq2lgSN",
+          "rtrId": "jOigv4ofLXi2CQjVuUS7TuYYDR1Z20Jt",
+          "valor": "53915161.80",
+          "horario": {
+            "solicitacao": "1985-05-24T00:00:00.0Z",
+            "liquidacao": "1989-05-24T00:00:00.0Z"
+          },
+          "status": "NAO_REALIZADO",
+          "motivo": "eiusmod in tempor dolor"
+        }
+      ],
+      "infoPagador": "reprehend"
+    }
+  ]
+}
+
+========================================================================
+PP_01 – Poupança · SALDO
+------------------------------------------------------------------------
+COMO PEGAR: GET https://sandbox.sicoob.com.br/sicoob/sandbox/poupanca/v3/contas/{conta}/saldo
+
+Request enviado (referência):
+{
+  "contaPoupanca": 12345
+}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "mensagens": [
+    {
+      "mensagem": "string",
+      "codigo": "string"
+    }
+  ],
+  "resultado": {
+    "data": "2019-08-24T14:15:22Z",
+    "saldoTotal": -1.7976931348623157e+308,
+    "saldoBloqueado": -1.7976931348623157e+308,
+    "saldoDisponivel": -1.7976931348623157e+308
+  }
+}
+
+========================================================================
+PIX_P_01 – Pix Pagamentos · CONSULTA
+------------------------------------------------------------------------
+COMO PEGAR: GET https://sandbox.sicoob.com.br/sicoob/sandbox/pix-pagamentos/v2/pagamentos?id=1
+
+Request enviado (referência):
+{
+  "id": 1
+}
+
+>>> Status Code - Retornado:
+200
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "note": "Resposta HTML do WAF/gateway (sandbox). Endpoint alcançado.",
+  "preview": "<html><head><title>Request Rejected</title></head><body>The requested URL was rejected. Please consult with your administrator.<br><br>Your support ID is: 9350839274691573060<br><br><a href='javascrip"
+}
+
+========================================================================
+SPB_01 – SPB Transferências · CONSULTA TED
+------------------------------------------------------------------------
+COMO PEGAR: GET https://sandbox.sicoob.com.br/sicoob/sandbox/spb/v2/transferencias/ted?codigo=
+
+Request enviado (referência):
+{
+  "codigo": "ABC123"
+}
+
+>>> Status Code - Retornado:
+400
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "httpCode": "400",
+  "httpMessage": "Bad Request",
+  "moreInformation": "One or more required API parameters are missing in the API request."
+}
+
+========================================================================
+CBP_01 – Cobrança Bancária Pagamentos · CONSULTA
+------------------------------------------------------------------------
+COMO PEGAR: GET https://sandbox.sicoob.com.br/sicoob/sandbox/cobranca-bancaria-pagamentos/v3/boletos?linhaDigitavel=
+
+Request enviado (referência):
+{
+  "linhaDigitavel": "42297115040000195441184217468127172300000023124"
+}
+
+>>> Status Code - Retornado:
+400
+
+>>> Response Body - Retornado (cole no documento):
+{
+  "httpCode": "400",
+  "httpMessage": "Bad Request",
+  "moreInformation": "One or more required API parameters are missing in the API request."
+}
+
+========================================================================
+RESUMO DO PILOTO
+------------------------------------------------------------------------
+OK · AT_01 – AUTENTICAÇÃO (Access token sandbox) → HTTP 200
+OK · CB_01 – Cobrança Bancária · INCLUSÃO BOLETO → HTTP 200
+OK · CB_02 – Cobrança Bancária · CONSULTA BOLETO → HTTP 200
+OK · CC_01 – Conta Corrente · SALDO → HTTP 200
+OK · PIX_R_01 – Pix Recebimentos · LISTAR COB → HTTP 200
+OK · PIX_R_02 – Pix Recebimentos · CRIAR COB → HTTP 201
+OK · PIX_R_03 – Pix Recebimentos · LISTAR PIX → HTTP 200
+OK · PP_01 – Poupança · SALDO → HTTP 200
+VERIFICAR · PIX_P_01 – Pix Pagamentos · CONSULTA → HTTP 200
+VERIFICAR · SPB_01 – SPB Transferências · CONSULTA TED → HTTP 400
+VERIFICAR · CBP_01 – Cobrança Bancária Pagamentos · CONSULTA → HTTP 400
+
+Observação: no sandbox do Portal, alguns endpoints retornam mock/OpenAPI ou
+exigem parâmetros adicionais (SPB / Cobrança Pagamentos). Os testes críticos
+de Cobrança Bancária, Conta Corrente, Pix Recebimentos e Poupança com HTTP 2xx
+demonstram autenticação e consumo das APIs liberadas para a Azoup (coop. 5004).
+Certificado A1 ICP-Brasil já está no sistema para o fluxo de produção (OAuth mTLS).

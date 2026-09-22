@@ -13,6 +13,8 @@ export type BancoCobrancaEscolha = 'sicoob' | 'c6';
 export type EnviarMensalidadeOpts = {
   emitenteId: string;
   banco: BancoCobrancaEscolha;
+  /** true = cada boleto usa o CNPJ do cadastro do cliente; false = usa o CNPJ escolhido abaixo para todos. */
+  usarEmitenteDoCliente: boolean;
   discriminacao?: string;
 };
 
@@ -20,10 +22,9 @@ type Props = {
   visible: boolean;
   loading?: boolean;
   onClose: () => void;
-  /** Mensalidade + boleto bancário (banco escolhido aqui). */
   onMensalidadeComBoleto: (opts: EnviarMensalidadeOpts) => void;
-  /** Mensalidade + boleto + NFS-e no mesmo CNPJ. */
   onMensalidadeComBoletoENf: (opts: EnviarMensalidadeOpts) => void;
+  /** Preferência inicial (ex.: empresa do filtro ou do cliente selecionado). */
   emitenteIdInicial?: string | null;
 };
 
@@ -51,6 +52,7 @@ export function EnviarMensalidadeModal({
 }: Props) {
   const { user } = useAuth();
   const [emitentes, setEmitentes] = useState<NfseEmitente[]>([]);
+  const [usarDoCliente, setUsarDoCliente] = useState(true);
   const [banco, setBanco] = useState<BancoCobrancaEscolha>('sicoob');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadingEmit, setLoadingEmit] = useState(false);
@@ -62,6 +64,7 @@ export function EnviarMensalidadeModal({
     let cancelled = false;
     setLoadingEmit(true);
     setEditouTexto(false);
+    setUsarDoCliente(true);
     void ensureEmitentes(user.id)
       .then((list) => {
         if (cancelled) return;
@@ -107,6 +110,7 @@ export function EnviarMensalidadeModal({
 
   const selected = emitentes.find((e) => e.id === selectedId) ?? null;
   const emitenteId = selectedId || emitentesDoBanco[0]?.id || emitentes[0]?.id || '';
+  const bancoLabel = banco === 'c6' ? 'C6 Bank' : 'Sicoob';
 
   const escolherBanco = (next: BancoCobrancaEscolha) => {
     setBanco(next);
@@ -118,80 +122,120 @@ export function EnviarMensalidadeModal({
     }
   };
 
+  const optsBase = (): EnviarMensalidadeOpts => ({
+    emitenteId,
+    banco,
+    usarEmitenteDoCliente: usarDoCliente,
+    discriminacao: discriminacao.trim(),
+  });
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.bg} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <Text style={styles.title}>Como deseja enviar?</Text>
           <Text style={styles.hint}>
-            O boleto usa o CNPJ da empresa definido no cadastro de cada cliente. Abaixo, escolha só o texto da
-            NFS-e (se for emitir nota) e confirme o envio.
+            Por padrão o boleto usa o CNPJ da empresa do cadastro de cada cliente. Você pode trocar e forçar um
+            CNPJ/banco para todos desta geração.
           </Text>
 
           <View style={styles.emitBox}>
-            <Text style={styles.emitLabel}>Banco do boleto (referência)</Text>
-            <Text style={styles.bancoHint}>
-              O banco real segue a empresa do cliente (Sicoob ou C6 conforme o CNPJ no cadastro). A seleção abaixo
-              só vale se o cliente ainda não tiver empresa.
-            </Text>
-            <View style={styles.bancoRow}>
-              {([
-                { id: 'sicoob' as const, label: 'Sicoob' },
-                { id: 'c6' as const, label: 'C6 Bank' },
-              ]).map((opt) => {
-                const on = banco === opt.id;
-                return (
-                  <Pressable
-                    key={opt.id}
-                    style={[styles.bancoOpt, on && styles.bancoOptOn]}
-                    onPress={() => escolherBanco(opt.id)}
-                  >
-                    <Ionicons
-                      name={on ? 'radio-button-on' : 'radio-button-off'}
-                      size={20}
-                      color={on ? colors.orange : colors.gray400}
-                    />
-                    <Text style={[styles.bancoOptTxt, on && styles.bancoOptTxtOn]}>{opt.label}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <Text style={styles.emitLabel}>CNPJ cobrador do boleto</Text>
+            <Pressable
+              style={[styles.emitOpt, usarDoCliente && styles.emitOptOn]}
+              onPress={() => setUsarDoCliente(true)}
+            >
+              <Ionicons
+                name={usarDoCliente ? 'radio-button-on' : 'radio-button-off'}
+                size={20}
+                color={usarDoCliente ? colors.orange : colors.gray400}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.emitOptTxt}>Usar empresa do cadastro do cliente</Text>
+                <Text style={styles.optSub}>Recomendado — Sicoob/C6 conforme o CNPJ de cada cliente</Text>
+              </View>
+            </Pressable>
+            <Pressable
+              style={[styles.emitOpt, !usarDoCliente && styles.emitOptOn]}
+              onPress={() => setUsarDoCliente(false)}
+            >
+              <Ionicons
+                name={!usarDoCliente ? 'radio-button-on' : 'radio-button-off'}
+                size={20}
+                color={!usarDoCliente ? colors.orange : colors.gray400}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.emitOptTxt}>Trocar — usar outro CNPJ para todos</Text>
+                <Text style={styles.optSub}>Escolha banco e empresa abaixo</Text>
+              </View>
+            </Pressable>
           </View>
 
-          {loadingEmit ? (
-            <ActivityIndicator color={colors.orange} />
-          ) : emitentes.length > 0 ? (
-            <View style={styles.emitBox}>
-              <Text style={styles.emitLabel}>CNPJ fallback / NFS-e (se cliente sem empresa)</Text>
-              {emitentesDoBanco.map((e) => {
-                const selectedOpt = e.id === selectedId;
-                return (
-                  <Pressable
-                    key={e.id}
-                    style={[styles.emitOpt, selectedOpt && styles.emitOptOn]}
-                    onPress={() => setSelectedId(e.id)}
-                  >
-                    <Ionicons
-                      name={selectedOpt ? 'radio-button-on' : 'radio-button-off'}
-                      size={20}
-                      color={selectedOpt ? colors.orange : colors.gray400}
-                    />
-                    <Text style={styles.emitOptTxt}>{emitenteLabel(e)}</Text>
-                  </Pressable>
-                );
-              })}
-              {selected && selected.banco_cobranca !== banco ? (
-                <Text style={styles.warnHint}>
-                  Este CNPJ está marcado como {selected.banco_cobranca === 'c6' ? 'C6' : 'Sicoob'}. Só é usado
-                  se o cliente não tiver empresa no cadastro; senão prevalece o CNPJ do cliente.
+          {!usarDoCliente ? (
+            <>
+              <View style={styles.emitBox}>
+                <Text style={styles.emitLabel}>Banco do boleto</Text>
+                <View style={styles.bancoRow}>
+                  {([
+                    { id: 'sicoob' as const, label: 'Sicoob' },
+                    { id: 'c6' as const, label: 'C6 Bank' },
+                  ]).map((opt) => {
+                    const on = banco === opt.id;
+                    return (
+                      <Pressable
+                        key={opt.id}
+                        style={[styles.bancoOpt, on && styles.bancoOptOn]}
+                        onPress={() => escolherBanco(opt.id)}
+                      >
+                        <Ionicons
+                          name={on ? 'radio-button-on' : 'radio-button-off'}
+                          size={20}
+                          color={on ? colors.orange : colors.gray400}
+                        />
+                        <Text style={[styles.bancoOptTxt, on && styles.bancoOptTxtOn]}>{opt.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.bancoHint}>Boleto será registrado no {bancoLabel}.</Text>
+              </View>
+
+              {loadingEmit ? (
+                <ActivityIndicator color={colors.orange} />
+              ) : emitentes.length > 0 ? (
+                <View style={styles.emitBox}>
+                  <Text style={styles.emitLabel}>CNPJ cobrador / emitente</Text>
+                  {emitentesDoBanco.map((e) => {
+                    const selectedOpt = e.id === selectedId;
+                    return (
+                      <Pressable
+                        key={e.id}
+                        style={[styles.emitOpt, selectedOpt && styles.emitOptOn]}
+                        onPress={() => setSelectedId(e.id)}
+                      >
+                        <Ionicons
+                          name={selectedOpt ? 'radio-button-on' : 'radio-button-off'}
+                          size={20}
+                          color={selectedOpt ? colors.orange : colors.gray400}
+                        />
+                        <Text style={styles.emitOptTxt}>{emitenteLabel(e)}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : (
+                <Text style={styles.hint}>
+                  Cadastre o emitente em Configurações › NFS-e. Sem CNPJ, o carnê fica informativo.
                 </Text>
-              ) : null}
-            </View>
-          ) : (
-            <Text style={styles.hint}>
-              Cadastre o emitente em Configurações › NFS-e. Sem CNPJ, o carnê fica informativo.
+              )}
+            </>
+          ) : loadingEmit ? (
+            <ActivityIndicator color={colors.orange} />
+          ) : selected ? (
+            <Text style={styles.bancoHint}>
+              Fallback se algum cliente estiver sem empresa: {emitenteLabel(selected)}.
             </Text>
-          )}
+          ) : null}
 
           <View style={styles.discBox}>
             <Text style={styles.emitLabel}>Discriminação dos serviços (NFS-e)</Text>
@@ -213,35 +257,32 @@ export function EnviarMensalidadeModal({
 
           <Pressable
             style={[styles.option, styles.optionPrimary]}
-            onPress={() =>
-              onMensalidadeComBoletoENf({
-                emitenteId,
-                banco,
-                discriminacao: discriminacao.trim(),
-              })
-            }
-            disabled={loading || loadingEmit}
+            onPress={() => onMensalidadeComBoletoENf(optsBase())}
+            disabled={loading || loadingEmit || (!usarDoCliente && !emitenteId)}
           >
             <Ionicons name="document-text" size={22} color={colors.white} />
             <View style={styles.optionBody}>
               <Text style={styles.optionTitleLight}>Gerar mensalidade + boleto + NFS-e</Text>
               <Text style={styles.optionSubLight}>
-                Boleto e nota usam o CNPJ da empresa do cadastro do cliente. Cliente precisa estar com &quot;Com
-                NF&quot; e certificado A1 desse CNPJ.
+                {usarDoCliente
+                  ? 'Boleto e nota pelo CNPJ do cadastro de cada cliente (pode trocar acima).'
+                  : `Boleto e nota com ${bancoLabel} / CNPJ escolhido para todos.`}
               </Text>
             </View>
           </Pressable>
 
           <Pressable
             style={styles.option}
-            onPress={() => onMensalidadeComBoleto({ emitenteId, banco })}
-            disabled={loading || loadingEmit}
+            onPress={() => onMensalidadeComBoleto(optsBase())}
+            disabled={loading || loadingEmit || (!usarDoCliente && !emitenteId)}
           >
             <Ionicons name="receipt-outline" size={22} color={colors.petroleum} />
             <View style={styles.optionBody}>
               <Text style={styles.optionTitle}>Gerar mensalidade + boleto</Text>
               <Text style={styles.optionSub}>
-                Sem nota fiscal — boleto pelo CNPJ da empresa cadastrada no cliente.
+                {usarDoCliente
+                  ? 'Sem nota — boleto pelo CNPJ do cadastro do cliente.'
+                  : `Sem nota — boleto ${bancoLabel} com o CNPJ escolhido.`}
               </Text>
             </View>
           </Pressable>
@@ -289,7 +330,7 @@ const styles = StyleSheet.create({
   bancoOptTxt: { fontSize: 14, fontWeight: '700', color: colors.gray700 },
   bancoOptTxtOn: { color: colors.petroleum },
   bancoHint: { fontSize: 12, color: colors.orange, fontWeight: '700' },
-  warnHint: { fontSize: 12, color: colors.gray600, lineHeight: 16 },
+  optSub: { fontSize: 11, color: colors.gray600, marginTop: 2, lineHeight: 15 },
   emitOpt: {
     flexDirection: 'row',
     alignItems: 'center',
