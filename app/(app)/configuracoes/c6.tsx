@@ -196,14 +196,6 @@ export default function C6ConfigScreen() {
         Toast.show({ type: 'error', text1: 'Informe o Client Secret deste CNPJ.' });
         return;
       }
-      if (!temCertUpload) {
-        Toast.show({
-          type: 'error',
-          text1: 'Envie o certificado mTLS deste CNPJ',
-          text2: 'Cada CNPJ precisa do próprio par .crt + .key do portal C6.',
-        });
-        return;
-      }
     }
     setSaving(true);
     try {
@@ -230,11 +222,21 @@ export default function C6ConfigScreen() {
       setTemSecretSalvo(temSecretSalvo || secretAlterado);
       setSecretAlterado(false);
       setValues((v) => ({ ...v, client_secret: '' }));
-      Toast.show({
-        type: 'success',
-        text1: 'Configuração salva para este CNPJ',
-        text2: emitente ? emitenteLabel(emitente) : undefined,
-      });
+      if (!temCertUpload) {
+        Toast.show({
+          type: 'info',
+          text1: 'Credenciais salvas — falta o certificado',
+          text2:
+            'Clique em “Enviar certificados”, escolha o .crt e depois o .key deste CNPJ no portal C6.',
+          visibilityTime: 10000,
+        });
+      } else {
+        Toast.show({
+          type: 'success',
+          text1: 'Configuração salva para este CNPJ',
+          text2: emitente ? emitenteLabel(emitente) : undefined,
+        });
+      }
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
@@ -425,12 +427,13 @@ export default function C6ConfigScreen() {
 
       <Text style={styles.sectionTitle}>3. Certificado mTLS deste CNPJ</Text>
       <Text style={styles.hint}>
-        Baixe no portal C6 o par .crt + .key do aplicativo vinculado a este CNPJ. O outro CNPJ usa o
-        certificado dele — não misture.
+        No portal C6 Developers › aplicativo deste CNPJ, baixe o certificado (.crt) e a chave (.key).
+        Ao clicar no botão abaixo, o sistema pede os dois arquivos em sequência (primeiro .crt, depois
+        .key). Cada CNPJ tem o seu — não use o do outro.
       </Text>
       <View style={styles.box}>
         <Text style={styles.boxLabel}>Status</Text>
-        <Text style={styles.boxValue}>
+        <Text style={[styles.boxValue, !temCertUpload && styles.boxWarn]}>
           {temCertUpload ? 'Certificados deste CNPJ enviados ✓' : 'Pendente — envie .crt e .key'}
         </Text>
       </View>
@@ -445,6 +448,12 @@ export default function C6ConfigScreen() {
         loading={uploadingCert}
         disabled={saving || !emitenteId}
       />
+      {!temCertUpload ? (
+        <Text style={styles.warn}>
+          Sem o certificado, Client ID/Secret podem ser salvos, mas o boleto deste CNPJ não registra no
+          C6 até enviar o par .crt + .key.
+        </Text>
+      ) : null}
 
       <Text style={styles.sectionTitle}>Webhook (baixa automática)</Text>
       <View style={styles.box}>
