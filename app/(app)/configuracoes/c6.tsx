@@ -4,8 +4,9 @@ import { useAuth } from '@/context/AuthContext';
 import {
   ensureC6Config,
   fetchC6ConfigsByUser,
-  pickC6CertFile,
+  pickC6CertPair,
   pickEmitenteC6,
+  salvarCertPathsC6,
   uploadC6CertPair,
   upsertC6Config,
 } from '@/services/c6ConfigService';
@@ -247,39 +248,35 @@ export default function C6ConfigScreen() {
   const uploadCerts = async () => {
     if (!user?.id || !emitenteId) return;
     try {
-      const crt = await pickC6CertFile('crt');
-      if (!crt) return;
-      const key = await pickC6CertFile('key');
-      if (!key) {
-        Toast.show({ type: 'info', text1: 'Selecione também o arquivo da chave (.key).' });
+      Toast.show({
+        type: 'info',
+        text1: 'Selecione os 2 arquivos juntos',
+        text2: 'No seletor, marque o .crt e o .key ao mesmo tempo (Ctrl/Cmd + clique).',
+        visibilityTime: 6000,
+      });
+      const pair = await pickC6CertPair();
+      if (!pair) {
+        Toast.show({
+          type: 'error',
+          text1: 'Selecione os dois arquivos',
+          text2: 'É preciso marcar .crt e .key juntos no mesmo envio.',
+          visibilityTime: 8000,
+        });
         return;
       }
       setUploadingCert(true);
-      const paths = await uploadC6CertPair(user.id, emitenteId, crt, key);
-      patch({
-        cert_crt_storage_path: paths.cert_crt_storage_path,
-        cert_key_storage_path: paths.cert_key_storage_path,
-      });
-      await upsertC6Config(user.id, {
-        emitente_id: emitenteId,
-        ativo: values.ativo,
-        ambiente: values.ambiente,
-        client_id: values.client_id.trim(),
-        client_secret: secretAlterado ? values.client_secret.trim() : '',
-        billing_scheme: values.billing_scheme || C6_ACTIVE_DEFAULTS.billing_scheme,
-        webhook_token: values.webhook_token,
-        cert_crt_storage_path: paths.cert_crt_storage_path,
-        cert_key_storage_path: paths.cert_key_storage_path,
-      });
+      const paths = await uploadC6CertPair(user.id, emitenteId, pair.crt, pair.key);
+      const refreshed = await salvarCertPathsC6(user.id, emitenteId, paths);
+      applyConfigToForm(emitenteId, refreshed);
       setTemCertUpload(true);
       await refreshStatuses();
       Toast.show({
         type: 'success',
-        text1: 'Certificados deste CNPJ enviados',
-        text2: 'O outro CNPJ continua com o certificado dele.',
+        text1: 'Certificados salvos neste CNPJ',
+        text2: `${pair.crt.name} + ${pair.key.name}`,
       });
     } catch (e) {
-      Toast.show({ type: 'error', text1: (e as Error).message });
+      Toast.show({ type: 'error', text1: (e as Error).message, visibilityTime: 10000 });
     } finally {
       setUploadingCert(false);
     }
@@ -427,21 +424,20 @@ export default function C6ConfigScreen() {
 
       <Text style={styles.sectionTitle}>3. Certificado mTLS deste CNPJ</Text>
       <Text style={styles.hint}>
-        No portal C6 Developers › aplicativo deste CNPJ, baixe o certificado (.crt) e a chave (.key).
-        Ao clicar no botão abaixo, o sistema pede os dois arquivos em sequência (primeiro .crt, depois
-        .key). Cada CNPJ tem o seu — não use o do outro.
+        No portal C6, baixe o .crt e o .key deste CNPJ. No botão abaixo, selecione os dois arquivos no
+        mesmo envio (Ctrl ou Cmd + clique). Não use o certificado A1 da NFS-e — é outro arquivo.
       </Text>
       <View style={styles.box}>
         <Text style={styles.boxLabel}>Status</Text>
         <Text style={[styles.boxValue, !temCertUpload && styles.boxWarn]}>
-          {temCertUpload ? 'Certificados deste CNPJ enviados ✓' : 'Pendente — envie .crt e .key'}
+          {temCertUpload ? 'Certificados deste CNPJ salvos ✓' : 'Pendente — envie .crt e .key juntos'}
         </Text>
       </View>
       <PrimaryButton
         title={
           temCertUpload
             ? 'Trocar certificados deste CNPJ (.crt + .key)'
-            : 'Enviar certificados deste CNPJ (.crt + .key)'
+            : 'Enviar .crt e .key deste CNPJ'
         }
         variant="secondary"
         onPress={() => void uploadCerts()}
@@ -562,4 +558,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   boxValue: { fontSize: 13, color: colors.petroleum, fontWeight: '600' },
+  boxWarn: { color: colors.orange },
+  warn: { fontSize: 12, color: colors.orange, fontWeight: '600', lineHeight: 17 },
 });
