@@ -3,25 +3,58 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
 import {
   ensureC6Config,
+  fetchC6ConfigsByUser,
   pickC6CertFile,
   pickEmitenteC6,
   uploadC6CertPair,
   upsertC6Config,
 } from '@/services/c6ConfigService';
-import { C6_ACTIVE_DEFAULTS } from '@/services/c6SandboxDefaults';
+import { C6_ACTIVE_DEFAULTS, onlyDigitsCnpj } from '@/services/c6SandboxDefaults';
 import { emitenteLabel, ensureEmitentes, updateEmitenteBancoCobranca } from '@/services/nfseEmitenteService';
 import { colors, radius, spacing } from '@/theme/colors';
-import type { C6Ambiente, C6ConfigInput } from '@/types/c6';
+import type { C6Ambiente, C6Config, C6ConfigInput } from '@/types/c6';
 import type { NfseEmitente } from '@/types/notaFiscal';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import Toast from 'react-native-toast-message';
+
+function formatCnpj(digits: string) {
+  const d = onlyDigitsCnpj(digits);
+  if (d.length !== 14) return digits || '—';
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+}
+
+function statusConfig(cfg: C6Config | undefined): 'ok' | 'parcial' | 'vazio' {
+  if (!cfg) return 'vazio';
+  const id = Boolean(cfg.client_id?.trim());
+  const secret = Boolean(cfg.client_secret?.trim());
+  const cert = Boolean(cfg.cert_crt_storage_path && cfg.cert_key_storage_path);
+  if (id && secret && cert && cfg.ativo) return 'ok';
+  if (id || secret || cert) return 'parcial';
+  return 'vazio';
+}
+
+function statusLabel(s: 'ok' | 'parcial' | 'vazio') {
+  if (s === 'ok') return 'Pronto';
+  if (s === 'parcial') return 'Incompleto';
+  return 'Não configurado';
+}
 
 export default function C6ConfigScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const [emitentes, setEmitentes] = useState<NfseEmitente[]>([]);
+  const [configsByEmitente, setConfigsByEmitente] = useState<Map<string, C6Config>>(new Map());
   const [emitenteId, setEmitenteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -29,6 +62,7 @@ export default function C6ConfigScreen() {
   const [temCertUpload, setTemCertUpload] = useState(false);
   const [secretAlterado, setSecretAlterado] = useState(false);
   const [temSecretSalvo, setTemSecretSalvo] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [values, setValues] = useState<C6ConfigInput>({
     emitente_id: '',
     ativo: true,
@@ -52,30 +86,42 @@ export default function C6ConfigScreen() {
     return base ? `${base}/api/boleto/webhook-sicoob?banco=c6` : '/api/boleto/webhook-sicoob?banco=c6';
   }, []);
 
+  const refreshStatuses = useCallback(async () => {
+    if (!user?.id) return;
+    const list = await fetchC6ConfigsByUser(user.id);
+    setConfigsByEmitente(new Map(list.map((c) => [c.emitente_id, c])));
+  }, [user?.id]);
+
+  const applyConfigToForm = useCallback((id: string, cfg: C6Config) => {
+    setValues({
+      emitente_id: id,
+      ativo: cfg.ativo !== false,
+      ambiente: cfg.ambiente === 'sandbox' ? 'sandbox' : 'producao',
+      client_id: cfg.client_id || '',
+      client_secret: '',
+      billing_scheme: cfg.billing_scheme || (cfg.ambiente === 'sandbox' ? '21' : '15'),
+      webhook_token: cfg.webhook_token,
+      cert_crt_storage_path: cfg.cert_crt_storage_path,
+      cert_key_storage_path: cfg.cert_key_storage_path,
+    });
+    setTemSecretSalvo(Boolean(cfg.client_secret?.trim()));
+    setSecretAlterado(false);
+    setTemCertUpload(Boolean(cfg.cert_crt_storage_path && cfg.cert_key_storage_path));
+    setDirty(false);
+  }, []);
+
   const loadConfigForEmitente = useCallback(
-    async (list: NfseEmitente[], id: string) => {
+    async (id: string) => {
       if (!user?.id) return;
       const cfg = await ensureC6Config(user.id, id);
-      setValues({
-        emitente_id: id,
-        ativo: cfg.ativo !== false,
-        ambiente: cfg.ambiente === 'sandbox' ? 'sandbox' : 'producao',
-        client_id: cfg.client_id || '',
-        client_secret: '',
-        billing_scheme: cfg.billing_scheme || (cfg.ambiente === 'sandbox' ? '21' : '15'),
-        webhook_token: cfg.webhook_token,
-        cert_crt_storage_path: cfg.cert_crt_storage_path,
-        cert_key_storage_path: cfg.cert_key_storage_path,
+      applyConfigToForm(id, cfg);
+      setConfigsByEmitente((prev) => {
+        const next = new Map(prev);
+        next.set(id, cfg);
+        return next;
       });
-      setTemSecretSalvo(Boolean(cfg.client_secret?.trim()));
-      setSecretAlterado(false);
-      setTemCertUpload(Boolean(cfg.cert_crt_storage_path && cfg.cert_key_storage_path));
-      const em = list.find((e) => e.id === id);
-      if (em && em.banco_cobranca !== 'c6') {
-        await updateEmitenteBancoCobranca(user.id, id, 'c6').catch(() => undefined);
-      }
     },
-    [user?.id],
+    [user?.id, applyConfigToForm],
   );
 
   const load = useCallback(async () => {
@@ -84,55 +130,77 @@ export default function C6ConfigScreen() {
     try {
       const list = await ensureEmitentes(user.id);
       setEmitentes(list);
+      await refreshStatuses();
       if (!list.length) {
         setEmitenteId(null);
         return;
       }
-      const preferred = pickEmitenteC6(list) ?? list.find((e) => e.banco_cobranca === 'c6') ?? list[0];
+      const preferred = pickEmitenteC6(list) ?? list[0];
       setEmitenteId(preferred.id);
-      await loadConfigForEmitente(list, preferred.id);
+      await loadConfigForEmitente(preferred.id);
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setLoading(false);
     }
-  }, [user?.id, loadConfigForEmitente]);
+  }, [user?.id, loadConfigForEmitente, refreshStatuses]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const escolherEmitente = async (id: string) => {
+  const trocarEmitente = async (id: string) => {
     if (!user?.id || id === emitenteId) return;
-    setEmitenteId(id);
-    setLoading(true);
-    try {
-      await loadConfigForEmitente(emitentes, id);
-    } catch (e) {
-      Toast.show({ type: 'error', text1: (e as Error).message });
-    } finally {
-      setLoading(false);
+
+    const go = async () => {
+      setEmitenteId(id);
+      setLoading(true);
+      try {
+        await loadConfigForEmitente(id);
+      } catch (e) {
+        Toast.show({ type: 'error', text1: (e as Error).message });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (dirty) {
+      const msg =
+        'Há alterações não salvas neste CNPJ. Trocar agora descarta as mudanças. Continuar?';
+      if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined' && window.confirm(msg)) await go();
+      } else {
+        Alert.alert('Alterações não salvas', msg, [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Descartar', style: 'destructive', onPress: () => void go() },
+        ]);
+      }
+      return;
     }
+    await go();
   };
 
-  const patch = (p: Partial<C6ConfigInput>) => setValues((v) => ({ ...v, ...p }));
+  const patch = (p: Partial<C6ConfigInput>) => {
+    setDirty(true);
+    setValues((v) => ({ ...v, ...p }));
+  };
 
   const save = async () => {
     if (!user?.id || !emitenteId) return;
     if (values.ativo) {
       if (!values.client_id.trim()) {
-        Toast.show({ type: 'error', text1: 'Informe o Client ID do portal C6 Developers.' });
+        Toast.show({ type: 'error', text1: 'Informe o Client ID deste CNPJ no portal C6.' });
         return;
       }
       if (!secretAlterado && !temSecretSalvo) {
-        Toast.show({ type: 'error', text1: 'Informe o Client Secret do aplicativo C6.' });
+        Toast.show({ type: 'error', text1: 'Informe o Client Secret deste CNPJ.' });
         return;
       }
       if (!temCertUpload) {
         Toast.show({
           type: 'error',
-          text1: 'Envie o certificado mTLS (.crt + .key)',
-          text2: 'Baixe no portal C6 Developers do CNPJ AZFS e envie abaixo.',
+          text1: 'Envie o certificado mTLS deste CNPJ',
+          text2: 'Cada CNPJ precisa do próprio par .crt + .key do portal C6.',
         });
         return;
       }
@@ -152,9 +220,21 @@ export default function C6ConfigScreen() {
         cert_crt_storage_path: values.cert_crt_storage_path,
         cert_key_storage_path: values.cert_key_storage_path,
       });
+      // Este CNPJ passa a cobrar via C6 com as credenciais salvas acima.
       await updateEmitenteBancoCobranca(user.id, emitenteId, 'c6');
-      Toast.show({ type: 'success', text1: 'Configuração C6 salva.' });
-      router.back();
+      setEmitentes((prev) =>
+        prev.map((e) => (e.id === emitenteId ? { ...e, banco_cobranca: 'c6' } : e)),
+      );
+      await refreshStatuses();
+      setDirty(false);
+      setTemSecretSalvo(temSecretSalvo || secretAlterado);
+      setSecretAlterado(false);
+      setValues((v) => ({ ...v, client_secret: '' }));
+      Toast.show({
+        type: 'success',
+        text1: 'Configuração salva para este CNPJ',
+        text2: emitente ? emitenteLabel(emitente) : undefined,
+      });
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
@@ -182,7 +262,7 @@ export default function C6ConfigScreen() {
         emitente_id: emitenteId,
         ativo: values.ativo,
         ambiente: values.ambiente,
-        client_id: values.client_id.trim() || C6_ACTIVE_DEFAULTS.client_id,
+        client_id: values.client_id.trim(),
         client_secret: secretAlterado ? values.client_secret.trim() : '',
         billing_scheme: values.billing_scheme || C6_ACTIVE_DEFAULTS.billing_scheme,
         webhook_token: values.webhook_token,
@@ -190,10 +270,11 @@ export default function C6ConfigScreen() {
         cert_key_storage_path: paths.cert_key_storage_path,
       });
       setTemCertUpload(true);
+      await refreshStatuses();
       Toast.show({
         type: 'success',
-        text1: 'Certificados mTLS enviados',
-        text2: 'Use o par .crt + .key do CNPJ AZFS no portal C6.',
+        text1: 'Certificados deste CNPJ enviados',
+        text2: 'O outro CNPJ continua com o certificado dele.',
       });
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
@@ -214,8 +295,8 @@ export default function C6ConfigScreen() {
     return (
       <View style={styles.center}>
         <Text style={styles.lead}>
-          Cadastre o CNPJ AZFS (ou outro cobrador C6) como emitente em Configurações › NFS-e antes de
-          configurar o boleto C6.
+          Cadastre os dois CNPJs como emitentes em Configurações › NFS-e. Depois configure Client ID,
+          Secret e certificado de cada um aqui.
         </Text>
         <PrimaryButton title="Voltar" variant="ghost" onPress={() => router.back()} />
       </View>
@@ -229,28 +310,52 @@ export default function C6ConfigScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <Text style={styles.lead}>
-        Credenciais do aplicativo C6 Bank (produção ou homologação): Client ID, Client Secret e
-        certificado mTLS do CNPJ cobrador (AZFS). Esses dados são usados ao emitir boleto pelo C6.
+        Cada CNPJ tem Client ID, Client Secret e certificado mTLS próprios. Ao gerar boleto, o sistema
+        usa a configuração do CNPJ cobrador daquele cliente (ou o escolhido na geração).
       </Text>
 
-      <Text style={styles.sectionTitle}>CNPJ cobrador</Text>
+      <Text style={styles.sectionTitle}>1. Escolha o CNPJ</Text>
       <View style={styles.emitList}>
         {emitentes.map((e) => {
           const on = e.id === emitenteId;
+          const st = statusConfig(configsByEmitente.get(e.id));
           return (
             <Pressable
               key={e.id}
               style={[styles.emitOpt, on && styles.emitOptOn]}
-              onPress={() => void escolherEmitente(e.id)}
+              onPress={() => void trocarEmitente(e.id)}
             >
-              <Text style={[styles.emitOptTxt, on && styles.emitOptTxtOn]}>{emitenteLabel(e)}</Text>
+              <View style={styles.emitOptTop}>
+                <Text style={[styles.emitOptTxt, on && styles.emitOptTxtOn]} numberOfLines={2}>
+                  {emitenteLabel(e)}
+                </Text>
+                <View
+                  style={[
+                    styles.badge,
+                    st === 'ok' && styles.badgeOk,
+                    st === 'parcial' && styles.badgeParcial,
+                  ]}
+                >
+                  <Text style={styles.badgeTxt}>{statusLabel(st)}</Text>
+                </View>
+              </View>
               <Text style={styles.emitOptSub}>
-                {e.banco_cobranca === 'c6' ? 'Banco: C6' : 'Marcar como C6 ao salvar'}
+                CNPJ {formatCnpj(e.documento)} ·{' '}
+                {e.banco_cobranca === 'c6' ? 'Cobra no C6' : 'Ainda não marcado como C6'}
               </Text>
             </Pressable>
           );
         })}
       </View>
+
+      {emitente ? (
+        <Text style={styles.editingHint}>
+          Editando agora: {emitenteLabel(emitente)}
+          {dirty ? ' · alterações não salvas' : ''}
+        </Text>
+      ) : null}
+
+      <Text style={styles.sectionTitle}>2. Credenciais deste CNPJ</Text>
 
       <View style={styles.checkRow}>
         <Pressable
@@ -287,15 +392,15 @@ export default function C6ConfigScreen() {
       </View>
 
       <FormTextInput
-        label="Client ID"
+        label="Client ID (deste CNPJ)"
         value={values.client_id}
         onChangeText={(t) => patch({ client_id: t })}
         autoCapitalize="none"
         autoCorrect={false}
-        placeholder="UUID do aplicativo no portal C6 Developers"
+        placeholder="UUID do aplicativo C6 deste CNPJ"
       />
       <FormTextInput
-        label="Client Secret"
+        label="Client Secret (deste CNPJ)"
         value={values.client_secret}
         onChangeText={(t) => {
           setSecretAlterado(true);
@@ -304,7 +409,11 @@ export default function C6ConfigScreen() {
         autoCapitalize="none"
         autoCorrect={false}
         secureTextEntry
-        placeholder={temSecretSalvo && !secretAlterado ? '•••••••• (salvo — digite para trocar)' : 'Secret do aplicativo C6'}
+        placeholder={
+          temSecretSalvo && !secretAlterado
+            ? '•••••••• (salvo — digite para trocar)'
+            : 'Secret do aplicativo C6 deste CNPJ'
+        }
       />
       <FormTextInput
         label="Billing scheme (carteira)"
@@ -314,25 +423,23 @@ export default function C6ConfigScreen() {
         placeholder={values.ambiente === 'producao' ? '15' : '21'}
       />
 
-      <Text style={styles.sectionTitle}>Certificado mTLS (AZFS)</Text>
+      <Text style={styles.sectionTitle}>3. Certificado mTLS deste CNPJ</Text>
       <Text style={styles.hint}>
-        No portal C6 Developers, baixe o par .crt + .key do aplicativo vinculado ao CNPJ AZFS e envie
-        aqui. Sem isso a emissão em produção falha.
+        Baixe no portal C6 o par .crt + .key do aplicativo vinculado a este CNPJ. O outro CNPJ usa o
+        certificado dele — não misture.
       </Text>
       <View style={styles.box}>
         <Text style={styles.boxLabel}>Status</Text>
         <Text style={styles.boxValue}>
-          {temCertUpload ? 'Certificados enviados ✓' : 'Pendente — envie .crt e .key'}
+          {temCertUpload ? 'Certificados deste CNPJ enviados ✓' : 'Pendente — envie .crt e .key'}
         </Text>
-        {emitente ? (
-          <>
-            <Text style={styles.boxLabel}>Emitente</Text>
-            <Text style={styles.boxValue}>{emitenteLabel(emitente)}</Text>
-          </>
-        ) : null}
       </View>
       <PrimaryButton
-        title={temCertUpload ? 'Trocar certificados (.crt + .key)' : 'Enviar certificados (.crt + .key)'}
+        title={
+          temCertUpload
+            ? 'Trocar certificados deste CNPJ (.crt + .key)'
+            : 'Enviar certificados deste CNPJ (.crt + .key)'
+        }
         variant="secondary"
         onPress={() => void uploadCerts()}
         loading={uploadingCert}
@@ -346,15 +453,28 @@ export default function C6ConfigScreen() {
         </Text>
       </View>
       <FormTextInput
-        label="Token do webhook (opcional)"
+        label="Token do webhook (opcional, deste CNPJ)"
         value={values.webhook_token ?? ''}
         onChangeText={(t) => patch({ webhook_token: t || null })}
         autoCapitalize="none"
         placeholder="Se o C6 exigir autenticação no webhook"
       />
 
-      <PrimaryButton title="Salvar configuração C6" onPress={() => void save()} loading={saving} />
-      <PrimaryButton title="Voltar" variant="ghost" onPress={() => router.back()} disabled={saving} />
+      <PrimaryButton
+        title={
+          emitente
+            ? `Salvar configuração — ${formatCnpj(emitente.documento)}`
+            : 'Salvar configuração C6'
+        }
+        onPress={() => void save()}
+        loading={saving}
+      />
+      <PrimaryButton
+        title="Voltar"
+        variant="ghost"
+        onPress={() => router.back()}
+        disabled={saving}
+      />
     </ScrollView>
   );
 }
@@ -372,6 +492,12 @@ const styles = StyleSheet.create({
   },
   lead: { fontSize: 13, color: colors.gray600, lineHeight: 18 },
   hint: { fontSize: 12, color: colors.gray600, lineHeight: 17, marginTop: -4 },
+  editingHint: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.orange,
+    lineHeight: 17,
+  },
   sectionTitle: { fontSize: 15, fontWeight: '800', color: colors.petroleum, marginTop: spacing.sm },
   checkRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   chip: {
@@ -392,15 +518,25 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.md,
     backgroundColor: colors.white,
-    gap: 4,
+    gap: 6,
   },
   emitOptOn: {
     borderColor: colors.orange,
     backgroundColor: 'rgba(232, 106, 36, 0.06)',
   },
-  emitOptTxt: { fontSize: 13, fontWeight: '700', color: colors.petroleum },
+  emitOptTop: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  emitOptTxt: { flex: 1, fontSize: 13, fontWeight: '700', color: colors.petroleum },
   emitOptTxtOn: { color: colors.petroleum },
   emitOptSub: { fontSize: 11, color: colors.gray600 },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.full,
+    backgroundColor: colors.gray200,
+  },
+  badgeOk: { backgroundColor: '#D1FAE5' },
+  badgeParcial: { backgroundColor: '#FEF3C7' },
+  badgeTxt: { fontSize: 10, fontWeight: '800', color: colors.petroleum },
   box: {
     backgroundColor: colors.white,
     borderRadius: radius.md,
