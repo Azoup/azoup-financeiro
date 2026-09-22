@@ -2,9 +2,12 @@ const path = require('path');
 const fs = require('fs');
 
 /**
- * Credenciais C6 Bank — CNPJ cobrador: 05.320.214/0001-69
+ * Credenciais C6 Bank — CNPJs cobradores (portal C6).
+ * Preferir credenciais salvas em Configurações › Boleto C6.
  */
 const C6_CNPJ_COBRADOR = '05320214000169';
+const C6_CNPJ_AZFS = '66639480000143';
+const C6_CNPJS_COBRADOR = [C6_CNPJ_COBRADOR, C6_CNPJ_AZFS];
 
 const C6_SANDBOX = {
   client_id: '3cbe1db9-ee03-4f3b-aae4-b0ea2e649cee',
@@ -73,4 +76,12 @@ function bundledCertPaths(ambiente) {
   );
 }
 
-module.exports = { C6_SANDBOX, C6_PROD, C6_ACTIVE, C6_CNPJ_COBRADOR, bundledCertPaths };
+module.exports = {
+  C6_SANDBOX,
+  C6_PROD,
+  C6_ACTIVE,
+  C6_CNPJ_COBRADOR,
+  C6_CNPJ_AZFS,
+  C6_CNPJS_COBRADOR,
+  bundledCertPaths,
+};

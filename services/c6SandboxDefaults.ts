@@ -1,8 +1,12 @@
 /**
- * Credenciais C6 Bank — CNPJ cobrador: 05.320.214/0001-69
+ * Credenciais C6 Bank — CNPJs cobradores conhecidos (portal C6).
  * Ambiente ativo: produção (boletos reais na CIP).
+ * Credenciais reais devem ser cadastradas em Configurações › Boleto C6.
  */
 export const C6_CNPJ_COBRADOR = '05320214000169';
+/** AZFS Tecnologia — CNPJ liberado para boleto C6 no sistema. */
+export const C6_CNPJ_AZFS = '66639480000143';
+export const C6_CNPJS_COBRADOR = [C6_CNPJ_COBRADOR, C6_CNPJ_AZFS] as const;
 
 /** Homologação (referência / evidências). */
 export const C6_SANDBOX_DEFAULTS = {
@@ -33,5 +37,6 @@ export function onlyDigitsCnpj(value: string | null | undefined): string {
 }
 
 export function isC6CobradorCnpj(documento: string | null | undefined): boolean {
-  return onlyDigitsCnpj(documento) === C6_CNPJ_COBRADOR;
+  const d = onlyDigitsCnpj(documento);
+  return (C6_CNPJS_COBRADOR as readonly string[]).includes(d);
 }

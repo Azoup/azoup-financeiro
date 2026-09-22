@@ -98,9 +98,9 @@ export default function ConfiguracoesIndexScreen() {
             <Ionicons name="card-outline" size={22} color={colors.orange} />
           </View>
           <View style={styles.rowBody}>
-            <Text style={styles.rowTitle}>Boleto C6 Bank</Text>
+            <Text style={styles.rowTitle}>Boleto C6 Bank (AZFS)</Text>
             <Text style={styles.rowSub}>
-              CNPJ novo — API boleto com mTLS, webhook e baixa automática.
+              Client ID, Client Secret e certificado mTLS do CNPJ cobrador.
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.gray400} />

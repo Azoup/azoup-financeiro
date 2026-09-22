@@ -2,8 +2,8 @@ const { C6_ACTIVE, C6_SANDBOX, bundledCertPaths } = require('./c6SandboxDefaults
 
 /**
  * Carrega config_c6 + mTLS.
- * Preferência: banco → defaults ativos (produção).
- * Migra automaticamente config antiga de sandbox para produção.
+ * Preferência: credenciais salvas em Configurações › Boleto C6.
+ * Fallback: defaults bundled (só se o usuário ainda não cadastrou Client ID).
  */
 async function loadC6Credentials(admin, userId, emitenteId) {
   let config = null;
@@ -22,18 +22,36 @@ async function loadC6Credentials(admin, userId, emitenteId) {
   }
 
   if (config && config.ativo === false) {
-    throw new Error('Integração C6 está inativa em Configurações › Boleto C6. Ative para emitir boleto real.');
+    throw new Error(
+      'Integração C6 está inativa em Configurações › Boleto C6. Ative para emitir boleto real.',
+    );
   }
 
-  let ambiente = (config?.ambiente || C6_ACTIVE.ambiente).trim();
-  let client_id = (config?.client_id || '').trim() || C6_ACTIVE.client_id;
-  let client_secret = (config?.client_secret || '').trim() || C6_ACTIVE.client_secret;
-  let billing_scheme = (config?.billing_scheme || '').trim() || C6_ACTIVE.billing_scheme;
+  const temCredenciaisSalvas = Boolean(
+    (config?.client_id || '').trim() && (config?.client_secret || '').trim(),
+  );
 
-  // Migra sandbox legado → produção (defaults ativos)
+  let ambiente = (config?.ambiente || '').trim() || C6_ACTIVE.ambiente;
+  let client_id = (config?.client_id || '').trim();
+  let client_secret = (config?.client_secret || '').trim();
+  let billing_scheme = (config?.billing_scheme || '').trim();
+
+  if (!temCredenciaisSalvas) {
+    // Sem cadastro do usuário: usa defaults ativos (compatibilidade).
+    ambiente = C6_ACTIVE.ambiente;
+    client_id = C6_ACTIVE.client_id;
+    client_secret = C6_ACTIVE.client_secret;
+    billing_scheme = C6_ACTIVE.billing_scheme;
+  } else if (!billing_scheme) {
+    billing_scheme = ambiente === 'producao' ? '15' : '21';
+  }
+
+  // Se ainda estiver com client_id de sandbox antigo e ambiente produção, migra defaults só
+  // quando o usuário não trocou o secret (legado). Não sobrescreve credenciais customizadas.
   if (
+    temCredenciaisSalvas &&
     C6_ACTIVE.ambiente === 'producao' &&
-    (ambiente === 'sandbox' || client_id === C6_SANDBOX.client_id)
+    client_id === C6_SANDBOX.client_id
   ) {
     ambiente = C6_ACTIVE.ambiente;
     client_id = C6_ACTIVE.client_id;
@@ -54,7 +72,9 @@ async function loadC6Credentials(admin, userId, emitenteId) {
   };
 
   if (!merged.client_id || !merged.client_secret) {
-    throw new Error('Credenciais C6 ausentes (Client ID / Secret).');
+    throw new Error(
+      'Credenciais C6 ausentes. Informe Client ID e Client Secret em Configurações › Boleto C6.',
+    );
   }
 
   if (config?.cert_crt_storage_path && config?.cert_key_storage_path) {
@@ -64,13 +84,20 @@ async function loadC6Credentials(admin, userId, emitenteId) {
     return { config: merged, certPath, keyPath, bundled: false };
   }
 
-  const bundled = bundledCertPaths(merged.ambiente);
-  return {
-    config: merged,
-    certPath: bundled.certPath,
-    keyPath: bundled.keyPath,
-    bundled: true,
-  };
+  // Sem upload: tenta certs no deploy; em produção exige upload se não houver bundled.
+  try {
+    const bundled = bundledCertPaths(merged.ambiente);
+    return {
+      config: merged,
+      certPath: bundled.certPath,
+      keyPath: bundled.keyPath,
+      bundled: true,
+    };
+  } catch (e) {
+    throw new Error(
+      `${e.message} Ou envie o certificado AZFS (.crt + .key) em Configurações › Boleto C6.`,
+    );
+  }
 }
 
 async function loadC6CredentialsForBoleto(admin, boleto) {

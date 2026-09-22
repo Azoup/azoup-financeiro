@@ -18,10 +18,10 @@ export type C6CertFilePick = {
 export function c6ConfigDefaults(emitenteId: string): C6ConfigInput {
   return {
     emitente_id: emitenteId,
-    ativo: C6_ACTIVE_DEFAULTS.ativo,
+    ativo: false,
     ambiente: C6_ACTIVE_DEFAULTS.ambiente,
-    client_id: C6_ACTIVE_DEFAULTS.client_id,
-    client_secret: C6_ACTIVE_DEFAULTS.client_secret,
+    client_id: '',
+    client_secret: '',
     billing_scheme: C6_ACTIVE_DEFAULTS.billing_scheme,
     webhook_token: null,
   };
@@ -59,14 +59,16 @@ export async function upsertC6Config(userId: string, input: C6ConfigInput): Prom
     input.billing_scheme?.trim() ||
     (ambiente === 'producao' ? '15' : '21');
 
+  const secretNovo = input.client_secret.trim();
+  const clientId = input.client_id.trim();
+
   const row: Record<string, unknown> = {
     user_id: userId,
     emitente_id: input.emitente_id,
     ativo: input.ativo,
     ambiente,
-    client_id: input.client_id.trim() || C6_ACTIVE_DEFAULTS.client_id,
-    client_secret:
-      input.client_secret.trim() || existing?.client_secret || C6_ACTIVE_DEFAULTS.client_secret,
+    client_id: clientId,
+    client_secret: secretNovo || existing?.client_secret || '',
     billing_scheme: billing,
     webhook_token: input.webhook_token?.trim() || null,
   };
@@ -89,31 +91,10 @@ export async function upsertC6Config(userId: string, input: C6ConfigInput): Prom
   }
 }
 
+/** Garante linha em config_c6 sem sobrescrever credenciais já salvas pelo usuário. */
 export async function ensureC6Config(userId: string, emitenteId: string): Promise<C6Config> {
   const existing = await fetchC6Config(userId, emitenteId);
-  if (existing) {
-    const precisaMigrar =
-      existing.ambiente === 'sandbox' ||
-      !existing.client_id?.trim() ||
-      !existing.client_secret?.trim() ||
-      existing.client_id === '3cbe1db9-ee03-4f3b-aae4-b0ea2e649cee';
-    if (precisaMigrar) {
-      await upsertC6Config(userId, {
-        emitente_id: emitenteId,
-        ativo: existing.ativo !== false,
-        ambiente: C6_ACTIVE_DEFAULTS.ambiente,
-        client_id: C6_ACTIVE_DEFAULTS.client_id,
-        client_secret: C6_ACTIVE_DEFAULTS.client_secret,
-        billing_scheme: C6_ACTIVE_DEFAULTS.billing_scheme,
-        webhook_token: existing.webhook_token,
-        cert_crt_storage_path: existing.cert_crt_storage_path,
-        cert_key_storage_path: existing.cert_key_storage_path,
-      });
-      const refreshed = await fetchC6Config(userId, emitenteId);
-      if (refreshed) return refreshed;
-    }
-    return existing;
-  }
+  if (existing) return existing;
   await upsertC6Config(userId, c6ConfigDefaults(emitenteId));
   const created = await fetchC6Config(userId, emitenteId);
   if (!created) throw new Error('Não foi possível criar configuração C6.');
@@ -180,8 +161,7 @@ export async function uploadC6CertPair(
 }
 
 /**
- * Preferência C6: CNPJ 05.320.214/0001-69 (cadastrado no portal C6),
- * depois banco_cobranca=c6, depois fallback legado.
+ * Preferência C6: CNPJ cobrador conhecido, depois banco_cobranca=c6.
  */
 export function pickEmitenteC6<
   T extends { id: string; padrao: boolean; banco_cobranca?: string; documento?: string },
