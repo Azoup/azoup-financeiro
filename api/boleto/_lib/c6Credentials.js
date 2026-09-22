@@ -1,9 +1,25 @@
-const { C6_ACTIVE, C6_SANDBOX, bundledCertPaths } = require('./c6SandboxDefaults');
+const {
+  C6_ACTIVE,
+  C6_SANDBOX,
+  bundledCertPaths,
+  onlyDigits,
+} = require('./c6SandboxDefaults');
+
+async function resolveEmitenteCnpj(admin, emitenteId) {
+  if (!emitenteId) return null;
+  const { data, error } = await admin
+    .from('nfse_emitente')
+    .select('documento')
+    .eq('id', emitenteId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return onlyDigits(data.documento);
+}
 
 /**
  * Carrega config_c6 + mTLS.
- * Preferência: credenciais salvas em Configurações › Boleto C6.
- * Fallback: defaults bundled (só se o usuário ainda não cadastrou Client ID).
+ * Preferência: upload em Configurações › Boleto C6 (por CNPJ).
+ * Fallback: certs bundled (AZFS → azfs-*.txt; outro → prod-*.txt).
  */
 async function loadC6Credentials(admin, userId, emitenteId) {
   let config = null;
@@ -27,6 +43,8 @@ async function loadC6Credentials(admin, userId, emitenteId) {
     );
   }
 
+  const emitenteCnpj = await resolveEmitenteCnpj(admin, emitenteId || config?.emitente_id);
+
   const temCredenciaisSalvas = Boolean(
     (config?.client_id || '').trim() && (config?.client_secret || '').trim(),
   );
@@ -37,7 +55,6 @@ async function loadC6Credentials(admin, userId, emitenteId) {
   let billing_scheme = (config?.billing_scheme || '').trim();
 
   if (!temCredenciaisSalvas) {
-    // Sem cadastro do usuário: usa defaults ativos (compatibilidade).
     ambiente = C6_ACTIVE.ambiente;
     client_id = C6_ACTIVE.client_id;
     client_secret = C6_ACTIVE.client_secret;
@@ -46,8 +63,6 @@ async function loadC6Credentials(admin, userId, emitenteId) {
     billing_scheme = ambiente === 'producao' ? '15' : '21';
   }
 
-  // Se ainda estiver com client_id de sandbox antigo e ambiente produção, migra defaults só
-  // quando o usuário não trocou o secret (legado). Não sobrescreve credenciais customizadas.
   if (
     temCredenciaisSalvas &&
     C6_ACTIVE.ambiente === 'producao' &&
@@ -69,6 +84,7 @@ async function loadC6Credentials(admin, userId, emitenteId) {
     pix_chave: (config?.pix_chave || '').trim() || C6_ACTIVE.pix_chave || '',
     emitente_id: config?.emitente_id || emitenteId || null,
     user_id: config?.user_id || userId,
+    cobrador_cnpj: emitenteCnpj || null,
   };
 
   if (!merged.client_id || !merged.client_secret) {
@@ -84,18 +100,18 @@ async function loadC6Credentials(admin, userId, emitenteId) {
     return { config: merged, certPath, keyPath, bundled: false };
   }
 
-  // Sem upload: tenta certs no deploy; em produção exige upload se não houver bundled.
   try {
-    const bundled = bundledCertPaths(merged.ambiente);
+    const bundled = bundledCertPaths(merged.ambiente, { cnpj: emitenteCnpj });
     return {
       config: merged,
       certPath: bundled.certPath,
       keyPath: bundled.keyPath,
       bundled: true,
+      certProfile: bundled.profile || null,
     };
   } catch (e) {
     throw new Error(
-      `${e.message} Ou envie o certificado AZFS (.crt + .key) em Configurações › Boleto C6.`,
+      `${e.message} Ou envie o certificado (.crt + .key) em Configurações › Boleto C6.`,
     );
   }
 }
