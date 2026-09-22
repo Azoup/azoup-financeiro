@@ -361,7 +361,7 @@ export function ClientForm({ initial, onSubmit, submitLabel }: Props) {
           />
         </View>
 
-        <Text style={styles.emitenteLab}>Empresa que emite a NFS-e deste cliente</Text>
+        <Text style={styles.emitenteLab}>Empresa (CNPJ) deste cliente — NFS-e e boleto</Text>
         {emitentes.length === 0 ? (
           <Text style={styles.emitenteHint}>Cadastre as empresas em Configurações › NFS-e.</Text>
         ) : (

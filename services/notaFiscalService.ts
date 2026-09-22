@@ -232,14 +232,6 @@ async function validarPreEmissaoNfse(
 ): Promise<{ emitente: NfseEmitente }> {
   await ensureEmitentes(userId);
 
-  let emitente: NfseEmitente | null = null;
-  if (emitenteId) {
-    emitente = await fetchEmitenteById(userId, emitenteId);
-  }
-  if (!emitente) {
-    emitente = await fetchEmitentePadrao(userId);
-  }
-
   const [perfil, clienteRes] = await Promise.all([
     fetchPerfilCobranca(userId),
     supabase.from('clientes').select(CLIENTE_EMBED_SELECT).eq('id', clienteId).single(),
@@ -254,6 +246,15 @@ async function validarPreEmissaoNfse(
     throw new Error(
       `Cliente "${clienteRow.nome_cliente}" sem CPF/CNPJ válido. Preencha o documento no cadastro antes de emitir NFS-e.`,
     );
+  }
+
+  let emitente: NfseEmitente | null = null;
+  const preferId = clienteRow.emitente_nf_id || emitenteId || null;
+  if (preferId) {
+    emitente = await fetchEmitenteById(userId, preferId);
+  }
+  if (!emitente) {
+    emitente = await fetchEmitentePadrao(userId);
   }
 
   if (emitente) {

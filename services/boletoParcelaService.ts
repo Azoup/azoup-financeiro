@@ -234,11 +234,15 @@ async function resolveEmitenteCobranca(
         null
       );
     }
-    // Sem seleção: CNPJ C6 (05.320.214/0001-69); senão o padrão (Sicoob).
-    return pickEmitenteC6(list) ?? list.find((e) => e.padrao) ?? list[0] ?? null;
+    return list.find((e) => e.padrao) ?? list[0] ?? null;
   } catch {
     return null;
   }
+}
+
+function bancoDoEmitente(emitente: NfseEmitente | null, bancoOverride?: 'sicoob' | 'c6' | null): 'sicoob' | 'c6' {
+  if (bancoOverride === 'c6' || bancoOverride === 'sicoob') return bancoOverride;
+  return emitente?.banco_cobranca === 'c6' ? 'c6' : 'sicoob';
 }
 
 /** Chamado logo após inserir parcelas da venda. */
@@ -258,7 +262,15 @@ export async function gerarBoletosParaVendaCriada(
   if (!venda) throw new Error('Venda não encontrada para gerar boletos.');
 
   const clienteId = (venda as { cliente_id: string }).cliente_id;
-  const snap = await buildSnapshotBenefPag(userId, clienteId);
+  const { data: cliRow } = await supabase
+    .from('clientes')
+    .select('emitente_nf_id')
+    .eq('id', clienteId)
+    .maybeSingle();
+  const emitenteNfId = (cliRow as { emitente_nf_id?: string | null } | null)?.emitente_nf_id ?? null;
+  const emitente = await resolveEmitenteCobranca(userId, emitenteNfId, null);
+  const banco = bancoDoEmitente(emitente);
+  const snap = await buildSnapshotBenefPag(userId, clienteId, emitente);
   const perfil = await fetchPerfilCobranca(userId).catch(() => null);
 
   const { data: parcelas, error: e2 } = await supabase
@@ -294,6 +306,9 @@ export async function gerarBoletosParaVendaCriada(
       nosso_numero: nossoNumeroDeId(p.id),
       numero_documento: numeroDocumentoVenda(vendaId, p.numero_parcela, total),
       instrucoes: montarInstrucoesVenda(perfil, opts.descricao, p.numero_parcela, total).slice(0, 4000),
+      emitente_id: emitente?.id ?? null,
+      tipo_emissao: banco,
+      status_registro: 'pendente' as const,
     };
   });
 
@@ -302,12 +317,16 @@ export async function gerarBoletosParaVendaCriada(
 
   const boletoIds = ((inserted ?? []) as { id: string }[]).map((r) => r.id);
   if (boletoIds.length) {
+    const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
     try {
+      if (banco === 'c6' && emitente?.id) {
+        const lote = await emitirBoletosC6Lote(userId, emitente.id, boletoIds, { modoRapido: true });
+        return { avisoEmail: resumoEmailBoletosLote(lote) ?? undefined };
+      }
       const lote = await emitirBoletosSicoobLote(userId, boletoIds);
-      const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
       return { avisoEmail: resumoEmailBoletosLote(lote) ?? undefined };
     } catch {
-      // Carnê informativo permanece em A receber; Sicoob pode ser reemitido depois.
+      // Carnê informativo permanece em A receber; banco pode ser reemitido depois.
     }
   }
   return {};
@@ -321,7 +340,10 @@ export type MensalidadeParaBoleto = {
   competencia: string | null;
 };
 
-/** Um carnê em contas a receber por mensalidade gerada. */
+/** Um carnê em contas a receber por mensalidade gerada.
+ * Beneficiário / banco: CNPJ da empresa no cadastro do cliente (`emitente_nf_id`).
+ * `opts.emitenteId` / `opts.banco` só entram como fallback se o cliente não tiver empresa.
+ */
 export async function gerarBoletosParaMensalidades(
   userId: string,
   mensalidades: MensalidadeParaBoleto[],
@@ -329,22 +351,43 @@ export async function gerarBoletosParaMensalidades(
 ): Promise<{ avisoSicoob?: string; avisoBoleto?: string; avisoEmail?: string }> {
   if (!mensalidades.length) return {};
 
-  const emitente = await resolveEmitenteCobranca(userId, opts?.emitenteId, opts?.banco);
-  const banco: 'sicoob' | 'c6' =
-    opts?.banco === 'c6' || opts?.banco === 'sicoob'
-      ? opts.banco
-      : emitente?.banco_cobranca === 'c6'
-        ? 'c6'
-        : 'sicoob';
+  const emitentesList = await ensureEmitentes(userId).catch(() => [] as NfseEmitente[]);
+  const emitenteById = new Map(emitentesList.map((e) => [e.id, e]));
+
+  const clienteIds = [...new Set(mensalidades.map((m) => m.cliente_id))];
+  const { data: clientesRows, error: eCli } = await supabase
+    .from('clientes')
+    .select('id, emitente_nf_id')
+    .in('id', clienteIds);
+  if (eCli) throw new Error(eCli.message);
+  const emitenteNfPorCliente = new Map(
+    ((clientesRows ?? []) as { id: string; emitente_nf_id: string | null }[]).map((c) => [
+      c.id,
+      c.emitente_nf_id,
+    ]),
+  );
+
   const perfil = await fetchPerfilCobranca(userId).catch(() => null);
   const snapCache = new Map<string, SnapshotBenefPag>();
   const rows: Record<string, unknown>[] = [];
+  /** Índice alinhado a `rows` / mensalidades processadas — para agrupar emissão. */
+  const meta: { banco: 'sicoob' | 'c6'; emitenteId: string | null }[] = [];
 
   for (const m of mensalidades) {
-    let snap = snapCache.get(m.cliente_id);
+    const emitenteClienteId = emitenteNfPorCliente.get(m.cliente_id) ?? null;
+    const emitente =
+      (emitenteClienteId ? emitenteById.get(emitenteClienteId) : undefined) ??
+      (await resolveEmitenteCobranca(
+        userId,
+        emitenteClienteId || opts?.emitenteId,
+        emitenteClienteId ? null : opts?.banco,
+      ));
+    const banco = bancoDoEmitente(emitente, emitenteClienteId ? null : opts?.banco);
+
+    let snap = snapCache.get(`${m.cliente_id}:${emitente?.id ?? ''}`);
     if (!snap) {
       snap = await buildSnapshotBenefPag(userId, m.cliente_id, emitente);
-      snapCache.set(m.cliente_id, snap);
+      snapCache.set(`${m.cliente_id}:${emitente?.id ?? ''}`, snap);
     }
     const comp = m.competencia?.trim() || null;
     const descResumo = comp
@@ -370,9 +413,13 @@ export async function gerarBoletosParaMensalidades(
       tipo_emissao: banco,
       status_registro: 'pendente',
     });
+    meta.push({ banco, emitenteId: emitente?.id ?? null });
   }
 
-  const { data: inserted, error } = await supabase.from('boletos_parcela_venda').insert(rows).select('id');
+  const { data: inserted, error } = await supabase
+    .from('boletos_parcela_venda')
+    .insert(rows)
+    .select('id, mensalidade_id');
   if (error) {
     if (/emitente_id|c6_|column|schema cache/i.test(error.message)) {
       throw new Error(
@@ -382,39 +429,68 @@ export async function gerarBoletosParaMensalidades(
     throw wrapBoletoDbError(error);
   }
 
-  const boletoIds = ((inserted ?? []) as { id: string }[]).map((r) => r.id);
-  if (boletoIds.length) {
-    const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
-    if (banco === 'c6') {
-      if (!emitente?.id) {
-        return {
-          avisoBoleto:
-            'Mensalidade criada; falta emitente C6. Configure em Configurações › Boleto C6 ou use “Registrar no C6”.',
-        };
+  const insertedRows = (inserted ?? []) as { id: string; mensalidade_id: string | null }[];
+  if (!insertedRows.length) return {};
+
+  const metaPorMensalidade = new Map<string, { banco: 'sicoob' | 'c6'; emitenteId: string | null }>();
+  mensalidades.forEach((m, i) => {
+    metaPorMensalidade.set(m.id, meta[i]!);
+  });
+
+  const grupos = new Map<string, { banco: 'sicoob' | 'c6'; emitenteId: string | null; ids: string[] }>();
+  for (const bol of insertedRows) {
+    const m = bol.mensalidade_id ? metaPorMensalidade.get(bol.mensalidade_id) : null;
+    const banco = m?.banco ?? 'sicoob';
+    const emitenteId = m?.emitenteId ?? null;
+    const key = `${banco}:${emitenteId ?? 'none'}`;
+    const g = grupos.get(key) ?? { banco, emitenteId, ids: [] };
+    g.ids.push(bol.id);
+    grupos.set(key, g);
+  }
+
+  const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
+  const avisos: string[] = [];
+  const emails: string[] = [];
+
+  for (const g of grupos.values()) {
+    if (g.banco === 'c6') {
+      if (!g.emitenteId) {
+        avisos.push(
+          'Falta empresa C6 no cadastro do cliente. Defina a empresa (CNPJ) no cliente ou em Configurações › NFS-e.',
+        );
+        continue;
       }
       try {
-        const lote = await emitirBoletosC6Lote(userId, emitente.id, boletoIds, { modoRapido: true });
-        const avisoEmail = resumoEmailBoletosLote(lote) ?? undefined;
-        return avisoEmail ? { avisoEmail } : {};
+        const lote = await emitirBoletosC6Lote(userId, g.emitenteId, g.ids, { modoRapido: true });
+        const msg = resumoEmailBoletosLote(lote);
+        if (msg) emails.push(msg);
       } catch (e) {
-        const msg =
+        avisos.push(
           (e as Error).message ??
-          'Mensalidade criada; registro C6 pendente. Use “Registrar no C6” na mensalidade.';
-        return { avisoBoleto: msg };
+            'Registro C6 pendente. Use “Registrar no C6” na mensalidade.',
+        );
+      }
+    } else {
+      try {
+        const lote = await emitirBoletosSicoobLote(userId, g.ids, { exigirRegistro: true });
+        const msg = resumoEmailBoletosLote(lote);
+        if (msg) emails.push(msg);
+      } catch (e) {
+        avisos.push(
+          (e as Error).message ??
+            'Registro bancário Sicoob não concluído; carnê permanece em A receber.',
+        );
       }
     }
-    try {
-      const lote = await emitirBoletosSicoobLote(userId, boletoIds, { exigirRegistro: true });
-      const avisoEmail = resumoEmailBoletosLote(lote) ?? undefined;
-      return avisoEmail ? { avisoEmail } : {};
-    } catch (e) {
-      const msg =
-        (e as Error).message ??
-        'Carnê informativo criado em A receber; registro bancário Sicoob não concluído.';
-      return { avisoSicoob: msg, avisoBoleto: msg };
-    }
   }
-  return {};
+
+  const avisoBoleto = avisos.length ? avisos.join('\n') : undefined;
+  const avisoEmail = emails.length ? emails.join('\n') : undefined;
+  return {
+    avisoBoleto,
+    avisoSicoob: avisoBoleto,
+    avisoEmail,
+  };
 }
 
 /** Recria carnês em A receber para mensalidades que foram geradas sem boleto (ex.: falha na migration 018). */

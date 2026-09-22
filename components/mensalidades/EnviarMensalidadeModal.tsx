@@ -106,7 +106,6 @@ export function EnviarMensalidadeModal({
   }, [banco, emitentes, emitentesDoBanco, selectedId, emitenteIdInicial]);
 
   const selected = emitentes.find((e) => e.id === selectedId) ?? null;
-  const bancoLabel = banco === 'c6' ? 'C6 Bank' : 'Sicoob';
   const emitenteId = selectedId || emitentesDoBanco[0]?.id || emitentes[0]?.id || '';
 
   const escolherBanco = (next: BancoCobrancaEscolha) => {
@@ -125,11 +124,16 @@ export function EnviarMensalidadeModal({
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <Text style={styles.title}>Como deseja enviar?</Text>
           <Text style={styles.hint}>
-            Escolha o banco do boleto (Sicoob ou C6), o CNPJ cobrador e se deseja emitir também a NFS-e.
+            O boleto usa o CNPJ da empresa definido no cadastro de cada cliente. Abaixo, escolha só o texto da
+            NFS-e (se for emitir nota) e confirme o envio.
           </Text>
 
           <View style={styles.emitBox}>
-            <Text style={styles.emitLabel}>Banco do boleto</Text>
+            <Text style={styles.emitLabel}>Banco do boleto (referência)</Text>
+            <Text style={styles.bancoHint}>
+              O banco real segue a empresa do cliente (Sicoob ou C6 conforme o CNPJ no cadastro). A seleção abaixo
+              só vale se o cliente ainda não tiver empresa.
+            </Text>
             <View style={styles.bancoRow}>
               {([
                 { id: 'sicoob' as const, label: 'Sicoob' },
@@ -152,14 +156,13 @@ export function EnviarMensalidadeModal({
                 );
               })}
             </View>
-            <Text style={styles.bancoHint}>Boleto será registrado no {bancoLabel}.</Text>
           </View>
 
           {loadingEmit ? (
             <ActivityIndicator color={colors.orange} />
           ) : emitentes.length > 0 ? (
             <View style={styles.emitBox}>
-              <Text style={styles.emitLabel}>CNPJ cobrador / emitente</Text>
+              <Text style={styles.emitLabel}>CNPJ fallback / NFS-e (se cliente sem empresa)</Text>
               {emitentesDoBanco.map((e) => {
                 const selectedOpt = e.id === selectedId;
                 return (
@@ -179,8 +182,8 @@ export function EnviarMensalidadeModal({
               })}
               {selected && selected.banco_cobranca !== banco ? (
                 <Text style={styles.warnHint}>
-                  Este CNPJ está marcado como {selected.banco_cobranca === 'c6' ? 'C6' : 'Sicoob'} nas
-                  configurações, mas o boleto seguirá pelo {bancoLabel} conforme sua escolha.
+                  Este CNPJ está marcado como {selected.banco_cobranca === 'c6' ? 'C6' : 'Sicoob'}. Só é usado
+                  se o cliente não tiver empresa no cadastro; senão prevalece o CNPJ do cliente.
                 </Text>
               ) : null}
             </View>
@@ -223,8 +226,8 @@ export function EnviarMensalidadeModal({
             <View style={styles.optionBody}>
               <Text style={styles.optionTitleLight}>Gerar mensalidade + boleto + NFS-e</Text>
               <Text style={styles.optionSubLight}>
-                Mensalidade, boleto bancário ({bancoLabel}) em A receber e nota fiscal. Cliente precisa estar
-                com &quot;Com NF&quot; e certificado A1 do CNPJ escolhido.
+                Boleto e nota usam o CNPJ da empresa do cadastro do cliente. Cliente precisa estar com &quot;Com
+                NF&quot; e certificado A1 desse CNPJ.
               </Text>
             </View>
           </Pressable>
@@ -238,7 +241,7 @@ export function EnviarMensalidadeModal({
             <View style={styles.optionBody}>
               <Text style={styles.optionTitle}>Gerar mensalidade + boleto</Text>
               <Text style={styles.optionSub}>
-                Sem nota fiscal — mensalidade e boleto {bancoLabel} para pagamento.
+                Sem nota fiscal — boleto pelo CNPJ da empresa cadastrada no cliente.
               </Text>
             </View>
           </Pressable>
