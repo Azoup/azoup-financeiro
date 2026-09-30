@@ -1,6 +1,7 @@
 import { FormTextInput } from '@/components/FormTextInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/context/AuthContext';
+import { fetchEmitentes } from '@/services/nfseEmitenteService';
 import { fetchCertificadoAtivo } from '@/services/nfeConfigService';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
 import {
@@ -28,10 +29,11 @@ export default function SicoobConfigScreen() {
     if (!user?.id) return;
     setLoading(true);
     try {
-      const [cfg, cert, perfil] = await Promise.all([
+      const [cfg, cert, perfil, emitentes] = await Promise.all([
         ensureSicoobConfig(user.id),
         fetchCertificadoAtivo(user.id),
         fetchPerfilCobranca(user.id),
+        fetchEmitentes(user.id),
       ]);
       setValues({
         ativo: cfg.ativo,
@@ -47,7 +49,8 @@ export default function SicoobConfigScreen() {
         webhook_token: cfg.webhook_token,
       });
       setCertOk(Boolean(cert));
-      setPerfilOk(Boolean(perfil?.razao_social?.trim() && perfil?.documento?.trim()));
+      const emitenteOk = emitentes.some((e) => e.razao_social?.trim() && e.documento?.trim());
+      setPerfilOk(Boolean(perfil?.razao_social?.trim() && perfil?.documento?.trim()) || emitenteOk);
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {

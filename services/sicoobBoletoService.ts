@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { nfeApiBaseUrl } from '@/services/nfeConfigService';
-import { fetchSicoobConfig } from '@/services/sicoobConfigService';
+import { ensureSicoobConfig, upsertSicoobConfig } from '@/services/sicoobConfigService';
 import type { EmitirBoletoLoteResult } from '@/types/sicoob';
 
 export function boletoApiBaseUrl(): string {
@@ -16,8 +16,24 @@ export async function emitirBoletosSicoobLote(
     return { success: true, emitidos: 0, erros: [], resultados: [] };
   }
 
-  const config = await fetchSicoobConfig(userId);
-  if (!config?.ativo) {
+  let config = await ensureSicoobConfig(userId);
+  if (!config.ativo && config.client_id?.trim() && config.numero_cliente && config.numero_conta_corrente) {
+    await upsertSicoobConfig(userId, {
+      ativo: true,
+      ambiente: 'producao',
+      client_id: config.client_id,
+      numero_cliente: config.numero_cliente,
+      numero_conta_corrente: config.numero_conta_corrente,
+      codigo_modalidade: config.codigo_modalidade,
+      codigo_especie_documento: config.codigo_especie_documento,
+      identificacao_emissao_boleto: config.identificacao_emissao_boleto,
+      identificacao_distribuicao_boleto: config.identificacao_distribuicao_boleto,
+      gerar_pix_boleto: config.gerar_pix_boleto,
+      webhook_token: config.webhook_token,
+    });
+    config = { ...config, ativo: true, ambiente: 'producao' };
+  }
+  if (!config.ativo) {
     if (opts?.exigirRegistro) {
       throw new Error(
         'Sicoob inativo. Ative e preencha Client ID / convênio em Configurações › Boleto Sicoob.',

@@ -89,6 +89,9 @@ async function emitirUmBoleto(admin, userId, boletoId) {
     config = saved;
   }
 
+  if (!config?.ativo && config?.ambiente === 'producao' && config?.client_id && config?.numero_cliente) {
+    config.ativo = true;
+  }
   if (!config?.ativo) {
     return {
       success: true,
@@ -115,7 +118,7 @@ async function emitirUmBoleto(admin, userId, boletoId) {
   }
 
   const { data: perfil } = await admin.from('perfil_cobranca').select('*').eq('user_id', userId).maybeSingle();
-  if (!perfil?.razao_social?.trim()) {
+  if (!perfil?.razao_social?.trim() && !String(boleto.beneficiario_razao_social ?? '').trim()) {
     throw new Error('Preencha o perfil do beneficiário em Configurações.');
   }
 

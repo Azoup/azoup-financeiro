@@ -128,9 +128,11 @@ export async function fetchCertificadoAtivo(userId: string): Promise<EmpresaCert
     .select('*')
     .eq('user_id', userId)
     .eq('ativo', true)
-    .maybeSingle();
+    .order('created_at', { ascending: false })
+    .limit(1);
   if (error) throw new Error(error.message);
-  return (data as EmpresaCertificado | null) ?? null;
+  const row = Array.isArray(data) ? data[0] : data;
+  return (row as EmpresaCertificado | null) ?? null;
 }
 
 export type CertificadoFilePick = {
