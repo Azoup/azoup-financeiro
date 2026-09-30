@@ -87,7 +87,7 @@ async function getSicoobAccessToken({ config, certPath, senha }) {
     grant_type: 'client_credentials',
     client_id: config.client_id,
     scope:
-      'cobranca_boletos_consultar cobranca_boletos_incluir cobranca_boletos_alterar cobranca_boletos_pagador cobranca_boletos_baixa',
+      'boletos_consulta boletos_inclusao boletos_alteracao',
   }).toString();
 
   const res = await httpsRequest(authUrl(config.ambiente), {
@@ -112,10 +112,17 @@ async function getSicoobAccessToken({ config, certPath, senha }) {
   return res.json.access_token;
 }
 
+function clipInstrucao(line) {
+  return String(line ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 40);
+}
+
 function splitInstrucoes(instrucoes) {
   return String(instrucoes ?? '')
     .split('\n')
-    .map((line) => line.trim())
+    .map(clipInstrucao)
     .filter(Boolean)
     .slice(0, 5);
 }
@@ -139,15 +146,19 @@ function buildPagadorFromCliente(cliente) {
   };
 }
 
-function buildSicoobPayload({ boleto, config, cliente, notaFiscal }) {
+function buildSicoobPayload({ boleto, config, cliente, notaFiscal, beneficiarioDocumento }) {
   const pagador = buildPagadorFromCliente(cliente);
   if (!pagador.numeroCpfCnpj) {
     throw new Error('Cliente sem CPF/CNPJ válido para emissão de boleto Sicoob.');
   }
+  const benef = onlyDigits(beneficiarioDocumento ?? boleto.beneficiario_documento ?? '');
+  if (benef && pagador.numeroCpfCnpj === benef) {
+    throw new Error('O pagador não pode ser o mesmo CPF/CNPJ do beneficiário Sicoob.');
+  }
 
   const instrucoes = splitInstrucoes(boleto.instrucoes);
   if (notaFiscal?.numero) {
-    instrucoes.unshift(`NFS-e nº ${notaFiscal.numero}${notaFiscal.codigo_verificacao ? ` — verificação ${notaFiscal.codigo_verificacao}` : ''}`);
+    instrucoes.unshift(clipInstrucao(`NFSe ${notaFiscal.numero}`));
   }
 
   const nossoNumero = Number(onlyDigits(boleto.nosso_numero).slice(-8) || '0');
@@ -175,10 +186,8 @@ function buildSicoobPayload({ boleto, config, cliente, notaFiscal }) {
     codigoNegativacao: 2,
     codigoProtesto: 3,
     pagador,
-    mensagensInstrucao: instrucoes.length ? instrucoes : ['Pagamento referente a serviços prestados.'],
+    mensagensInstrucao: instrucoes.length ? instrucoes : ['Pagamento de servicos prestados'],
     gerarPdf: true,
-    numeroDiasNegativacao: 0,
-    numeroDiasProtesto: 0,
   };
 }
 

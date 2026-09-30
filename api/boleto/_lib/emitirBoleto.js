@@ -43,12 +43,52 @@ async function emitirUmBoleto(admin, userId, boletoId) {
     };
   }
 
-  const { data: config, error: cErr } = await admin
+  const DEMO_CLIENT_ID = '9b5e603e428cc477a2841e2683c92d21';
+  const PROD = {
+    client_id: '65892082-96c4-46d3-8033-fa7e87d14a59',
+    numero_cliente: 1347780,
+    numero_conta_corrente: 10196269,
+  };
+
+  let { data: config, error: cErr } = await admin
     .from('config_sicoob')
     .select('*')
     .eq('user_id', userId)
     .maybeSingle();
   if (cErr) throw new Error(cErr.message);
+
+  const clientSalvo = String(config?.client_id ?? '').trim();
+  const incompleto =
+    !config ||
+    !clientSalvo ||
+    clientSalvo === DEMO_CLIENT_ID ||
+    config.ambiente !== 'producao' ||
+    !config.numero_cliente ||
+    !config.numero_conta_corrente;
+  if (incompleto) {
+    const row = {
+      user_id: userId,
+      ativo: true,
+      ambiente: 'producao',
+      client_id: clientSalvo && clientSalvo !== DEMO_CLIENT_ID ? clientSalvo : PROD.client_id,
+      numero_cliente: config?.numero_cliente || PROD.numero_cliente,
+      numero_conta_corrente: config?.numero_conta_corrente || PROD.numero_conta_corrente,
+      codigo_modalidade: config?.codigo_modalidade || 1,
+      codigo_especie_documento: config?.codigo_especie_documento || 'DM',
+      identificacao_emissao_boleto: config?.identificacao_emissao_boleto || 1,
+      identificacao_distribuicao_boleto: config?.identificacao_distribuicao_boleto || 1,
+      gerar_pix_boleto: Boolean(config?.gerar_pix_boleto),
+      webhook_token: config?.webhook_token ?? null,
+    };
+    const { data: saved, error: upErr } = await admin
+      .from('config_sicoob')
+      .upsert(row, { onConflict: 'user_id' })
+      .select('*')
+      .single();
+    if (upErr) throw new Error(upErr.message);
+    config = saved;
+  }
+
   if (!config?.ativo) {
     return {
       success: true,
@@ -58,8 +98,8 @@ async function emitirUmBoleto(admin, userId, boletoId) {
       message: 'Sicoob inativo — carnê informativo mantido.',
     };
   }
-  if (!config.client_id?.trim() || !config.numero_cliente) {
-    throw new Error('Configure Client ID e número do cliente (convênio) em Configurações › Sicoob.');
+  if (!config.client_id?.trim() || !config.numero_cliente || !config.numero_conta_corrente) {
+    throw new Error('Configure Client ID, convênio e conta corrente em Configurações › Sicoob.');
   }
 
   const cert = await resolveCertificadoAtivo(admin, userId, boleto.emitente_id);
@@ -114,7 +154,13 @@ async function emitirUmBoleto(admin, userId, boletoId) {
   const senha = await decryptCertPassword(admin, sec.senha_criptografada);
 
   try {
-    const payload = buildSicoobPayload({ boleto, config, cliente, notaFiscal });
+    const payload = buildSicoobPayload({
+      boleto,
+      config,
+      cliente,
+      notaFiscal,
+      beneficiarioDocumento: boleto.beneficiario_documento || perfil?.documento,
+    });
     const sicoob = await emitirBoletoSicoobApi({
       config,
       certPath,

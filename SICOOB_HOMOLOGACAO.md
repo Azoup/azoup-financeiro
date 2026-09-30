@@ -1,6 +1,21 @@
 # Homologação Sicoob — Azoup Tecnologia LTDA
 
-Passos oficiais (e-mail Sicoob) e o que já está pronto no **SistemaJessica / Azoup Financeiro**.
+## Resposta oficial do Sicoob (importante)
+
+> Os testes devem ser feitos em **ambiente de produção**, com um **client_id vinculado à empresa parceira**.
+
+Isso **não** vale para o Client ID / Access Token de demonstração do Portal Developers:
+
+| Campo (demo portal — NÃO usar na homologação) | Valor exemplo |
+|-----------------------------------------------|---------------|
+| Client ID | `9b5e603e428cc477a2841e2683c92d21` |
+| Access token (Bearer) | `1301865f-c6bc-38f3-9f49-666dbcfc59c3` |
+
+Esses valores só servem para brincar no sandbox público. Para liberação / evidências oficiais o Sicoob exige:
+
+1. **Ambiente = produção** (`api.sicoob.com.br` + OAuth produção)
+2. **Client ID** do aplicativo criado pelo **cooperado**, vinculado à empresa parceira **Azoup Tecnologia LTDA**
+3. **Certificado A1 ICP-Brasil** (mTLS) no OAuth `client_credentials` — não o Bearer fixo do portal
 
 ## Situação da parceira
 
@@ -9,68 +24,61 @@ Passos oficiais (e-mail Sicoob) e o que já está pronto no **SistemaJessica / A
 - APIs liberadas na parceira: Cobrança Bancária, Cobrança Bancária Pagamentos, Conta Corrente, Pix Pagamentos, Pix Recebimentos, Poupança, SPB Transferências
 - Material: https://developers.sicoob.com.br
 
-## O que a integradora (Azoup) já tem no sistema
-
-- Integração **API Cobrança Bancária V3** (`api/boleto/_lib/sicoobClient.js`)
-  - OAuth2 `client_credentials` + certificado A1 (mTLS)
-  - `POST /boletos` (inclusão)
-  - `GET /boletos` (consulta / liquidação)
-  - Header `client_id` nas chamadas da API
-- Tela **Configurações › Boleto Sicoob**
-- Emissão na geração de mensalidade (escolha Sicoob ou C6)
-- Script de evidências: `node scripts/gerar-evidencias-sicoob.js`
-- Arquivo gerado: `sicoob-evidencias-roteiro.txt`
-
-## Passo 1 — Portal Developers (cooperado indicado)
+## Passo 1 — Client ID da empresa parceira (produção)
 
 1. Cooperado acessa https://developers.sicoob.com.br (App Sicoob / conta cooperado).
 2. Cria **nova aplicação** vinculada à empresa parceira **Azoup Tecnologia LTDA**.
 3. Seleciona a API **Cobrança Bancária** (V3).
-4. Anota o **Client ID** gerado.
-5. No sandbox do portal, copia o **Access Token** de teste (ou usa certificado A1 ICP-Brasil do cooperado/software house para OAuth).
-6. Confirma **número do cliente (convênio)** e **conta corrente** de cobrança usados nos testes.
+4. Anota o **Client ID** gerado (esse é o que o Sicoob quer ver nas evidências).
+5. Confirma **número do cliente (convênio)** e **conta corrente** de cobrança de produção.
 
-## Passo 2 — Rodar evidências com as credenciais reais
+## Passo 2 — Configurar no sistema
 
-No PowerShell (na pasta do projeto):
+Em **Configurações › Boleto Sicoob**:
+
+- Ambiente: **Produção**
+- Client ID: o do app do cooperado (parceira Azoup)
+- Número do cliente / convênio e conta corrente
+- Certificado A1: o mesmo cadastrado em **Configurações › NFS-e** (ICP-Brasil)
+
+O sistema já faz OAuth + mTLS em produção (`api/boleto/_lib/sicoobClient.js`).
+
+## Passo 3 — Gerar evidências em produção
 
 ```powershell
-$env:SICOOB_CLIENT_ID="(client_id do app criado)"
-$env:SICOOB_ACCESS_TOKEN="(token sandbox do portal)"   # OU use .pfx abaixo
-$env:SICOOB_NUMERO_CLIENTE="(convenio)"
-$env:SICOOB_NUMERO_CONTA="(conta corrente)"
-$env:SICOOB_AMBIENTE="sandbox"
-# Alternativa OAuth + certificado:
-# $env:SICOOB_CERT_PFX_PATH="C:\caminho\certificado.pfx"
-# $env:SICOOB_CERT_PASSWORD="senha"
+$env:SICOOB_CLIENT_ID="(client_id do app vinculado à Azoup — NÃO o demo 9b5e...)"
+$env:SICOOB_CERT_PFX_PATH="C:\caminho\certificado-a1.pfx"
+$env:SICOOB_CERT_PASSWORD="(senha do A1)"
+$env:SICOOB_NUMERO_CLIENTE="(convenio produção)"
+$env:SICOOB_NUMERO_CONTA="(conta corrente produção)"
+$env:SICOOB_AMBIENTE="producao"
+# NÃO use SICOOB_ACCESS_TOKEN do portal — produção usa OAuth + A1
 node scripts/gerar-evidencias-sicoob.js
 ```
 
-Isso atualiza `sicoob-evidencias-roteiro.txt` com Status Code + Response Body de:
+Arquivo gerado: `sicoob-evidencias-roteiro.txt` (AT_01 autenticação, CB_01 inclusão, CB_02 consulta).
 
-| Código | Teste |
-|--------|--------|
-| AT_01 | Autenticação (token / OAuth mTLS) |
-| CB_01 | Inclusão de boleto `POST /boletos` |
-| CB_02 | Consulta `GET /boletos` |
-
-## Passo 3 — Enviar ao Sicoob (feedback / liberação nacional)
-
-Anexar ou colar no e-mail:
-
-1. `sicoob-evidencias-roteiro.txt` (com **credenciais do app do cooperado**, não só o demo público)
-2. Informar:
-   - Razão social: Azoup Tecnologia LTDA
-   - Software: SistemaJessica / Azoup Financeiro
-   - Cooperativa: 5004
-   - Client ID do aplicativo de teste
-   - Confirmação de que o certificado usado é ICP-Brasil (quando OAuth/mTLS)
+## Passo 4 — Responder o e-mail do Sicoob
 
 Texto sugerido:
 
-> Segue evidências dos testes de autenticação e consumo da API Cobrança Bancária V3 realizados com o aplicativo criado pelo cooperado vinculado à Azoup Tecnologia LTDA (cooperativa 5004). Solicitamos a liberação da empresa em rede nacional para que demais cooperativas possam criar credenciais usando a Azoup como vetor da integração.
+> Prezado(a), boa tarde!
+>
+> Agradecemos o retorno. Refaremos os testes em **ambiente de produção**, utilizando o **Client ID do aplicativo vinculado à empresa parceira Azoup Tecnologia LTDA** (cooperativa 5004), com autenticação OAuth2 `client_credentials` e certificado A1 ICP-Brasil (mTLS), conforme orientação.
+>
+> Em seguida encaminhamos o arquivo de evidências (`sicoob-evidencias-roteiro.txt`) com Status Code e Response Body dos testes AT_01, CB_01 e CB_02.
+>
+> Cordialmente,  
+> Azoup Tecnologia LTDA — SistemaJessica / Azoup Financeiro
 
-## Nota sobre o sandbox público
+Anexar depois:
 
-O token/client_id de demonstração do portal responde **consulta (GET)** com mock 200, mas a **inclusão (POST)** costuma devolver 400 com payload placeholder (`mensagem: "string"`).  
-Para a liberação nacional o Sicoob exige evidências com as **credenciais do aplicativo do cooperado** vinculado à Azoup.
+1. `sicoob-evidencias-roteiro.txt` com o Client ID parceiro (não o demo)
+2. Razão social, software, cooperativa 5004, Client ID usado, confirmação do A1 ICP-Brasil
+
+## O que já está no sistema
+
+- API Cobrança Bancária V3 (inclusão, consulta, baixa)
+- Tela **Configurações › Boleto Sicoob** (ambiente produção + Client ID)
+- Emissão na geração de mensalidade
+- Script `scripts/gerar-evidencias-sicoob.js`

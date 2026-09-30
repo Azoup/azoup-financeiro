@@ -80,6 +80,14 @@ export default function SicoobConfigScreen() {
         Toast.show({ type: 'error', text1: 'Informe o número do cliente (convênio) Sicoob.' });
         return;
       }
+      if (!values.numero_conta_corrente) {
+        Toast.show({ type: 'error', text1: 'Informe a conta corrente Sicoob (com o dígito).' });
+        return;
+      }
+      if (values.ambiente !== 'producao') {
+        Toast.show({ type: 'error', text1: 'Selecione Produção. O sandbox não registra boleto real.' });
+        return;
+      }
       if (!certOk) {
         Toast.show({ type: 'error', text1: 'Cadastre o certificado A1 em Configurações › NFS-e.' });
         return;
@@ -112,8 +120,8 @@ export default function SicoobConfigScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.lead}>
-        Ao ativar, todo carnê gerado em vendas e mensalidades será registrado na API Cobrança Bancária Sicoob V3
-        (com ou sem NFS-e). O certificado A1 é o mesmo da NFS-e.
+        Cobrança Sicoob em produção (cooperativa 5004). O boleto usa o Client ID do aplicativo Azoup,
+        o convênio 1347780, a conta 10196269 e o certificado A1 do CNPJ 05.320.214/0001-69.
       </Text>
 
       <View style={styles.checkRow}>
@@ -139,7 +147,7 @@ export default function SicoobConfigScreen() {
             onPress={() => patch({ ambiente: amb })}
           >
             <Text style={[styles.chipTxt, values.ambiente === amb && styles.chipTxtOn]}>
-              {amb === 'sandbox' ? 'Homologação' : 'Produção'}
+              {amb === 'sandbox' ? 'Sandbox' : 'Produção'}
             </Text>
           </Pressable>
         ))}

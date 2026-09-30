@@ -1,23 +1,19 @@
 /**
- * Gera sicoob-evidencias-roteiro.txt com status + body para enviar ao Sicoob (piloto / liberação).
+ * Gera sicoob-evidencias-roteiro.txt com status + body para enviar ao Sicoob.
  *
- * Uso (sandbox com token do Portal Developers):
- *   set SICOOB_CLIENT_ID=...
- *   set SICOOB_ACCESS_TOKEN=...
- *   set SICOOB_NUMERO_CLIENTE=...
- *   set SICOOB_NUMERO_CONTA=...
- *   node scripts/gerar-evidencias-sicoob.js
+ * E-mail oficial Sicoob: testes em PRODUÇÃO com Client ID vinculado à empresa parceira (Azoup).
+ * NÃO use o Client ID / Bearer de demonstração do Portal Developers nas evidências oficiais.
  *
- * Uso (OAuth + certificado A1 — fluxo real / produção ou sandbox com mTLS):
- *   set SICOOB_CLIENT_ID=...
+ * Produção (fluxo exigido):
+ *   set SICOOB_CLIENT_ID=...          # app do cooperado vinculado à Azoup
  *   set SICOOB_CERT_PFX_PATH=C:\caminho\cert.pfx
  *   set SICOOB_CERT_PASSWORD=...
  *   set SICOOB_NUMERO_CLIENTE=...
  *   set SICOOB_NUMERO_CONTA=...
- *   set SICOOB_AMBIENTE=sandbox   (ou producao)
+ *   set SICOOB_AMBIENTE=producao
  *   node scripts/gerar-evidencias-sicoob.js
  *
- * Credenciais de demonstração do Portal (sandbox público — podem expirar):
+ * Sandbox público (smoke local apenas — NÃO enviar ao Sicoob):
  *   client_id 9b5e603e428cc477a2841e2683c92d21
  *   token     1301865f-c6bc-38f3-9f49-666dbcfc59c3
  */
@@ -26,9 +22,10 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 
+const DEMO_CLIENT_ID = '9b5e603e428cc477a2841e2683c92d21';
 const AMBIENTE = (process.env.SICOOB_AMBIENTE || 'sandbox').toLowerCase();
 const CLIENT_ID =
-  process.env.SICOOB_CLIENT_ID || '9b5e603e428cc477a2841e2683c92d21';
+  process.env.SICOOB_CLIENT_ID || DEMO_CLIENT_ID;
 const ACCESS_TOKEN_ENV =
   process.env.SICOOB_ACCESS_TOKEN || '1301865f-c6bc-38f3-9f49-666dbcfc59c3';
 const CERT_PFX = process.env.SICOOB_CERT_PFX_PATH || '';
@@ -38,9 +35,10 @@ const NUMERO_CONTA = Number(process.env.SICOOB_NUMERO_CONTA || '12345');
 const CODIGO_MODALIDADE = Number(process.env.SICOOB_CODIGO_MODALIDADE || '1');
 const CONTA_SANDBOX = Number(process.env.SICOOB_CONTA_TESTE || NUMERO_CONTA || '12345');
 
-const HOST = 'https://sandbox.sicoob.com.br/sicoob/sandbox';
+const IS_PROD = AMBIENTE === 'producao' || AMBIENTE === 'production';
+const HOST = IS_PROD ? 'https://api.sicoob.com.br' : 'https://sandbox.sicoob.com.br/sicoob/sandbox';
 const ENDPOINTS = {
-  cobranca: `${HOST}/cobranca-bancaria/v3`,
+  cobranca: IS_PROD ? `${HOST}/cobranca-bancaria/v3` : `${HOST}/cobranca-bancaria/v3`,
   cobrancaPagamentos: `${HOST}/cobranca-bancaria-pagamentos/v3`,
   contaCorrente: `${HOST}/conta-corrente/v4`,
   pixRecebimentos: `${HOST}/pix/api/v2`,
@@ -50,8 +48,8 @@ const ENDPOINTS = {
 };
 
 const SCOPE =
-  process.env.SICOOB_SCOPE ||
-  'cobranca_boletos_consultar cobranca_boletos_incluir cobranca_boletos_alterar cobranca_boletos_pagador';
+  process.env.SICOOB_SCOPE ??
+  'boletos_consulta boletos_inclusao boletos_alteracao';
 
 function authUrl() {
   if (AMBIENTE === 'producao' || AMBIENTE === 'production') {
@@ -148,11 +146,12 @@ async function obterToken(agent) {
     throw new Error('Informe SICOOB_ACCESS_TOKEN (sandbox) ou SICOOB_CERT_PFX_PATH (OAuth/mTLS).');
   }
 
-  const body = new URLSearchParams({
+  const params = {
     grant_type: 'client_credentials',
     client_id: CLIENT_ID,
-    scope: SCOPE,
-  }).toString();
+  };
+  if (SCOPE) params.scope = SCOPE;
+  const body = new URLSearchParams(params).toString();
 
   const res = await httpsRequest(authUrl(), {
     method: 'POST',
@@ -173,9 +172,9 @@ async function obterToken(agent) {
       url: authUrl(),
       grant_type: 'client_credentials',
       client_id: CLIENT_ID,
-      scope: SCOPE,
+      scope: SCOPE || '(escopos padrão do aplicativo)',
       mtls: true,
-      cert: CERT_PFX,
+      cert: 'A1 ICP-Brasil do CNPJ 05320214000169',
     },
   };
 }
@@ -187,6 +186,20 @@ function truncateJson(obj, max = 3500) {
 }
 
 async function main() {
+  const isProd = AMBIENTE === 'producao' || AMBIENTE === 'production';
+  if (isProd && CLIENT_ID === DEMO_CLIENT_ID) {
+    throw new Error(
+      'SICOOB_AMBIENTE=producao exige o Client ID do aplicativo vinculado à Azoup (parceira). ' +
+        'O Client ID de demonstração do portal (9b5e603e…) não é aceito pelo Sicoob nas evidências oficiais.',
+    );
+  }
+  if (isProd && ACCESS_TOKEN_ENV && !CERT_PFX) {
+    throw new Error(
+      'Em produção use OAuth + certificado A1 (SICOOB_CERT_PFX_PATH). ' +
+        'O Access Token Bearer do portal não serve para homologação oficial.',
+    );
+  }
+
   const lines = [];
   const results = [];
   const add = (title, how, status, body, requestBody) => {
@@ -215,23 +228,41 @@ async function main() {
   };
 
   const geradoEm = new Date().toISOString();
-  lines.push('EVIDÊNCIAS SICOOB — piloto sandbox (liberação nacional)');
+  lines.push(
+    isProd
+      ? 'EVIDÊNCIAS SICOOB — PRODUÇÃO (Client ID empresa parceira)'
+      : 'EVIDÊNCIAS SICOOB — sandbox (smoke local — NÃO enviar ao Sicoob)',
+  );
   lines.push('Empresa parceira: Azoup Tecnologia LTDA');
   lines.push('Software: SistemaJessica / Azoup Financeiro');
   lines.push('Cooperativa liberada (parceira): 5004');
   lines.push(`Ambiente: ${AMBIENTE}`);
   lines.push(`Gerado em: ${geradoEm}`);
   lines.push('');
-  lines.push('========== CREDENCIAIS (Portal Developers › Sandbox) ==========');
+  lines.push(
+    isProd
+      ? '========== CREDENCIAIS (app vinculado à parceira Azoup — produção) =========='
+      : '========== CREDENCIAIS (Portal Developers › Sandbox — demo) ==========',
+  );
   lines.push(`client_id: ${CLIENT_ID}`);
-  lines.push('access_token: (Bearer do portal — valor omitido no resumo; usado nas requests)');
-  lines.push(`numeroCliente / convênio teste: ${NUMERO_CLIENTE}`);
-  lines.push(`numeroContaCorrente teste: ${CONTA_SANDBOX}`);
-  lines.push('certificado A1: cadastrado no sistema (produção/OAuth); sandbox usa token Bearer do portal');
+  if (isProd) {
+    lines.push('auth: OAuth2 client_credentials + certificado A1 ICP-Brasil (mTLS)');
+  } else {
+    lines.push('access_token: (Bearer do portal — valor omitido no resumo; usado nas requests)');
+  }
+  lines.push(`numeroCliente / convênio: ${NUMERO_CLIENTE}`);
+  lines.push(`numeroContaCorrente: ${CONTA_SANDBOX}`);
+  lines.push(
+    isProd
+      ? 'certificado A1: informado via SICOOB_CERT_PFX_PATH'
+      : 'certificado A1: sandbox pode usar Bearer do portal',
+  );
   lines.push('');
-  lines.push('========== ENDPOINTS SANDBOX TESTADOS ==========');
-  for (const [k, v] of Object.entries(ENDPOINTS)) lines.push(`- ${k}: ${v}`);
-  lines.push('');
+  if (!isProd) {
+    lines.push('========== ENDPOINTS SANDBOX TESTADOS ==========');
+    for (const [k, v] of Object.entries(ENDPOINTS)) lines.push(`- ${k}: ${v}`);
+    lines.push('');
+  }
   lines.push('APIs liberadas na parceira Azoup: Cobrança Bancária, Cobrança Bancária Pagamentos,');
   lines.push('Conta Corrente, Pix Pagamentos, Pix Recebimentos, Poupança, SPB Transferências.');
   lines.push('');
@@ -241,12 +272,24 @@ async function main() {
   const token = tokenRes.json?.access_token;
   if (!token) {
     add('AT_01 – AUTENTICAÇÃO', 'Token / OAuth', tokenRes.status, tokenRes.json ?? tokenRes.raw, tokenRes.request);
+    fs.writeFileSync(path.join(__dirname, '..', 'sicoob-evidencias-roteiro.txt'), lines.join('\n'), 'utf8');
+    const detalhe =
+      tokenRes.json?.error_description ||
+      tokenRes.json?.error ||
+      tokenRes.json?.message ||
+      tokenRes.raw ||
+      `HTTP ${tokenRes.status}`;
+    console.error('Auth falhou:', tokenRes.status, String(detalhe).slice(0, 400));
     throw new Error('Falha ao obter token.');
   }
 
   add(
-    'AT_01 – AUTENTICAÇÃO (Access token sandbox)',
-    'Portal Developers › Sandbox › Access token (Bearer) + header client_id',
+    isProd
+      ? 'AT_01 – AUTENTICAÇÃO (OAuth produção + A1)'
+      : 'AT_01 – AUTENTICAÇÃO (Access token sandbox)',
+    isProd
+      ? 'OAuth2 client_credentials + mTLS (certificado A1) + header client_id'
+      : 'Portal Developers › Sandbox › Access token (Bearer) + header client_id',
     tokenRes.status,
     redactToken(tokenRes.json),
     tokenRes.request,
@@ -260,39 +303,53 @@ async function main() {
   };
 
   // ---- Cobrança Bancária V3 ----
+  const hoje = new Date();
+  const venc = new Date(hoje.getTime() + 10 * 24 * 60 * 60 * 1000);
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const nossoHomolog = Number(String(Date.now()).slice(-8));
   const payloadIncluir = {
     numeroCliente: NUMERO_CLIENTE,
     codigoModalidade: CODIGO_MODALIDADE,
     numeroContaCorrente: CONTA_SANDBOX,
     codigoEspecieDocumento: 'DM',
-    dataEmissao: '2020-01-20',
-    nossoNumero: 258861,
-    seuNumero: '1235512',
-    identificacaoBoletoEmpresa: '4562',
+    dataEmissao: isProd ? iso(hoje) : '2020-01-20',
+    nossoNumero: isProd ? nossoHomolog : 258861,
+    seuNumero: isProd ? `HOM${nossoHomolog}` : '1235512',
+    identificacaoBoletoEmpresa: isProd ? `HOM${nossoHomolog}` : '4562',
     identificacaoEmissaoBoleto: 1,
     identificacaoDistribuicaoBoleto: 1,
-    valor: 156.23,
-    dataVencimento: '2020-01-20',
-    dataLimitePagamento: '2020-01-20',
+    valor: isProd ? 10 : 156.23,
+    dataVencimento: isProd ? iso(venc) : '2020-01-20',
+    dataLimitePagamento: isProd ? iso(venc) : '2020-01-20',
     tipoDesconto: 0,
     tipoMulta: 0,
     tipoJurosMora: 0,
     numeroParcela: 1,
     aceite: true,
-    codigoNegativacao: 0,
+    codigoNegativacao: isProd ? 2 : 0,
     codigoProtesto: 3,
     gerarPdf: true,
-    pagador: {
-      numeroCpfCnpj: '98765432185',
-      nome: 'Marcelo dos Santos',
-      endereco: 'Rua 87 Quadra 1 Lote 1 casa 1',
-      bairro: 'Santa Rosa',
-      cidade: 'Luziania',
-      cep: '72320000',
-      uf: 'DF',
-      email: 'pagador@dominio.com.br',
-    },
-    mensagensInstrucao: ['Homologacao Azoup Tecnologia LTDA — SistemaJessica'],
+    pagador: isProd
+      ? {
+          numeroCpfCnpj: '66639480000143',
+          nome: 'AZFS TECNOLOGIA LTDA',
+          endereco: 'Avenida Nove de Julho, 637',
+          bairro: 'Jardim Sao Domingos',
+          cidade: 'Americana',
+          cep: '13471140',
+          uf: 'SP',
+        }
+      : {
+          numeroCpfCnpj: '98765432185',
+          nome: 'Marcelo dos Santos',
+          endereco: 'Rua 87 Quadra 1 Lote 1 casa 1',
+          bairro: 'Santa Rosa',
+          cidade: 'Luziania',
+          cep: '72320000',
+          uf: 'DF',
+          email: 'pagador@dominio.com.br',
+        },
+    mensagensInstrucao: ['Homologacao Azoup'],
   };
   const bodyIncluir = JSON.stringify(payloadIncluir);
   const incluir = await httpsRequest(`${ENDPOINTS.cobranca}/boletos`, {
@@ -330,6 +387,30 @@ async function main() {
     Object.fromEntries(qsBol.entries()),
   );
 
+  if (isProd && (incluir.status === 200 || incluir.status === 201)) {
+    const baixarBody = JSON.stringify({
+      numeroCliente: NUMERO_CLIENTE,
+      codigoModalidade: CODIGO_MODALIDADE,
+    });
+    const baixar = await httpsRequest(
+      `${ENDPOINTS.cobranca}/boletos/${nossoConsultar}/baixar`,
+      {
+        method: 'POST',
+        headers: { ...apiHeaders, 'Content-Length': Buffer.byteLength(baixarBody) },
+        body: baixarBody,
+        agent,
+      },
+    );
+    add(
+      'CB_03 – Cobrança Bancária · BAIXA DO BOLETO DE TESTE',
+      `POST ${ENDPOINTS.cobranca}/boletos/${nossoConsultar}/baixar`,
+      baixar.status,
+      baixar.json ?? baixar.raw,
+      JSON.parse(baixarBody),
+    );
+  }
+
+  if (!isProd) {
   // ---- Conta Corrente ----
   const saldoCc = await httpsRequest(
     `${ENDPOINTS.contaCorrente}/saldo?numeroContaCorrente=${CONTA_SANDBOX}`,
@@ -442,6 +523,8 @@ async function main() {
     cobPag.json ?? cobPag.raw,
     { linhaDigitavel: '42297115040000195441184217468127172300000023124' },
   );
+
+  }
 
   lines.push('='.repeat(72));
   lines.push('RESUMO DO PILOTO');
