@@ -15,6 +15,7 @@ import type { NfseEmitente, NotaFiscalListRow, NotaFiscalStatus } from '@/types/
 import { showAppToast } from '@/utils/appToast';
 import { baixarDanfePdf, baixarLoteDanfeXml } from '@/utils/baixarDanfseArquivos';
 import { formatBRL } from '@/utils/currency';
+import { labelMesAnoBR } from '@/utils/date';
 import { compartilharDanfseComFeedback } from '@/utils/danfseDocumento';
 import {
   corNotaFiscalStatus,
@@ -53,6 +54,29 @@ const STATUS_OPTS: { id: StatusFiltro; label: string }[] = [
   { id: 'rascunho', label: 'Rascunho' },
 ];
 
+function mesAtualChave(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function deslocarMes(chave: string, delta: number): string {
+  const [y, mo] = chave.split('-').map(Number);
+  const d = new Date(y, mo - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function mesChaveNota(row: NotaFiscalListRow): string {
+  const raw = (row.data_emissao || row.created_at || '').slice(0, 10);
+  const m = /^(\d{4})-(\d{2})/.exec(raw);
+  return m ? `${m[1]}-${m[2]}` : '';
+}
+
+function labelMesChave(chave: string): string {
+  const [y, mo] = chave.split('-').map(Number);
+  if (!y || !mo) return chave;
+  return labelMesAnoBR(y, mo);
+}
+
 function baixarXmlNoNavegador(xml: string, nomeArquivo: string) {
   const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -85,6 +109,7 @@ export default function NotasFiscaisIndexScreen() {
   const [batchBusy, setBatchBusy] = useState(false);
 
   const [statusFilter, setStatusFilter] = useState<StatusFiltro>('todos');
+  const [mesFilter, setMesFilter] = useState(mesAtualChave);
   const [emitenteFilter, setEmitenteFilter] = useState<string>('todos');
   const [clienteSearch, setClienteSearch] = useState('');
   const debouncedCliente = useDebounce(clienteSearch, 280);
@@ -138,6 +163,7 @@ export default function NotasFiscaisIndexScreen() {
     const term = debouncedCliente.trim().toLowerCase();
     return rows.filter((r) => {
       if (!matchEmpresa(r.emitente_id, r.emitente?.id)) return false;
+      if (mesFilter !== 'todos' && mesChaveNota(r) !== mesFilter) return false;
       if (statusFilter !== 'todos' && r.status !== statusFilter) return false;
       if (emitenteFilter !== 'todos') {
         const eid = r.emitente_id ?? r.emitente?.id ?? '';
@@ -151,7 +177,7 @@ export default function NotasFiscaisIndexScreen() {
       }
       return true;
     });
-  }, [rows, statusFilter, emitenteFilter, debouncedCliente, matchEmpresa]);
+  }, [rows, mesFilter, statusFilter, emitenteFilter, debouncedCliente, matchEmpresa]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { todos: rows.length };
@@ -162,10 +188,23 @@ export default function NotasFiscaisIndexScreen() {
     return c;
   }, [rows]);
 
+  const mesesDisponiveis = useMemo(() => {
+    const atual = mesAtualChave();
+    const anterior = deslocarMes(atual, -1);
+    const extras = [
+      ...new Set(rows.map(mesChaveNota).filter((k) => k && k !== atual && k !== anterior)),
+    ].sort((a, b) => (a < b ? 1 : -1));
+    return [atual, anterior, ...extras];
+  }, [rows]);
+
   const temFiltroAtivo =
-    statusFilter !== 'todos' || emitenteFilter !== 'todos' || clienteSearch.trim().length > 0;
+    mesFilter !== mesAtualChave() ||
+    statusFilter !== 'todos' ||
+    emitenteFilter !== 'todos' ||
+    clienteSearch.trim().length > 0;
 
   const limparFiltros = () => {
+    setMesFilter(mesAtualChave());
     setStatusFilter('todos');
     setEmitenteFilter('todos');
     setClienteSearch('');
@@ -441,6 +480,37 @@ export default function NotasFiscaisIndexScreen() {
         <Ionicons name="settings-outline" size={16} color={colors.orange} />
         <Text style={styles.configLinkTxt}>Configurar emissão de NFS-e</Text>
       </Pressable>
+
+      <Text style={styles.filterTitle}>Mês de emissão</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chipsRow}
+      >
+        {mesesDisponiveis.map((chave) => {
+          const active = mesFilter === chave;
+          const n = rows.filter((r) => mesChaveNota(r) === chave).length;
+          return (
+            <Pressable
+              key={chave}
+              onPress={() => setMesFilter(chave)}
+              style={[styles.chip, active && styles.chipOn]}
+            >
+              <Text style={[styles.chipTxt, active && styles.chipTxtOn]}>
+                {labelMesChave(chave)} ({n})
+              </Text>
+            </Pressable>
+          );
+        })}
+        <Pressable
+          onPress={() => setMesFilter('todos')}
+          style={[styles.chip, mesFilter === 'todos' && styles.chipOn]}
+        >
+          <Text style={[styles.chipTxt, mesFilter === 'todos' && styles.chipTxtOn]}>
+            Todos ({rows.length})
+          </Text>
+        </Pressable>
+      </ScrollView>
 
       <Text style={styles.filterTitle}>Status</Text>
       <ScrollView
