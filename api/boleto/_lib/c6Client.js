@@ -216,7 +216,7 @@ function parseAddressNumber(raw) {
  * Schema sandbox C6 (v1/bank_slips):
  * - external_reference_id: ^[a-zA-Z0-9]{1,10}$
  * - our_number: até 10 dígitos
- * - payer.address: street, number (número), city, state, zip_code (sem neighborhood)
+ * - payer.address: street (máx. 33), number, city, state, zip_code (sem neighborhood)
  * - interest/fine: { value: number }
  */
 function buildC6Payload({ boleto, config, cliente }) {
@@ -252,7 +252,7 @@ function buildC6Payload({ boleto, config, cliente }) {
   if (!instructions.length) instructions.push('Pagamento referente a servicos prestados.');
 
   const address = {
-    street: street.slice(0, 100),
+    street: street.slice(0, 33),
     number: parseAddressNumber(cliente.numero),
     city: city.slice(0, 50),
     state,
