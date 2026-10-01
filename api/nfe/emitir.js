@@ -9,6 +9,16 @@ const { tentarEnviarEmailDanfe } = require('./_lib/enviarEmailDanfe');
  * Próximo RPS livre deste CNPJ (não olha a sequência do outro emitente).
  * Usado quando o ADN rejeita "RPS/chave já existe".
  */
+function falhaTransitoriaNfse(message) {
+  return /E999|E1000|HttpClient\.Timeout|Erro n[aã]o catalogado|prefeitura demorou|erro genérico \(E999\)/i.test(
+    String(message ?? ''),
+  );
+}
+
+function esperar(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function realocarNumeroRps(admin, { userId, nota, emitenteId }) {
   const serie = String(nota.serie ?? '1');
   let q = admin.from('nota_fiscal').select('numero').eq('user_id', userId).eq('serie', serie);
@@ -118,17 +128,27 @@ module.exports = async function handler(req, res) {
     }
 
     let notaAtual = nota;
-    let result = await emitirNfseSefaz({
-      admin,
-      nota: notaAtual,
-      itens,
-      pagamentos: pagamentos ?? [],
-      perfil,
-      cliente,
-      config,
-      cert,
-      senhaEnc: sec.senha_criptografada,
-    });
+    const emitir = () =>
+      emitirNfseSefaz({
+        admin,
+        nota: notaAtual,
+        itens,
+        pagamentos: pagamentos ?? [],
+        perfil,
+        cliente,
+        config,
+        cert,
+        senhaEnc: sec.senha_criptografada,
+      });
+
+    let result = await emitir();
+
+    // E999/E1000: a calculadora da prefeitura falha ou estoura o tempo. Uma nova tentativa costuma passar.
+    if (!result.success && falhaTransitoriaNfse(result.message)) {
+      console.warn('[nfse] falha transitória da prefeitura — tentando de novo', result.message);
+      await esperar(2000);
+      result = await emitir();
+    }
 
     // L1260/L1268: o RPS já está no ADN. Reenviar o mesmo número falha de novo.
     if (!result.success && isRpsChaveDuplicadaAdn(result.message)) {
@@ -142,17 +162,7 @@ module.exports = async function handler(req, res) {
         nota: notaAtual,
         emitenteId: nota.emitente_id || emitCtx.emitente?.id || null,
       });
-      result = await emitirNfseSefaz({
-        admin,
-        nota: notaAtual,
-        itens,
-        pagamentos: pagamentos ?? [],
-        perfil,
-        cliente,
-        config,
-        cert,
-        senhaEnc: sec.senha_criptografada,
-      });
+      result = await emitir();
       if (result.success) {
         result.message = `NFS-e autorizada com RPS ${notaAtual.numero} (o número anterior já existia no ADN).`;
       }

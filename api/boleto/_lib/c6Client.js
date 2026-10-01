@@ -7,7 +7,7 @@ function onlyDigits(value) {
   return String(value ?? '').replace(/\D/g, '');
 }
 
-/** C6 recusa acento e pontuação em city, street e name. */
+/** C6 recusa acento e pontuação. Produção também limita o tamanho de cada campo. */
 function textoC6(value, fallback) {
   const base = String(value ?? '')
     .normalize('NFD')
@@ -16,6 +16,15 @@ function textoC6(value, fallback) {
     .replace(/\s+/g, ' ')
     .trim();
   return base || fallback;
+}
+
+function clipC6(value, max) {
+  const text = String(value ?? '').trim();
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max).trim();
+  const space = cut.lastIndexOf(' ');
+  if (space >= Math.floor(max * 0.6)) return cut.slice(0, space).trim();
+  return cut;
 }
 
 function apiBaseUrl(ambiente) {
@@ -213,11 +222,14 @@ function parseAddressNumber(raw) {
 }
 
 /**
- * Schema sandbox C6 (v1/bank_slips):
+ * Schema produção C6 (v1/bank_slips):
  * - external_reference_id: ^[a-zA-Z0-9]{1,10}$
  * - our_number: até 10 dígitos
- * - payer.address: street (máx. 33), number, city, state, zip_code (sem neighborhood)
- * - interest/fine: { value: number }
+ * - payer.name: máx. 40
+ * - payer.address.street: máx. 33
+ * - payer.address.complement: máx. 24
+ * - payer.address.city: máx. 40
+ * - instructions: até 4 linhas
  */
 function buildC6Payload({ boleto, config, cliente }) {
   const taxId = onlyDigits(cliente.cnpj ?? cliente.cpf ?? cliente.documento ?? '');
@@ -247,19 +259,19 @@ function buildC6Payload({ boleto, config, cliente }) {
     (config.ambiente === 'producao' ? '15' : '21');
 
   const instructions = splitInstrucoes(boleto.instrucoes)
-    .map((line) => textoC6(line, ''))
+    .map((line) => clipC6(textoC6(line, ''), 60))
     .filter(Boolean);
   if (!instructions.length) instructions.push('Pagamento referente a servicos prestados.');
 
   const address = {
-    street: street.slice(0, 33),
+    street: clipC6(street, 33),
     number: parseAddressNumber(cliente.numero),
-    city: city.slice(0, 50),
+    city: clipC6(city, 40),
     state,
     zip_code: zip,
   };
-  const complement = textoC6(cliente.complemento, '');
-  if (complement) address.complement = complement.slice(0, 50);
+  const complement = clipC6(textoC6(cliente.complemento, ''), 24);
+  if (complement) address.complement = complement;
 
   const payload = {
     external_reference_id: externalId,
@@ -269,7 +281,7 @@ function buildC6Payload({ boleto, config, cliente }) {
     billing_scheme: String(billing),
     our_number: String(ourNumber),
     payer: {
-      name: name.slice(0, 100),
+      name: clipC6(name, 40),
       tax_id: taxId,
       address,
     },

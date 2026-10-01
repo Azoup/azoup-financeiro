@@ -4,6 +4,14 @@ function humanizeNfseRejection(message, ibge) {
   const raw = String(message ?? '').trim();
   if (!raw) return 'NFS-e rejeitada pela SEFIN.';
 
+  if (/E1000|HttpClient\.Timeout|request was canceled due to the configured HttpClient/i.test(raw)) {
+    return 'A prefeitura demorou para calcular a NFS-e e cancelou a tentativa. Emita de novo só esta nota.';
+  }
+
+  if (/E999|Erro não catalogado|Erro nao catalogado/i.test(raw)) {
+    return 'A prefeitura devolveu um erro genérico (E999) ao calcular o imposto. Emita de novo só esta nota.';
+  }
+
   if (/L928/i.test(raw)) {
     return [
       'L928 — Alíquota de ISS fora da faixa do código de serviço (em Americana, 01.05 exige entre 2% e 5%; o valor típico é 2%).',
