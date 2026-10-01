@@ -61,6 +61,7 @@ import { confirmDestructive } from '@/utils/confirmDialog';
 import { compartilharDanfseComFeedback } from '@/utils/danfseDocumento';
 
 type StatusFiltro = 'todos' | MensalidadeGeradaStatusVisual;
+type NfFiltro = 'todas' | 'sem_nf' | 'com_nf';
 
 const MENSALIDADES_POR_PAGINA = 10;
 
@@ -154,6 +155,9 @@ export default function HistoricoMensalidadesGeradasScreen() {
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, 300);
   const [statusFilter, setStatusFilter] = useState<StatusFiltro>('todos');
+  const [nfFiltro, setNfFiltro] = useState<NfFiltro>('todas');
+  const [selecionadas, setSelecionadas] = useState<string[]>([]);
+  const [nfLoteBusy, setNfLoteBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [pagamentos, setPagamentos] = useState<Record<string, PagamentoMensalidadeGerada[]>>({});
@@ -232,8 +236,13 @@ export default function HistoricoMensalidadesGeradasScreen() {
           (m.lote_faturamento_id != null && lotesKeep.has(m.lote_faturamento_id)),
       );
     }
+    if (nfFiltro === 'sem_nf') {
+      list = list.filter((m) => m.status !== 'cancelado' && !nfEmitidas[m.id]);
+    } else if (nfFiltro === 'com_nf') {
+      list = list.filter((m) => Boolean(nfEmitidas[m.id]));
+    }
     return list;
-  }, [allRows, clienteFiltro, debouncedSearch, statusFilter, matchEmpresa, boletosPorMensalidade]);
+  }, [allRows, clienteFiltro, debouncedSearch, statusFilter, nfFiltro, nfEmitidas, matchEmpresa, boletosPorMensalidade]);
 
   const historicoItems = useMemo(() => groupHistoricoRows(filteredRows), [filteredRows]);
 
@@ -245,7 +254,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
 
   useEffect(() => {
     setPagina(1);
-  }, [clienteFiltro, debouncedSearch, statusFilter]);
+  }, [clienteFiltro, debouncedSearch, statusFilter, nfFiltro]);
 
   useEffect(() => {
     setPagina((atual) => Math.min(atual, totalPaginas));
@@ -256,31 +265,21 @@ export default function HistoricoMensalidadesGeradasScreen() {
     const ids = itemsPagina.map((m) => m.id).filter(Boolean);
     if (!user?.id || !ids.length) {
       setPagamentos({});
-      setNfEmitidas({});
       setBoletosPorMensalidade({});
       return;
     }
     (async () => {
       try {
-        const [paysMap, nfMap, boletosMap] = await Promise.all([
+        const [paysMap, boletosMap] = await Promise.all([
           fetchPagamentosMensalidadesPorIds(ids),
-          fetchNotasFiscaisPorMensalidadeIds(user.id, ids),
           fetchBoletosPorMensalidadeIds(user.id, ids),
         ]);
         if (!alive) return;
         setPagamentos(paysMap);
         setBoletosPorMensalidade(boletosMap);
-        const emitidas: Record<string, { numero: number | null }> = {};
-        for (const [mid, nf] of nfMap) {
-          if (nf.status === 'autorizada') {
-            emitidas[mid] = { numero: nf.numero ?? null };
-          }
-        }
-        setNfEmitidas(emitidas);
       } catch (e) {
         if (alive) {
           setPagamentos({});
-          setNfEmitidas({});
           setBoletosPorMensalidade({});
           showAppError((e as Error).message);
         }
@@ -290,6 +289,32 @@ export default function HistoricoMensalidadesGeradasScreen() {
       alive = false;
     };
   }, [itemsPagina, user?.id]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!user?.id || !allRows.length) {
+      setNfEmitidas({});
+      return;
+    }
+    (async () => {
+      const emitidas: Record<string, { numero: number | null }> = {};
+      const ids = allRows.map((m) => m.id);
+      try {
+        for (let i = 0; i < ids.length; i += 80) {
+          const nfMap = await fetchNotasFiscaisPorMensalidadeIds(user.id, ids.slice(i, i + 80));
+          for (const [mid, nf] of nfMap) {
+            if (nf.status === 'autorizada') emitidas[mid] = { numero: nf.numero ?? null };
+          }
+        }
+        if (alive) setNfEmitidas(emitidas);
+      } catch (e) {
+        if (alive) showAppError((e as Error).message);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [allRows, user?.id]);
 
   const abrirPdfBoleto = async (mensalidadeId: string) => {
     if (!user?.id) return;
@@ -527,6 +552,78 @@ export default function HistoricoMensalidadesGeradasScreen() {
     setNfConfirmMensalidade(null);
   };
 
+  const semNota = (m: MensalidadeGerada) => m.status !== 'cancelado' && !nfEmitidas[m.id];
+
+  const idsSemNotaFiltrados = filteredRows.filter(semNota).map((m) => m.id);
+  const todasSemNotaMarcadas =
+    idsSemNotaFiltrados.length > 0 && idsSemNotaFiltrados.every((id) => selecionadas.includes(id));
+
+  const alternarSelecao = (id: string) => {
+    setSelecionadas((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const alternarTodasSemNota = () => {
+    setSelecionadas((prev) => {
+      if (idsSemNotaFiltrados.length && idsSemNotaFiltrados.every((id) => prev.includes(id))) {
+        return prev.filter((id) => !idsSemNotaFiltrados.includes(id));
+      }
+      return [...new Set([...prev, ...idsSemNotaFiltrados])];
+    });
+  };
+
+  const emitirNfSelecionadas = async () => {
+    if (!user?.id || nfLoteBusy) return;
+    const alvos = filteredRows.filter((m) => selecionadas.includes(m.id) && semNota(m));
+    if (!alvos.length) {
+      showAppInfo('Selecione mensalidades que ainda não têm NFS-e.');
+      return;
+    }
+    setNfLoteBusy(true);
+    let ok = 0;
+    const erros: string[] = [];
+    try {
+      for (const m of alvos) {
+        const nome = unwrapCliente(m).nome;
+        try {
+          const res = await gerarNotaFiscalParaMensalidade(
+            user.id,
+            {
+              id: m.id,
+              cliente_id: m.cliente_id,
+              valor: m.valor,
+              competencia: m.competencia,
+            },
+            { usarEmitenteDoCliente: true },
+          );
+          if (res.success) {
+            ok += 1;
+            setNfEmitidas((prev) => ({ ...prev, [m.id]: { numero: null } }));
+            setSelecionadas((prev) => prev.filter((id) => id !== m.id));
+          } else {
+            erros.push(`${nome}: ${res.message ?? 'não emitida'}`);
+          }
+        } catch (e) {
+          erros.push(`${nome}: ${(e as Error).message}`);
+        }
+      }
+    } finally {
+      setNfLoteBusy(false);
+    }
+    if (ok && !erros.length) {
+      showAppSuccess(
+        ok === 1 ? '1 NFS-e emitida.' : `${ok} NFS-e emitidas.`,
+        'As que falharem continuam sem nota para tentar de novo.',
+      );
+    } else if (ok && erros.length) {
+      showAppInfo(
+        `${ok} emitida(s), ${erros.length} com erro.`,
+        erros.slice(0, 3).join(' · '),
+      );
+    } else {
+      showAppError(erros[0] ?? 'Nenhuma NFS-e foi emitida.', erros.slice(1, 3).join(' · ') || undefined);
+    }
+  };
+
   const irGerarMensalidade = () => {
     if (clienteFiltro) {
       router.push(`/(app)/mensalidades/gerar?cliente=${encodeURIComponent(String(clienteFiltro))}`);
@@ -538,9 +635,10 @@ export default function HistoricoMensalidadesGeradasScreen() {
   const limparFiltros = () => {
     setSearch('');
     setStatusFilter('todos');
+    setNfFiltro('todas');
   };
 
-  const temFiltroAtivo = Boolean(search.trim()) || statusFilter !== 'todos';
+  const temFiltroAtivo = Boolean(search.trim()) || statusFilter !== 'todos' || nfFiltro !== 'todas';
 
   const totalBase = useMemo(() => {
     if (clienteFiltro) {
@@ -792,8 +890,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
         />
         <PrimaryButton title="Gerar mensalidade" onPress={irGerarMensalidade} style={styles.btnGerar} />
         <Text style={styles.nfHint}>
-          Use &quot;Emitir NFS-e&quot; em cada mensalidade ou em A receber (tipo Mensalidade). Cliente precisa estar
-          com NF no cadastro.
+          Use &quot;Sem nota&quot; para ver quem ainda não tem NFS-e. Marque as linhas e emita em lote: se uma falhar, as outras continuam.
         </Text>
 
         <View style={styles.searchWrap}>
@@ -835,8 +932,56 @@ export default function HistoricoMensalidadesGeradasScreen() {
           })}
         </ScrollView>
 
+        <View style={styles.filterRow}>
+          <Text style={styles.filterLabel}>NFS-e</Text>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+          {(
+            [
+              ['todas', 'Todas'],
+              ['sem_nf', 'Sem nota'],
+              ['com_nf', 'Com nota'],
+            ] as const
+          ).map(([id, label]) => {
+            const active = nfFiltro === id;
+            return (
+              <Pressable
+                key={id}
+                onPress={() => setNfFiltro(id)}
+                style={[styles.chip, active && styles.chipActive]}
+              >
+                <Text style={[styles.chipTxt, active && styles.chipTxtActive]}>{label}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        {idsSemNotaFiltrados.length > 0 ? (
+          <View style={styles.loteNf}>
+            <Pressable onPress={alternarTodasSemNota} style={styles.loteNfCheck} hitSlop={6}>
+              <Ionicons
+                name={todasSemNotaMarcadas ? 'checkbox' : 'square-outline'}
+                size={22}
+                color={todasSemNotaMarcadas ? colors.orange : colors.gray400}
+              />
+              <Text style={styles.loteNfTxt}>
+                Selecionar sem nota ({selecionadas.filter((id) => idsSemNotaFiltrados.includes(id)).length}/
+                {idsSemNotaFiltrados.length})
+              </Text>
+            </Pressable>
+            <PrimaryButton
+              title={nfLoteBusy ? 'Emitindo notas…' : 'Emitir NFS-e das selecionadas'}
+              onPress={() => void emitirNfSelecionadas()}
+              disabled={nfLoteBusy || selecionadas.length === 0}
+              loading={nfLoteBusy}
+              style={styles.loteNfBtn}
+            />
+          </View>
+        ) : null}
+
         {filteredRows.length > 0 ? (
           <View style={styles.tableHead}>
+            <View style={styles.checkCol} />
             <Text style={[styles.th, styles.linhaCli]}>Cliente</Text>
             <Text style={[styles.th, styles.linhaVenc]}>Venc.</Text>
             <Text style={[styles.th, styles.linhaVal]}>Valor</Text>
@@ -907,6 +1052,22 @@ export default function HistoricoMensalidadesGeradasScreen() {
     const isLast = index === itemsPagina.length - 1;
     return (
       <View style={[styles.linha, isLast && styles.linhaLast]}>
+        <Pressable
+          onPress={() => semNota(item) && alternarSelecao(item.id)}
+          style={styles.checkCol}
+          hitSlop={6}
+          accessibilityLabel="Selecionar mensalidade"
+        >
+          {semNota(item) ? (
+            <Ionicons
+              name={selecionadas.includes(item.id) ? 'checkbox' : 'square-outline'}
+              size={20}
+              color={selecionadas.includes(item.id) ? colors.orange : colors.gray400}
+            />
+          ) : (
+            <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+          )}
+        </Pressable>
         <View style={styles.linhaCli}>
           <Text style={styles.cli} numberOfLines={1}>
             {cli.nome}
@@ -1233,6 +1394,15 @@ const styles = StyleSheet.create({
   linhaVenc: { width: 72, fontSize: 12, color: colors.gray800 },
   linhaVal: { width: 84, textAlign: 'right', fontSize: 13, fontWeight: '700', color: colors.orange },
   moreBtn: { width: 32, alignItems: 'center' },
+  checkCol: { width: 28, alignItems: 'center', justifyContent: 'center' },
+  loteNf: {
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  loteNfCheck: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  loteNfTxt: { flex: 1, fontSize: 13, fontWeight: '700', color: colors.petroleum },
+  loteNfBtn: {},
   card: {
     flex: 1,
     minWidth: 0,

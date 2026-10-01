@@ -581,7 +581,9 @@ export default function GerarMensalidadeScreen() {
         type: nfFalhou ? 'error' : 'success',
         text1: `${criados} mensalidade(s) gerada(s).${extras.length ? ` ${extras.join('; ')}.` : ''}`,
         text2: nfFalhou
-          ? nfDetalhe ?? 'Nenhuma NFS-e foi autorizada. Verifique certificado e configurações.'
+          ? (nf?.erros?.slice(0, 2).join(' · ') ||
+              nfDetalhe ||
+              'Nenhuma NFS-e foi autorizada. Verifique certificado e configurações.')
           : gerarNotaFiscal
             ? 'Veja as notas em Notas fiscais.'
             : 'Confira em A receber.',

@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { ensureNfeConfig, fetchCertificadoAtivo, nfeApiBaseUrl } from '@/services/nfeConfigService';
+import { ensureNfeConfig, nfeApiBaseUrl } from '@/services/nfeConfigService';
 import {
   fetchCertificadoAtivoEmitente,
   fetchEmitenteById,
@@ -834,20 +834,6 @@ export async function gerarNotasFiscaisParaMensalidades(
   mensalidades: MensalidadeNfInput[],
   opts?: EmitOpts,
 ): Promise<{ emitidas: number; rejeitadas: number; ignoradas: number; erros: string[]; emails_enviados: number }> {
-  const padrao = await fetchEmitentePadrao(userId);
-  const emitenteId = opts?.emitenteId || padrao?.id;
-  if (emitenteId) {
-    const cert = await fetchCertificadoAtivoEmitente(userId, emitenteId);
-    if (!cert) {
-      throw new Error('Cadastre o certificado A1 do emitente em Configurações › NFS-e antes de gerar notas.');
-    }
-  } else {
-    const cert = await fetchCertificadoAtivo(userId);
-    if (!cert) {
-      throw new Error('Cadastre o certificado A1 em Configurações › NFS-e antes de gerar notas fiscais.');
-    }
-  }
-
   const clienteIds = [...new Set(mensalidades.map((m) => m.cliente_id))];
   const { data: clientesRows, error: cliErr } = await supabase
     .from('clientes')
@@ -856,9 +842,12 @@ export async function gerarNotasFiscaisParaMensalidades(
   if (cliErr) throw new Error(cliErr.message);
 
   const emitePorCliente = new Map(
+    (clientesRows ?? []).map((c) => [c.id as string, Boolean(c.emite_nf)]),
+  );
+  const nomePorCliente = new Map(
     (clientesRows ?? []).map((c) => [
       c.id as string,
-      Boolean(c.emite_nf),
+      (c.nome_fantasia || c.nome || 'Cliente') as string,
     ]),
   );
 
@@ -885,11 +874,13 @@ export async function gerarNotasFiscaisParaMensalidades(
         if (result.emailEnviado) emailsEnviados += 1;
       } else {
         rejeitadas += 1;
-        if (result.message) erros.push(result.message);
+        const nome = nomePorCliente.get(m.cliente_id) ?? 'Cliente';
+        if (result.message) erros.push(`${nome}: ${result.message}`);
       }
     } catch (e) {
       rejeitadas += 1;
-      erros.push((e as Error).message);
+      const nome = nomePorCliente.get(m.cliente_id) ?? 'Cliente';
+      erros.push(`${nome}: ${(e as Error).message}`);
     }
   }
 

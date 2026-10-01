@@ -440,20 +440,23 @@ export async function fetchCertificadoAtivoEmitente(
     .eq('user_id', userId)
     .eq('emitente_id', emitenteId)
     .eq('ativo', true)
-    .maybeSingle();
+    .order('created_at', { ascending: false })
+    .limit(1);
   if (error) throw new Error(error.message);
-  if (data) return data as EmpresaCertificado;
+  const row = Array.isArray(data) ? data[0] : null;
+  if (row) return row as EmpresaCertificado;
 
-  // Legado: cert ativo sem emitente_id
   const { data: legado, error: legErr } = await supabase
     .from('empresa_certificado')
     .select('*')
     .eq('user_id', userId)
     .eq('ativo', true)
     .is('emitente_id', null)
-    .maybeSingle();
+    .order('created_at', { ascending: false })
+    .limit(1);
   if (legErr) throw new Error(legErr.message);
-  return (legado as EmpresaCertificado | null) ?? null;
+  const legadoRow = Array.isArray(legado) ? legado[0] : null;
+  return (legadoRow as EmpresaCertificado | null) ?? null;
 }
 
 export async function uploadCertificadoA1Emitente(
