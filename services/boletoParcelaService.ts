@@ -765,6 +765,8 @@ export type ContasReceberConsulta = {
   vencimentoAte?: string | null;
   emitenteId?: string | null;
   soDuplicados?: boolean;
+  /** `pendente` aparece na tela como Registrando. */
+  statusRegistro?: 'pendente';
 };
 
 export type ContasReceberPagina = {
@@ -943,9 +945,9 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
       origem: isMen ? 'mensalidade' : 'venda',
       parcela_status: status,
       situacao_cobranca: situacaoCobrancaDeStatus(status),
-      nome_cliente: boleto.pagador_nome || '—',
+      nome_cliente: String(boleto.pagador_nome || '—'),
       referencia_label,
-      cliente_id: clienteId,
+      cliente_id: clienteId == null ? null : String(clienteId),
       whatsapp: wa?.valor ?? null,
       whatsapp_contato_nome: wa?.nome ?? null,
       email: em?.valor ?? null,
@@ -965,6 +967,7 @@ function aplicarFiltrosBoleto(
   if (lado) query = query.eq('origem', lado);
   else if (opts.origem && opts.origem !== 'todos') query = query.eq('origem', opts.origem);
   if (opts.emitenteId) query = query.eq('emitente_id', opts.emitenteId);
+  if (opts.statusRegistro) query = query.eq('status_registro', opts.statusRegistro);
   if (opts.vencimentoDe) query = query.gte('data_vencimento', opts.vencimentoDe);
   if (opts.vencimentoAte) query = query.lte('data_vencimento', opts.vencimentoAte);
   const busca = textoBusca(opts.search);

@@ -12,8 +12,8 @@ import {
   fetchContasReceberPagina,
 } from '@/services/boletoParcelaService';
 import { reemitirBoletosC6 } from '@/services/c6BoletoService';
-import { reemitirBoletosSicoob } from '@/services/sicoobBoletoService';
 import { pickEmitenteC6 } from '@/services/c6ConfigService';
+import { reemitirBoletosSicoob } from '@/services/sicoobBoletoService';
 import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import {
   fetchMensalidadeGeradaById,
@@ -27,7 +27,6 @@ import {
   gerarNotaFiscalParaMensalidade,
   gerarNotaFiscalParaVenda,
 } from '@/services/notaFiscalService';
-import { sincronizarBoletosPendentes } from '@/services/sicoobBoletoService';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
 import {
   cancelarParcelaVenda,
@@ -127,7 +126,6 @@ export default function ContasReceberScreen() {
   const [allRows, setAllRows] = useState<ContaReceberListRow[]>([]);
   const [pagina, setPagina] = useState(1);
   const [totalDocumentos, setTotalDocumentos] = useState(0);
-  const syncBancoFeito = useRef(false);
   const pedidoLista = useRef(0);
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, 300);
@@ -136,6 +134,7 @@ export default function ContasReceberScreen() {
   const [origemFilter, setOrigemFilter] = useState<OrigemFiltro>('todos');
   const [situacaoFilter, setSituacaoFilter] = useState<SituacaoFiltro>('aberto');
   const [soDuplicados, setSoDuplicados] = useState(false);
+  const [soRegistrando, setSoRegistrando] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftVencDe, setDraftVencDe] = useState<string | null>(null);
   const [draftVencAte, setDraftVencAte] = useState<string | null>(null);
@@ -183,6 +182,7 @@ export default function ContasReceberScreen() {
           vencimentoAte,
           emitenteId: empresaId === 'todos' ? null : empresaId,
           soDuplicados,
+          statusRegistro: soRegistrando ? 'pendente' : undefined,
         }),
         fetchPerfilCobranca(user.id).catch(() => null),
       ]);
@@ -210,27 +210,16 @@ export default function ContasReceberScreen() {
     vencimentoAte,
     empresaId,
     soDuplicados,
+    soRegistrando,
   ]);
 
   useEffect(() => {
     setPagina(1);
-  }, [debouncedSearch, origemFilter, situacaoFilter, vencimentoDe, vencimentoAte, empresaId, soDuplicados]);
+  }, [debouncedSearch, origemFilter, situacaoFilter, vencimentoDe, vencimentoAte, empresaId, soDuplicados, soRegistrando]);
 
   useFocusEffect(
     useCallback(() => {
       void carregar();
-      if (syncBancoFeito.current) return;
-      syncBancoFeito.current = true;
-      void sincronizarBoletosPendentes()
-        .then((sicoobSync) => {
-          if (sicoobSync.baixados > 0) {
-            Toast.show({
-              type: 'success',
-              text1: `${sicoobSync.baixados} boleto(s) quitado(s) automaticamente via Sicoob.`,
-            });
-          }
-        })
-        .catch(() => undefined);
     }, [carregar]),
   );
 
@@ -250,7 +239,7 @@ export default function ContasReceberScreen() {
     const groups = new Map<string, string[]>();
     for (const r of allRows) {
       if (r.situacao_cobranca === 'cancelado') continue;
-      const quem = String(r.cliente_id || r.nome_cliente || '').trim().toUpperCase();
+      const quem = `${r.cliente_id ?? ''}|${r.nome_cliente ?? ''}`;
       const valor = Number(r.valor_documento).toFixed(2);
       const k = `${quem}|${String(r.data_vencimento).slice(0, 10)}|${valor}|${r.origem}`;
       const lista = groups.get(k) ?? [];
@@ -302,7 +291,8 @@ export default function ContasReceberScreen() {
     situacaoFilter !== 'aberto' ||
     Boolean(vencimentoDe) ||
     Boolean(vencimentoAte) ||
-    soDuplicados;
+    soDuplicados ||
+    soRegistrando;
 
   const abrirFiltros = () => {
     setDraftVencDe(vencimentoDe);
@@ -327,6 +317,7 @@ export default function ContasReceberScreen() {
     setOrigemFilter('todos');
     setSituacaoFilter('aberto');
     setSoDuplicados(false);
+    setSoRegistrando(false);
     setDraftVencDe(null);
     setDraftVencAte(null);
     setDraftOrigem('todos');
@@ -938,6 +929,12 @@ export default function ContasReceberScreen() {
             </Pressable>
           );
         })}
+        <Pressable
+          style={[styles.sitChip, soRegistrando && styles.sitChipOn]}
+          onPress={() => setSoRegistrando((v) => !v)}
+        >
+          <Text style={[styles.sitChipTxt, soRegistrando && styles.sitChipTxtOn]}>Registrando</Text>
+        </Pressable>
       </ScrollView>
 
       {duplicadosIds.clientes > 0 || soDuplicados ? (
@@ -1027,9 +1024,11 @@ export default function ContasReceberScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
           <Text style={styles.empty}>
-            {allRows.length === 0
-              ? 'Nenhum documento ainda. Use "Gerar mensalidade" ou "Nova venda" acima.'
-              : 'Nenhum resultado para os filtros atuais.'}
+            {soRegistrando && allRows.length === 0
+              ? 'Nenhum boleto com status Registrando.'
+              : temFiltroAtivo
+                ? 'Nenhum resultado para os filtros atuais.'
+                : 'Nenhum documento ainda. Use "Gerar mensalidade" ou "Nova venda" acima.'}
           </Text>
         }
       />

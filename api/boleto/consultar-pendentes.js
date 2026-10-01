@@ -15,7 +15,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const admin = getAdmin();
-    const result = await sincronizarBoletosPendentesGlobal(admin, 25);
+    const result = await sincronizarBoletosPendentesGlobal(admin, 5);
     return res.status(200).json({ success: true, ...result });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message ?? 'Erro interno.' });

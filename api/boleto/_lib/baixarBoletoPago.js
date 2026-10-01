@@ -490,8 +490,10 @@ async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 30) {
     .limit(limit);
   if (error) throw new Error(error.message);
 
+  const inicio = Date.now();
   const resultados = [];
   for (const row of boletos ?? []) {
+    if (Date.now() - inicio > 20000) break;
     try {
       const r = await consultarEBaixarBoleto(admin, userId, row.id, 'POLLING');
       resultados.push({ boletoId: row.id, ...r });
