@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { gerarBoletosParaMensalidades, registrarBoletosPendentesClientes } from '@/services/boletoParcelaService';
+import { gerarBoletosParaMensalidades } from '@/services/boletoParcelaService';
 import { gerarNotasFiscaisParaMensalidades } from '@/services/notaFiscalService';
 import type {
   CriarMensalidadeGeradaInput,
@@ -368,26 +368,6 @@ export async function criarMensalidadesGeradasLote(params: {
   }
   const nomeDe = (id: string) => nomePorId.get(id) || 'Cliente';
 
-  const pendentes = await registrarBoletosPendentesClientes(params.userId, params.clienteIds).catch(
-    (e: unknown) => {
-      falhas.push({
-        cliente: 'Lote',
-        tipo: 'boleto',
-        erro: (e as Error).message ?? 'Não foi possível registrar os boletos que tinham ficado pendentes.',
-      });
-      return null;
-    },
-  );
-  let avisoBoletoPendente = pendentes?.avisoBoleto;
-  let avisoEmailPendente = pendentes?.avisoEmail;
-  for (const f of pendentes?.falhasBoleto ?? []) {
-    falhas.push({
-      cliente: f.clienteId ? nomeDe(f.clienteId) : 'Cliente',
-      tipo: 'boleto',
-      erro: f.erro,
-    });
-  }
-
   /** Evita 2º carnê/boleto se o usuário regenerar após timeout (ex.: 504 no C6). */
   const existentesAbertos = new Map<string, { vencimentos: Set<string>; competencias: Set<string> }>();
   if (params.clienteIds.length) {
@@ -633,8 +613,6 @@ export async function criarMensalidadesGeradasLote(params: {
       ignorados,
       semVencimento,
       duplicados,
-      avisoBoleto: avisoBoletoPendente,
-      avisoEmail: avisoEmailPendente,
       falhas,
     };
   }
@@ -759,8 +737,8 @@ export async function criarMensalidadesGeradasLote(params: {
     ignorados,
     semVencimento,
     duplicados,
-    avisoBoleto: [avisoBoletoPendente, avisoBoleto].filter(Boolean).join('\n') || undefined,
-    avisoEmail: [avisoEmailPendente, avisoEmail].filter(Boolean).join('\n') || undefined,
+    avisoBoleto,
+    avisoEmail,
     nf: nfResult,
     falhas,
   };
