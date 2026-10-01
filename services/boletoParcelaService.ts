@@ -741,26 +741,32 @@ export async function regenerarCarneVenda(userId: string, vendaId: string): Prom
   });
 }
 
+async function selectInChunks<T>(ids: string[], run: (slice: string[]) => Promise<T[]>): Promise<T[]> {
+  const unicos = [...new Set(ids.filter(Boolean))];
+  const out: T[] = [];
+  const tamanho = 80;
+  for (let i = 0; i < unicos.length; i += tamanho) {
+    out.push(...(await run(unicos.slice(i, i + tamanho))));
+  }
+  return out;
+}
+
 export async function fetchContasReceberLista(userId: string): Promise<ContaReceberListRow[]> {
-  try {
-    await sincronizarCarnesMensalidadesFaltantes(userId);
-  } catch {
-    /* migration 034 pendente ou Sicoob indisponível */
+  const blist: BoletoParcelaVendaRow[] = [];
+  const pagina = 400;
+  for (let from = 0; ; from += pagina) {
+    const { data: boletos, error } = await supabase
+      .from('boletos_parcela_venda')
+      .select('*')
+      .eq('user_id', userId)
+      .order('data_vencimento', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + pagina - 1);
+    if (error) throw new Error(error.message);
+    const lote = (boletos ?? []) as BoletoParcelaVendaRow[];
+    blist.push(...lote);
+    if (lote.length < pagina) break;
   }
-  try {
-    await sincronizarCarnesVendasFaltantes(userId);
-  } catch {
-    /* */
-  }
-
-  const { data: boletos, error } = await supabase
-    .from('boletos_parcela_venda')
-    .select('*')
-    .eq('user_id', userId)
-    .order('data_vencimento', { ascending: true });
-
-  if (error) throw new Error(error.message);
-  const blist = (boletos ?? []) as BoletoParcelaVendaRow[];
   if (!blist.length) return [];
 
   const parcelaIds = blist.map((b) => b.parcela_id).filter((id): id is string => Boolean(id));
@@ -769,43 +775,36 @@ export async function fetchContasReceberLista(userId: string): Promise<ContaRece
     .filter((id): id is string => Boolean(id));
 
   const stParcela = new Map<string, string>();
-  if (parcelaIds.length) {
-    const { data: parcs, error: e2 } = await supabase
-      .from('parcelas_venda')
-      .select('id, status')
-      .in('id', parcelaIds);
+  const parcs = await selectInChunks(parcelaIds, async (slice) => {
+    const { data, error: e2 } = await supabase.from('parcelas_venda').select('id, status').in('id', slice);
     if (e2) throw new Error(e2.message);
-    for (const p of (parcs as { id: string; status: string }[] | null) ?? []) {
-      stParcela.set(p.id, p.status);
-    }
-  }
+    return (data ?? []) as { id: string; status: string }[];
+  });
+  for (const p of parcs) stParcela.set(p.id, p.status);
 
   const stMens = new Map<string, string>();
   const clientePorMensalidade = new Map<string, string>();
-  if (mensalidadeIds.length) {
-    const { data: mens, error: e3 } = await supabase
+  const mens = await selectInChunks(mensalidadeIds, async (slice) => {
+    const { data, error: e3 } = await supabase
       .from('mensalidades')
       .select('id, status, cliente_id')
-      .in('id', mensalidadeIds);
+      .in('id', slice);
     if (e3) throw new Error(e3.message);
-    for (const m of (mens as { id: string; status: string; cliente_id: string }[] | null) ?? []) {
-      stMens.set(m.id, m.status);
-      clientePorMensalidade.set(m.id, m.cliente_id);
-    }
+    return (data ?? []) as { id: string; status: string; cliente_id: string }[];
+  });
+  for (const m of mens) {
+    stMens.set(m.id, m.status);
+    clientePorMensalidade.set(m.id, m.cliente_id);
   }
 
   const vendaIds = blist.map((b) => b.venda_id).filter((id): id is string => Boolean(id));
   const clientePorVenda = new Map<string, string>();
-  if (vendaIds.length) {
-    const { data: vendas, error: e4 } = await supabase
-      .from('vendas')
-      .select('id, cliente_id')
-      .in('id', vendaIds);
+  const vendas = await selectInChunks(vendaIds, async (slice) => {
+    const { data, error: e4 } = await supabase.from('vendas').select('id, cliente_id').in('id', slice);
     if (e4) throw new Error(e4.message);
-    for (const v of (vendas as { id: string; cliente_id: string }[] | null) ?? []) {
-      clientePorVenda.set(v.id, v.cliente_id);
-    }
-  }
+    return (data ?? []) as { id: string; cliente_id: string }[];
+  });
+  for (const v of vendas) clientePorVenda.set(v.id, v.cliente_id);
 
   const clientePorBoleto = new Map<string, string>();
   for (const b of blist) {
@@ -822,19 +821,22 @@ export async function fetchContasReceberLista(userId: string): Promise<ContaRece
   const whatsappPorCliente = new Map<string, { valor: string; nome: string }>();
   const emailPorCliente = new Map<string, { valor: string; nome: string }>();
   if (clienteIds.length) {
-    const { data: contatos, error: e5 } = await supabase
-      .from('contatos_cliente')
-      .select('cliente_id, valor_contato, nome_contato, tipo_contato')
-      .in('cliente_id', clienteIds)
-      .in('tipo_contato', ['whatsapp', 'email'])
-      .order('created_at', { ascending: true });
-    if (e5) throw new Error(e5.message);
-    for (const c of (contatos as {
-      cliente_id: string;
-      valor_contato: string;
-      nome_contato: string;
-      tipo_contato: string;
-    }[] | null) ?? []) {
+    const contatos = await selectInChunks(clienteIds, async (slice) => {
+      const { data, error: e5 } = await supabase
+        .from('contatos_cliente')
+        .select('cliente_id, valor_contato, nome_contato, tipo_contato')
+        .in('cliente_id', slice)
+        .in('tipo_contato', ['whatsapp', 'email'])
+        .order('created_at', { ascending: true });
+      if (e5) throw new Error(e5.message);
+      return (data ?? []) as {
+        cliente_id: string;
+        valor_contato: string;
+        nome_contato: string;
+        tipo_contato: string;
+      }[];
+    });
+    for (const c of contatos) {
       if (c.tipo_contato === 'whatsapp' && !whatsappPorCliente.has(c.cliente_id)) {
         whatsappPorCliente.set(c.cliente_id, {
           valor: c.valor_contato,
@@ -850,10 +852,22 @@ export async function fetchContasReceberLista(userId: string): Promise<ContaRece
     }
   }
 
-  const [nfPorMensalidade, nfPorVenda] = await Promise.all([
-    fetchNotasFiscaisPorMensalidadeIds(userId, mensalidadeIds).catch(() => new Map()),
-    fetchNotasFiscaisPorVendaIds(userId, vendaIds).catch(() => new Map()),
-  ]);
+  const nfPorMensalidade = new Map<string, { id: string }>();
+  const nfPorVenda = new Map<string, { id: string }>();
+  const nfMens = await selectInChunks(mensalidadeIds, async (slice) => {
+    const map = await fetchNotasFiscaisPorMensalidadeIds(userId, slice).catch(() => new Map());
+    return [...map.entries()];
+  });
+  for (const [id, nota] of nfMens) {
+    if (!nfPorMensalidade.has(id)) nfPorMensalidade.set(id, nota);
+  }
+  const nfVendas = await selectInChunks(vendaIds, async (slice) => {
+    const map = await fetchNotasFiscaisPorVendaIds(userId, slice).catch(() => new Map());
+    return [...map.entries()];
+  });
+  for (const [id, nota] of nfVendas) {
+    if (!nfPorVenda.has(id)) nfPorVenda.set(id, nota);
+  }
 
   return blist.map((b) => {
     const isMen = b.origem === 'mensalidade' || Boolean(b.mensalidade_id);
@@ -863,7 +877,9 @@ export async function fetchContasReceberLista(userId: string): Promise<ContaRece
 
     let referencia_label: string;
     if (isMen) {
-      const linha = b.venda_descricao_resumo.split('\n').find((l) => l.startsWith('Competência:'));
+      const linha = String(b.venda_descricao_resumo ?? '')
+        .split('\n')
+        .find((l) => l.startsWith('Competência:'));
       referencia_label = linha
         ? `Mensalidade · ${linha.replace('Competência: ', '').trim()}`
         : 'Mensalidade recorrente';

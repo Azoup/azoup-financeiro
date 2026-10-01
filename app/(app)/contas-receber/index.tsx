@@ -10,8 +10,6 @@ import { useDebounce } from '@/hooks/useDebounce';
 import {
   fetchBoletoParcelaById,
   fetchContasReceberLista,
-  sincronizarCarnesMensalidadesFaltantes,
-  sincronizarCarnesVendasFaltantes,
 } from '@/services/boletoParcelaService';
 import { reemitirBoletosC6 } from '@/services/c6BoletoService';
 import { reemitirBoletosSicoob } from '@/services/sicoobBoletoService';
@@ -170,54 +168,6 @@ export default function ContasReceberScreen() {
     if (!user?.id) return;
     setLoading(true);
     try {
-      try {
-        const [syncMen, syncVen] = await Promise.all([
-          sincronizarCarnesMensalidadesFaltantes(user.id).catch((e) => {
-            const msg = (e as Error).message;
-            if (/mensalidade_id|018|019|034|boletos_parcela/i.test(msg)) {
-              Toast.show({ type: 'error', text1: 'Banco desatualizado', text2: msg, visibilityTime: 8000 });
-            }
-            return { gerados: 0 };
-          }),
-          sincronizarCarnesVendasFaltantes(user.id).catch((e) => {
-            const msg = (e as Error).message;
-            if (/034|boletos_parcela|does not exist/i.test(msg)) {
-              Toast.show({ type: 'error', text1: 'Banco desatualizado', text2: msg, visibilityTime: 8000 });
-            }
-            return { gerados: 0 };
-          }),
-        ]);
-        if (syncMen.gerados > 0) {
-          Toast.show({
-            type: 'info',
-            text1: `${syncMen.gerados} carnê(s) de mensalidade incluído(s) em A receber.`,
-          });
-        }
-        if (syncVen.gerados > 0) {
-          Toast.show({
-            type: 'success',
-            text1: `${syncVen.gerados} carnê(s) de venda incluído(s) em A receber.`,
-          });
-        }
-      } catch (syncErr) {
-        const msg = (syncErr as Error).message;
-        if (/mensalidade_id|018|019|034|boletos_parcela/i.test(msg)) {
-          Toast.show({ type: 'error', text1: 'Banco desatualizado', text2: msg, visibilityTime: 8000 });
-        }
-      }
-
-      try {
-        const sicoobSync = await sincronizarBoletosPendentes();
-        if (sicoobSync.baixados > 0) {
-          Toast.show({
-            type: 'success',
-            text1: `${sicoobSync.baixados} boleto(s) quitado(s) automaticamente via Sicoob.`,
-          });
-        }
-      } catch {
-        /* Sicoob inativo ou API indisponível em dev */
-      }
-
       const [list, perfil] = await Promise.all([
         fetchContasReceberLista(user.id),
         fetchPerfilCobranca(user.id).catch(() => null),
@@ -230,6 +180,16 @@ export default function ContasReceberScreen() {
     } finally {
       setLoading(false);
     }
+    void sincronizarBoletosPendentes()
+      .then((sicoobSync) => {
+        if (sicoobSync.baixados > 0) {
+          Toast.show({
+            type: 'success',
+            text1: `${sicoobSync.baixados} boleto(s) quitado(s) automaticamente via Sicoob.`,
+          });
+        }
+      })
+      .catch(() => undefined);
   }, [user?.id]);
 
   useFocusEffect(
@@ -242,9 +202,6 @@ export default function ContasReceberScreen() {
     if (!user?.id) return;
     setRefreshing(true);
     try {
-      await sincronizarCarnesMensalidadesFaltantes(user.id).catch(() => undefined);
-      await sincronizarCarnesVendasFaltantes(user.id).catch(() => undefined);
-      await sincronizarBoletosPendentes().catch(() => undefined);
       const [list, perfil] = await Promise.all([
         fetchContasReceberLista(user.id),
         fetchPerfilCobranca(user.id).catch(() => null),
@@ -275,8 +232,9 @@ export default function ContasReceberScreen() {
   const duplicadosIds = useMemo(() => {
     const groups = new Map<string, string[]>();
     for (const r of allRows) {
+      if (!matchEmpresa(r.emitente_id)) continue;
       if (r.situacao_cobranca === 'cancelado') continue;
-      const quem = (r.cliente_id || r.nome_cliente).trim().toUpperCase();
+      const quem = String(r.cliente_id || r.nome_cliente || '').trim().toUpperCase();
       const valor = Number(r.valor_documento).toFixed(2);
       const k = `${quem}|${String(r.data_vencimento).slice(0, 10)}|${valor}|${r.origem}`;
       const lista = groups.get(k) ?? [];
@@ -291,7 +249,7 @@ export default function ContasReceberScreen() {
       for (const id of lista) ids.add(id);
     }
     return { ids, clientes };
-  }, [allRows]);
+  }, [allRows, matchEmpresa]);
 
   const filteredRows = useMemo(() => {
     let list = allRows.filter((r) => matchEmpresa(r.emitente_id));
@@ -299,9 +257,9 @@ export default function ContasReceberScreen() {
     if (term) {
       list = list.filter(
         (r) =>
-          r.nome_cliente.toLowerCase().includes(term) ||
-          r.numero_documento.toLowerCase().includes(term) ||
-          r.referencia_label.toLowerCase().includes(term),
+          String(r.nome_cliente ?? '').toLowerCase().includes(term) ||
+          String(r.numero_documento ?? '').toLowerCase().includes(term) ||
+          String(r.referencia_label ?? '').toLowerCase().includes(term),
       );
     }
     if (origemFilter !== 'todos') {
@@ -320,7 +278,9 @@ export default function ContasReceberScreen() {
       list = list.filter((r) => duplicadosIds.ids.has(r.id));
     }
     list.sort((a, b) => {
-      const nome = a.nome_cliente.localeCompare(b.nome_cliente, 'pt-BR', { sensitivity: 'base' });
+      const nome = String(a.nome_cliente ?? '').localeCompare(String(b.nome_cliente ?? ''), 'pt-BR', {
+        sensitivity: 'base',
+      });
       if (nome !== 0) return nome;
       if (a.data_vencimento !== b.data_vencimento) return a.data_vencimento < b.data_vencimento ? -1 : 1;
       return Number(a.valor_documento) - Number(b.valor_documento);
