@@ -133,6 +133,7 @@ export default function ContasReceberScreen() {
   const [vencimentoAte, setVencimentoAte] = useState<string | null>(null);
   const [origemFilter, setOrigemFilter] = useState<OrigemFiltro>('todos');
   const [situacaoFilter, setSituacaoFilter] = useState<SituacaoFiltro>('aberto');
+  const [soDuplicados, setSoDuplicados] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftVencDe, setDraftVencDe] = useState<string | null>(null);
   const [draftVencAte, setDraftVencAte] = useState<string | null>(null);
@@ -271,6 +272,27 @@ export default function ContasReceberScreen() {
     return { aberto, pago, valorAberto };
   }, [allRows]);
 
+  const duplicadosIds = useMemo(() => {
+    const groups = new Map<string, string[]>();
+    for (const r of allRows) {
+      if (r.situacao_cobranca === 'cancelado') continue;
+      const quem = (r.cliente_id || r.nome_cliente).trim().toUpperCase();
+      const valor = Number(r.valor_documento).toFixed(2);
+      const k = `${quem}|${String(r.data_vencimento).slice(0, 10)}|${valor}|${r.origem}`;
+      const lista = groups.get(k) ?? [];
+      lista.push(r.id);
+      groups.set(k, lista);
+    }
+    const ids = new Set<string>();
+    let clientes = 0;
+    for (const lista of groups.values()) {
+      if (lista.length < 2) continue;
+      clientes += 1;
+      for (const id of lista) ids.add(id);
+    }
+    return { ids, clientes };
+  }, [allRows]);
+
   const filteredRows = useMemo(() => {
     let list = allRows.filter((r) => matchEmpresa(r.emitente_id));
     const term = debouncedSearch.trim().toLowerCase();
@@ -294,15 +316,35 @@ export default function ContasReceberScreen() {
     if (vencimentoAte) {
       list = list.filter((r) => r.data_vencimento <= vencimentoAte);
     }
+    if (soDuplicados) {
+      list = list.filter((r) => duplicadosIds.ids.has(r.id));
+    }
+    list.sort((a, b) => {
+      const nome = a.nome_cliente.localeCompare(b.nome_cliente, 'pt-BR', { sensitivity: 'base' });
+      if (nome !== 0) return nome;
+      if (a.data_vencimento !== b.data_vencimento) return a.data_vencimento < b.data_vencimento ? -1 : 1;
+      return Number(a.valor_documento) - Number(b.valor_documento);
+    });
     return list;
-  }, [allRows, debouncedSearch, origemFilter, situacaoFilter, vencimentoDe, vencimentoAte, matchEmpresa]);
+  }, [
+    allRows,
+    debouncedSearch,
+    origemFilter,
+    situacaoFilter,
+    vencimentoDe,
+    vencimentoAte,
+    matchEmpresa,
+    soDuplicados,
+    duplicadosIds,
+  ]);
 
   const temFiltroAtivo =
     Boolean(search.trim()) ||
     origemFilter !== 'todos' ||
     situacaoFilter !== 'aberto' ||
     Boolean(vencimentoDe) ||
-    Boolean(vencimentoAte);
+    Boolean(vencimentoAte) ||
+    soDuplicados;
 
   const abrirFiltros = () => {
     setDraftVencDe(vencimentoDe);
@@ -326,6 +368,7 @@ export default function ContasReceberScreen() {
     setVencimentoAte(null);
     setOrigemFilter('todos');
     setSituacaoFilter('aberto');
+    setSoDuplicados(false);
     setDraftVencDe(null);
     setDraftVencAte(null);
     setDraftOrigem('todos');
@@ -788,6 +831,12 @@ export default function ContasReceberScreen() {
               {item.nome_cliente}
             </Text>
             {atrasado ? <Text style={styles.cliAtraso}>Atrasado</Text> : null}
+            {item.nosso_numero_banco ? (
+              <Text style={styles.cliNn} numberOfLines={1}>
+                Nosso nº {item.nosso_numero_banco}
+              </Text>
+            ) : null}
+            {duplicadosIds.ids.has(item.id) ? <Text style={styles.cliDup}>Boleto repetido</Text> : null}
             {temWhats ? (
               <Text style={styles.cliWa} numberOfLines={1}>
                 {formatWhatsAppDisplay(item.whatsapp!)}
@@ -934,6 +983,19 @@ export default function ContasReceberScreen() {
           );
         })}
       </ScrollView>
+
+      {duplicadosIds.clientes > 0 ? (
+        <Pressable
+          style={[styles.dupChip, soDuplicados && styles.dupChipOn]}
+          onPress={() => setSoDuplicados((v) => !v)}
+        >
+          <Text style={[styles.dupChipTxt, soDuplicados && styles.dupChipTxtOn]}>
+            {soDuplicados
+              ? `Mostrando ${duplicadosIds.clientes} cliente(s) com boleto repetido`
+              : `Ver só os repetidos (${duplicadosIds.clientes} cliente(s))`}
+          </Text>
+        </Pressable>
+      ) : null}
 
       <View style={styles.searchRow}>
         <View style={styles.searchWrap}>
@@ -1263,7 +1325,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     marginBottom: spacing.sm,
   },
+  dupChip: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: radius.md,
+    backgroundColor: '#fff4e5',
+    borderWidth: 1,
+    borderColor: '#f5d7a1',
+  },
+  dupChipOn: { backgroundColor: '#7a4e00', borderColor: '#7a4e00' },
+  dupChipTxt: { fontSize: 13, fontWeight: '700', color: '#7a4e00' },
+  dupChipTxtOn: { color: colors.white },
   resultCount: { fontSize: 12, color: colors.gray600 },
+  cliNn: { fontSize: 11, color: colors.gray600, marginTop: 2 },
+  cliDup: { fontSize: 11, fontWeight: '700', color: '#9a3412', marginTop: 2 },
   clearLink: { fontSize: 12, fontWeight: '700', color: colors.orange },
   tableHead: {
     flexDirection: 'row',
