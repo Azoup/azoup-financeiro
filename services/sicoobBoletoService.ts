@@ -51,25 +51,61 @@ export async function emitirBoletosSicoobLote(
     throw new Error('URL da API não configurada (use a mesma origem web ou EXPO_PUBLIC_NFE_API_URL).');
   }
 
-  const res = await fetch(`${base}/api/boleto/emitir-lote`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ boletoIds }),
-  });
+  const erros: string[] = [];
+  const resultados: EmitirBoletoLoteResult['resultados'] = [];
+  let emitidos = 0;
+  let emailsEnviados = 0;
+  let emailsIgnorados = 0;
+  let emailsErro = 0;
 
-  const body = (await res.json().catch(() => ({}))) as EmitirBoletoLoteResult & { message?: string };
-  if (!res.ok) {
-    throw new Error(body.message ?? body.erros?.join(' · ') ?? `Emissão Sicoob falhou (${res.status}).`);
+  // Um boleto por requisição: 200+ no mesmo POST estoura o limite de 60s da Vercel (504).
+  for (const boletoId of boletoIds) {
+    const res = await fetch(`${base}/api/boleto/emitir-lote`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ boletoIds: [boletoId] }),
+    });
+
+    const body = (await res.json().catch(() => ({}))) as EmitirBoletoLoteResult & { message?: string };
+
+    if (res.status === 504) {
+      erros.push(
+        `${boletoId}: Tempo esgotado (504) ao registrar no Sicoob. O carnê ficou em A receber — use Registrar no Sicoob na mensalidade.`,
+      );
+      continue;
+    }
+
+    if (!res.ok) {
+      erros.push(
+        `${boletoId}: ${body.message ?? body.erros?.join(' · ') ?? `Emissão Sicoob falhou (${res.status}).`}`,
+      );
+      continue;
+    }
+
+    if (body.erros?.length) erros.push(...body.erros);
+    if (body.resultados?.length) resultados.push(...body.resultados);
+    emitidos += body.emitidos ?? 0;
+    emailsEnviados += body.emails_enviados ?? 0;
+    emailsIgnorados += body.emails_ignorados ?? 0;
+    emailsErro += body.emails_erro ?? 0;
   }
 
-  if (body.erros?.length) {
-    throw new Error(body.erros.join('\n'));
+  if (erros.length && emitidos === 0) {
+    throw new Error(erros.join('\n'));
   }
 
-  return body;
+  return {
+    success: erros.length === 0,
+    emitidos,
+    erros,
+    resultados,
+    emails_enviados: emailsEnviados,
+    emails_ignorados: emailsIgnorados,
+    emails_erro: emailsErro,
+  };
 }
 
 export async function vincularNotaFiscalAoBoletoMensalidade(
