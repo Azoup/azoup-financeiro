@@ -485,7 +485,7 @@ export default function NfeConfigScreen() {
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.lead}>
         Cadastre até 2 CNPJs emitentes. Um pode ser Simples Nacional e o outro Regime Normal — cada um com
-        dados fiscais e certificado A1 próprios. Na emissão da NFS-e você escolhe qual CNPJ usar.
+        dados fiscais, certificado A1 e numeração de NFS-e próprios. Na emissão você escolhe qual CNPJ usar.
       </Text>
 
       <Card style={styles.card}>
@@ -506,6 +506,9 @@ export default function NfeConfigScreen() {
                 </Text>
                 <Text style={[styles.tabSub, on && styles.tabTxtOn]} numberOfLines={1}>
                   {emitenteLabel(e).split(' · ')[1] || e.documento}
+                </Text>
+                <Text style={[styles.tabSub, on && styles.tabTxtOn]} numberOfLines={1}>
+                  Última nota {Math.max(0, Number(e.proximo_numero) - 1)} · próxima {e.proximo_numero}
                 </Text>
                 <View
                   style={[
@@ -664,7 +667,12 @@ export default function NfeConfigScreen() {
           </Card>
 
           <Card style={styles.card}>
-            <Text style={styles.h}>3. Município e numeração</Text>
+            <Text style={styles.h}>3. Numeração deste CNPJ</Text>
+            <Text style={styles.sub}>
+              Vale só para {form.nome}
+              {form.documento ? ` (${form.documento})` : ''}. O outro CNPJ não usa esta sequência.
+              Informe a última NFS-e já aceita na prefeitura deste CNPJ.
+            </Text>
             <FormTextInput label="Série do RPS" value={form.serie} onChangeText={(t) => patch({ serie: t })} />
             <FormTextInput
               label="Último número emitido"
@@ -681,9 +689,8 @@ export default function NfeConfigScreen() {
               placeholder="Ex.: 1452"
             />
             <Text style={styles.sub}>
-              A próxima NFS-e deste CNPJ sairá com o número{' '}
-              {form.proximo_numero || '1'}. Use o último RPS que já foi aceito na
-              prefeitura para a sequência continuar daí.
+              A próxima NFS-e deste CNPJ sairá com o número {form.proximo_numero || '1'}. Salve para
+              gravar. Troque o emitente acima para configurar a última nota do outro CNPJ.
             </Text>
             <FormTextInput
               label="Código IBGE"

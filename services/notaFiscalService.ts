@@ -65,21 +65,35 @@ function resolverDescricaoServico(
 }
 
 function isNumeroSerieDuplicado(msg?: string): boolean {
-  return /nota_fiscal_user_id_serie_numero_key|duplicate key value violates unique constraint/i.test(msg ?? '');
+  return /nota_fiscal_user_id_serie_numero_key|uq_nota_fiscal_emitente_serie_numero|duplicate key value violates unique constraint/i.test(
+    msg ?? '',
+  );
 }
 
-/** A unique da nota é (usuário, série, número), compartilhada entre os CNPJs. */
-async function proximoNumeroLivre(userId: string, serie: string, sugerido: number): Promise<number> {
-  const { data, error } = await supabase
+/** Próximo RPS livre só deste CNPJ. O outro emitente tem sequência própria. */
+async function proximoNumeroLivre(
+  userId: string,
+  emitenteId: string | null | undefined,
+  serie: string,
+  sugerido: number,
+): Promise<number> {
+  const inicio = Math.max(1, Number(sugerido) || 1);
+  let q = supabase
     .from('nota_fiscal')
     .select('numero')
     .eq('user_id', userId)
     .eq('serie', serie)
-    .order('numero', { ascending: false })
-    .limit(1);
+    .gte('numero', inicio);
+  if (emitenteId) q = q.eq('emitente_id', emitenteId);
+  else q = q.is('emitente_id', null);
+
+  const { data, error } = await q.order('numero', { ascending: true }).limit(500);
   if (error) throw new Error(error.message);
-  const maior = Number(data?.[0]?.numero) || 0;
-  return Math.max(Number(sugerido) || 1, maior + 1);
+
+  const usados = new Set((data ?? []).map((row) => Number((row as { numero?: number }).numero) || 0));
+  let numero = inicio;
+  while (usados.has(numero)) numero += 1;
+  return numero;
 }
 
 async function inserirRascunhoNota(params: {
@@ -90,7 +104,12 @@ async function inserirRascunhoNota(params: {
   valor: number;
 }): Promise<string> {
   const serie = String(params.emitente.serie ?? '1');
-  let numero = await proximoNumeroLivre(params.userId, serie, params.emitente.proximo_numero);
+  let numero = await proximoNumeroLivre(
+    params.userId,
+    params.emitente.id,
+    serie,
+    params.emitente.proximo_numero,
+  );
   let ultimoErro: string | undefined;
 
   for (let tentativa = 0; tentativa < 8; tentativa++) {
@@ -111,12 +130,6 @@ async function inserirRascunhoNota(params: {
       const notaId = nf.id as string;
       await inserirItensNotaFiscal(notaId, params.emitente, params.descricao, params.valor);
       await bumpProximoNumero(params.userId, params.emitente, numero + 1);
-      await supabase
-        .from('nfse_emitente')
-        .update({ proximo_numero: numero + 1 })
-        .eq('user_id', params.userId)
-        .eq('serie', serie)
-        .lt('proximo_numero', numero + 1);
       return notaId;
     }
 
@@ -126,14 +139,14 @@ async function inserirRascunhoNota(params: {
   }
 
   throw new Error(
-    'O número desta série de NFS-e já está em uso em outra nota. Tente emitir de novo.',
+    'Este número já foi usado neste CNPJ. Ajuste a última nota em Configurações › NFS-e.',
   );
 }
 
 function wrapNotaFiscalInsertError(msg?: string): Error {
   if (!msg) return new Error('Falha ao criar rascunho da NFS-e.');
   if (isNumeroSerieDuplicado(msg)) {
-    return new Error('O número desta série de NFS-e já está em uso em outra nota. Tente emitir de novo.');
+    return new Error('Este número já foi usado neste CNPJ. Ajuste a última nota em Configurações › NFS-e.');
   }
   if (/emitente_id|nfse_emitente/i.test(msg) && /does not exist|column|schema cache|42P01/i.test(msg)) {
     return new Error(
@@ -677,11 +690,16 @@ export async function reemitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emi
     ? await fetchEmitenteById(userId, nota.emitente_id as string)
     : await fetchEmitentePadrao(userId);
 
-  const { data: usados } = await supabase
+  const serieNota = String((nota as { serie?: string }).serie ?? '1');
+  let usadosQuery = supabase
     .from('nota_fiscal')
     .select('numero')
     .eq('user_id', userId)
-    .eq('serie', String((nota as { serie?: string }).serie ?? '1'));
+    .eq('serie', serieNota);
+  const emitenteNotaId = (nota as { emitente_id?: string | null }).emitente_id;
+  if (emitenteNotaId) usadosQuery = usadosQuery.eq('emitente_id', emitenteNotaId);
+  else usadosQuery = usadosQuery.is('emitente_id', null);
+  const { data: usados } = await usadosQuery;
   const maiorUsado = (usados ?? []).reduce((max, row) => {
     const n = Number((row as { numero?: number }).numero) || 0;
     return n > max ? n : max;

@@ -6,16 +6,15 @@ const { resolveEmitenteContexto } = require('./_lib/nfseEmitenteResolve');
 const { tentarEnviarEmailDanfe } = require('./_lib/enviarEmailDanfe');
 
 /**
- * Próximo RPS livre (maior que o atual e que qualquer nota da mesma série).
- * Usado quando o ADN rejeita "RPS/chave já existe" — reenviar o mesmo número sempre falha.
+ * Próximo RPS livre deste CNPJ (não olha a sequência do outro emitente).
+ * Usado quando o ADN rejeita "RPS/chave já existe".
  */
 async function realocarNumeroRps(admin, { userId, nota, emitenteId }) {
   const serie = String(nota.serie ?? '1');
-  const { data, error } = await admin
-    .from('nota_fiscal')
-    .select('numero')
-    .eq('user_id', userId)
-    .eq('serie', serie);
+  let q = admin.from('nota_fiscal').select('numero').eq('user_id', userId).eq('serie', serie);
+  if (emitenteId) q = q.eq('emitente_id', emitenteId);
+  else q = q.is('emitente_id', null);
+  const { data, error } = await q;
   if (error) throw new Error(error.message);
 
   let max = Number(nota.numero) || 0;
