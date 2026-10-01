@@ -8,6 +8,16 @@ function onlyDigits(value) {
   return String(value ?? '').replace(/\D/g, '');
 }
 
+function textoSemAcento(value, fallback) {
+  const base = String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return base || fallback;
+}
+
 function authUrl(ambiente) {
   if (ambiente === 'sandbox') {
     return 'https://sandbox.sicoob.com.br/auth/realms/cooperado/protocol/openid-connect/token';
@@ -113,10 +123,7 @@ async function getSicoobAccessToken({ config, certPath, senha }) {
 }
 
 function clipInstrucao(line) {
-  return String(line ?? '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 40);
+  return textoSemAcento(line, '').slice(0, 40);
 }
 
 function splitInstrucoes(instrucoes) {
@@ -129,14 +136,17 @@ function splitInstrucoes(instrucoes) {
 
 function buildPagadorFromCliente(cliente) {
   const doc = onlyDigits(cliente.cnpj ?? cliente.cpf ?? cliente.documento ?? '');
-  const nome = (cliente.nome_fantasia ?? cliente.nome ?? cliente.razao_social ?? 'Pagador').trim();
-  const logradouro = [cliente.logradouro, cliente.numero, cliente.complemento].filter(Boolean).join(', ');
+  const nome = textoSemAcento(cliente.nome_fantasia ?? cliente.nome ?? cliente.razao_social, 'Pagador');
+  const logradouro = textoSemAcento(
+    [cliente.logradouro, cliente.numero, cliente.complemento].filter(Boolean).join(' '),
+    'Nao informado',
+  );
   return {
     numeroCpfCnpj: doc,
     nome,
-    endereco: logradouro || 'Não informado',
-    bairro: (cliente.bairro ?? 'Centro').trim() || 'Centro',
-    cidade: (cliente.cidade ?? 'Não informado').trim() || 'Não informado',
+    endereco: logradouro,
+    bairro: textoSemAcento(cliente.bairro, 'Centro'),
+    cidade: textoSemAcento(cliente.cidade, 'Nao informado'),
     cep: onlyDigits(cliente.cep ?? '00000000').padStart(8, '0').slice(0, 8),
     uf: String(cliente.uf ?? cliente.estado ?? 'SP')
       .trim()

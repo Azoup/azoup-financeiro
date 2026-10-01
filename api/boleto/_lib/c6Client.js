@@ -7,6 +7,17 @@ function onlyDigits(value) {
   return String(value ?? '').replace(/\D/g, '');
 }
 
+/** C6 recusa acento e pontuação em city, street e name. */
+function textoC6(value, fallback) {
+  const base = String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return base || fallback;
+}
+
 function apiBaseUrl(ambiente) {
   if (ambiente === 'sandbox') {
     return 'https://baas-api-sandbox.c6bank.info';
@@ -212,9 +223,9 @@ function buildC6Payload({ boleto, config, cliente }) {
   const taxId = onlyDigits(cliente.cnpj ?? cliente.cpf ?? cliente.documento ?? '');
   if (!taxId) throw new Error('Cliente sem CPF/CNPJ válido para emissão de boleto C6.');
 
-  const name = (cliente.nome_fantasia ?? cliente.nome ?? cliente.razao_social ?? 'Pagador').trim();
-  const street = (cliente.logradouro ?? 'Nao informado').trim() || 'Nao informado';
-  let city = (cliente.cidade ?? 'Nao informado').trim() || 'Nao informado';
+  const name = textoC6(cliente.nome_fantasia ?? cliente.nome ?? cliente.razao_social, 'Pagador');
+  const street = textoC6(cliente.logradouro, 'Nao informado');
+  let city = textoC6(cliente.cidade, 'Nao informado');
   if (city.length < 3) city = 'Nao informado';
   const state = String(cliente.uf ?? cliente.estado ?? 'SP')
     .trim()
@@ -235,7 +246,9 @@ function buildC6Payload({ boleto, config, cliente }) {
     String(config.billing_scheme || '').trim() ||
     (config.ambiente === 'producao' ? '15' : '21');
 
-  const instructions = splitInstrucoes(boleto.instrucoes);
+  const instructions = splitInstrucoes(boleto.instrucoes)
+    .map((line) => textoC6(line, ''))
+    .filter(Boolean);
   if (!instructions.length) instructions.push('Pagamento referente a servicos prestados.');
 
   const address = {
@@ -245,7 +258,7 @@ function buildC6Payload({ boleto, config, cliente }) {
     state,
     zip_code: zip,
   };
-  const complement = (cliente.complemento ?? '').trim();
+  const complement = textoC6(cliente.complemento, '');
   if (complement) address.complement = complement.slice(0, 50);
 
   const payload = {
