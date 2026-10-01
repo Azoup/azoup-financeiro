@@ -337,7 +337,13 @@ export async function criarMensalidadesGeradasLote(params: {
   duplicados: number;
   avisoBoleto?: string;
   avisoEmail?: string;
-  nf?: { emitidas: number; rejeitadas: number; ignoradas: number; erros: string[] };
+  nf?: {
+    emitidas: number;
+    rejeitadas: number;
+    ignoradas: number;
+    erros: string[];
+    emails_enviados?: number;
+  };
 }> {
   const comp = params.competencia?.trim() || null;
   const ultimos = await fetchUltimoVencimentoMensalidadePorCliente(params.userId, params.clienteIds);

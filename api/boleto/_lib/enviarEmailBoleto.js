@@ -127,7 +127,7 @@ function corpoHtml(texto) {
  * Envia e-mail via Resend HTTP API.
  * @returns {{ enviado?: boolean, skipped?: boolean, reason?: string, to?: string, error?: string }}
  */
-async function enviarEmailResend({ to, subject, text, pdfBuffer, filename }) {
+async function enviarEmailResend({ to, subject, text, pdfBuffer, filename, attachments }) {
   const apiKey = safeTrim(process.env.RESEND_API_KEY);
   if (!apiKey) {
     return { skipped: true, reason: 'email_nao_configurado' };
@@ -143,14 +143,14 @@ async function enviarEmailResend({ to, subject, text, pdfBuffer, filename }) {
     html: corpoHtml(text),
   };
 
+  const files = Array.isArray(attachments) ? [...attachments] : [];
   if (pdfBuffer?.length) {
-    payload.attachments = [
-      {
-        filename: filename || 'boleto.pdf',
-        content: pdfBuffer.toString('base64'),
-      },
-    ];
+    files.push({
+      filename: filename || 'boleto.pdf',
+      content: Buffer.isBuffer(pdfBuffer) ? pdfBuffer.toString('base64') : String(pdfBuffer),
+    });
   }
+  if (files.length) payload.attachments = files;
 
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',

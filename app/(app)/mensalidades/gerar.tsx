@@ -539,6 +539,13 @@ export default function GerarMensalidadeScreen() {
       }
       if (gerarNotaFiscal && nf) {
         extras.push(`${nf.emitidas} NFS-e autorizada(s)`);
+        if (nf.emails_enviados > 0) {
+          extras.push(
+            nf.emails_enviados === 1
+              ? 'DANFE enviada por e-mail'
+              : `${nf.emails_enviados} DANFEs enviadas por e-mail`,
+          );
+        }
         if (nf.rejeitadas > 0) extras.push(`${nf.rejeitadas} NF rejeitada(s) — veja em Notas fiscais`);
         if (nf.ignoradas > 0) extras.push(`${nf.ignoradas} sem NF no cadastro`);
       }

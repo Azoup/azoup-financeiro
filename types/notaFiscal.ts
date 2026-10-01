@@ -159,6 +159,7 @@ export type EmitirNfeResult = {
   codigo_verificacao?: string;
   danfe_url?: string;
   message?: string;
+  email?: { enviado?: boolean; skipped?: boolean; reason?: string; to?: string; error?: string };
 };
 
 /** Ambiente fiscal de emissão NFS-e: 1 = produção, 2 = homologação. */

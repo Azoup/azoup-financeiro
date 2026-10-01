@@ -537,7 +537,7 @@ export async function gerarNotaFiscalParaMensalidade(
   userId: string,
   mensalidade: MensalidadeNfInput,
   opts?: EmitOpts,
-): Promise<{ success: boolean; notaId?: string; message?: string; ignorada?: boolean }> {
+): Promise<{ success: boolean; notaId?: string; message?: string; ignorada?: boolean; emailEnviado?: boolean }> {
   const existente = await fetchUltimaNotaFiscalMensalidade(userId, mensalidade.id);
   if (existente?.status === 'autorizada') {
     return {
@@ -550,7 +550,7 @@ export async function gerarNotaFiscalParaMensalidade(
   const notaId = await criarNotaFiscalRascunhoMensalidade(userId, mensalidade, opts);
   const res = await emitirNotaFiscalSefaz(notaId);
   if (res.success) {
-    return { success: true, notaId };
+    return { success: true, notaId, emailEnviado: Boolean(res.email?.enviado) };
   }
   return { success: false, notaId, message: res.message };
 }
@@ -833,7 +833,7 @@ export async function gerarNotasFiscaisParaMensalidades(
   userId: string,
   mensalidades: MensalidadeNfInput[],
   opts?: EmitOpts,
-): Promise<{ emitidas: number; rejeitadas: number; ignoradas: number; erros: string[] }> {
+): Promise<{ emitidas: number; rejeitadas: number; ignoradas: number; erros: string[]; emails_enviados: number }> {
   const padrao = await fetchEmitentePadrao(userId);
   const emitenteId = opts?.emitenteId || padrao?.id;
   if (emitenteId) {
@@ -865,6 +865,7 @@ export async function gerarNotasFiscaisParaMensalidades(
   let emitidas = 0;
   let rejeitadas = 0;
   let ignoradas = 0;
+  let emailsEnviados = 0;
   const erros: string[] = [];
 
   for (const m of mensalidades) {
@@ -881,6 +882,7 @@ export async function gerarNotasFiscaisParaMensalidades(
       }
       if (result.success) {
         emitidas += 1;
+        if (result.emailEnviado) emailsEnviados += 1;
       } else {
         rejeitadas += 1;
         if (result.message) erros.push(result.message);
@@ -891,7 +893,7 @@ export async function gerarNotasFiscaisParaMensalidades(
     }
   }
 
-  return { emitidas, rejeitadas, ignoradas, erros };
+  return { emitidas, rejeitadas, ignoradas, erros, emails_enviados: emailsEnviados };
 }
 
 /** Mapa mensalidade_id → nota fiscal (qualquer status exceto cancelada). */

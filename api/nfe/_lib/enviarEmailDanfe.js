@@ -1,0 +1,108 @@
+/**
+ * Após autorizar a NFS-e: envia a DANFE (HTML) e o XML ao e-mail do cliente.
+ * Mesmo remetente do boleto (Resend). Falha de e-mail não desfaz a nota.
+ */
+const { enviarEmailResend } = require('../../boleto/_lib/enviarEmailBoleto');
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function safeTrim(v) {
+  return typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim();
+}
+
+function formatBRL(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function htmlSemBotaoImprimir(html) {
+  return String(html).replace(/<p class="noprint"[\s\S]*?<\/p>/gi, '');
+}
+
+async function fetchEmailCliente(admin, clienteId) {
+  const id = safeTrim(clienteId);
+  if (!id) return null;
+  const { data, error } = await admin
+    .from('contatos_cliente')
+    .select('valor_contato')
+    .eq('cliente_id', id)
+    .eq('tipo_contato', 'email')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) return null;
+  const email = safeTrim(data?.valor_contato);
+  return email && EMAIL_RE.test(email) ? email : null;
+}
+
+async function baixarHtmlDanfe(admin, storagePath) {
+  const path = safeTrim(storagePath);
+  if (!path) return null;
+  const { data, error } = await admin.storage.from('nota_fiscal_danfe').download(path);
+  if (error || !data) return null;
+  const buf = Buffer.from(await data.arrayBuffer());
+  const html = buf.toString('utf8');
+  return html.includes('<html') ? htmlSemBotaoImprimir(html) : null;
+}
+
+async function tentarEnviarEmailDanfe(admin, { nota, cliente, danfeStoragePath, xml, danfeUrl }) {
+  try {
+    const clienteId = nota?.cliente_id || cliente?.id;
+    const to = await fetchEmailCliente(admin, clienteId);
+    if (!to) return { skipped: true, reason: 'sem_email_cadastro' };
+
+    const nome =
+      safeTrim(cliente?.nome_fantasia) || safeTrim(cliente?.nome) || 'cliente';
+    const serie = safeTrim(nota?.serie) || '1';
+    const numero = safeTrim(nota?.numero) || 's_numero';
+    const linhas = [
+      `Olá, ${nome}!`,
+      '',
+      'Segue a NFS-e referente ao serviço prestado:',
+      `• Nota: ${serie}/${numero}`,
+      `• Valor: ${formatBRL(nota?.valor_total)}`,
+      nota?.competencia ? `• Competência: ${safeTrim(nota.competencia)}` : null,
+      nota?.codigo_verificacao
+        ? `• Código de verificação: ${safeTrim(nota.codigo_verificacao)}`
+        : null,
+      danfeUrl ? `• DANFE: ${safeTrim(danfeUrl)}` : null,
+      '',
+      'A DANFE segue em anexo.',
+      '',
+      'Qualquer dúvida, estamos à disposição.',
+      'Atenciosamente.',
+    ].filter((l) => l != null);
+
+    const attachments = [];
+    const html = await baixarHtmlDanfe(admin, danfeStoragePath);
+    if (html) {
+      attachments.push({
+        filename: `DANFSe_${serie}_${numero}.html`,
+        content: Buffer.from(html, 'utf8').toString('base64'),
+      });
+    }
+    const xmlTexto = safeTrim(xml);
+    if (xmlTexto) {
+      attachments.push({
+        filename: `NFSe_${serie}_${numero}.xml`,
+        content: Buffer.from(xmlTexto, 'utf8').toString('base64'),
+      });
+    }
+    if (!attachments.length && !danfeUrl) {
+      return { skipped: true, reason: 'sem_pdf', to };
+    }
+
+    return await enviarEmailResend({
+      to,
+      subject: `NFS-e ${serie}/${numero}`.slice(0, 200),
+      text: linhas.join('\n'),
+      attachments,
+    });
+  } catch (e) {
+    console.warn('[email-danfe]', e?.message || e);
+    return { skipped: false, enviado: false, error: e?.message || 'Falha ao enviar DANFE.' };
+  }
+}
+
+module.exports = { tentarEnviarEmailDanfe };

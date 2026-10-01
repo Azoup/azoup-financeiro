@@ -3,6 +3,7 @@ const { emitirNfseSefaz } = require('./_lib/nfseEmit');
 const { isRpsChaveDuplicadaAdn } = require('./_lib/nfseErrors');
 const { prepareServerlessCryptoEnv } = require('./_lib/serverlessEnv');
 const { resolveEmitenteContexto } = require('./_lib/nfseEmitenteResolve');
+const { tentarEnviarEmailDanfe } = require('./_lib/enviarEmailDanfe');
 
 /**
  * Próximo RPS livre (maior que o atual e que qualquer nota da mesma série).
@@ -187,6 +188,17 @@ module.exports = async function handler(req, res) {
         emitente_id: nota.emitente_id || emitCtx.emitente?.id || null,
       })
       .eq('id', notaFiscalId);
+
+    result.email = await tentarEnviarEmailDanfe(admin, {
+      nota: {
+        ...notaAtual,
+        codigo_verificacao: result.codigo_verificacao ?? notaAtual.codigo_verificacao,
+      },
+      cliente,
+      danfeStoragePath: result.danfe_storage_path,
+      xml: result.xml_autorizado,
+      danfeUrl: result.danfe_url,
+    });
 
     return res.status(200).json(result);
   } catch (e) {
