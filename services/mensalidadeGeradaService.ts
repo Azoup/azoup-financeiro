@@ -3,6 +3,7 @@ import { gerarBoletosParaMensalidades } from '@/services/boletoParcelaService';
 import { gerarNotasFiscaisParaMensalidades } from '@/services/notaFiscalService';
 import type {
   CriarMensalidadeGeradaInput,
+  FalhaEmissao,
   MensalidadeGerada,
   MensalidadeGeradaStatusDb,
   PagamentoMensalidadeGerada,
@@ -344,6 +345,7 @@ export async function criarMensalidadesGeradasLote(params: {
     erros: string[];
     emails_enviados?: number;
   };
+  falhas: FalhaEmissao[];
 }> {
   const comp = params.competencia?.trim() || null;
   const ultimos = await fetchUltimoVencimentoMensalidadePorCliente(params.userId, params.clienteIds);
@@ -352,6 +354,19 @@ export async function criarMensalidadesGeradasLote(params: {
   let semVencimento = 0;
   let ignorados = 0;
   let duplicados = 0;
+  const falhas: FalhaEmissao[] = [];
+  const nomePorId = new Map<string, string>();
+  if (params.clienteIds.length) {
+    const { data: nomes } = await supabase
+      .from('clientes')
+      .select('id, nome_fantasia, nome')
+      .in('id', params.clienteIds);
+    for (const r of nomes ?? []) {
+      const n = String(r.nome_fantasia || r.nome || '').trim();
+      nomePorId.set(r.id as string, n || 'Cliente');
+    }
+  }
+  const nomeDe = (id: string) => nomePorId.get(id) || 'Cliente';
 
   /** Evita 2º carnê/boleto se o usuário regenerar após timeout (ex.: 504 no C6). */
   const existentesAbertos = new Map<string, { vencimentos: Set<string>; competencias: Set<string> }>();
@@ -449,6 +464,11 @@ export async function criarMensalidadesGeradasLote(params: {
         : Number(cli?.mensalidade);
     if (!valorMensal || valorMensal <= 0) {
       ignorados += 1;
+      falhas.push({
+        cliente: nomeDe(clienteId),
+        tipo: 'mensalidade',
+        erro: 'Sem valor de mensalidade no cadastro.',
+      });
       continue;
     }
 
@@ -465,12 +485,22 @@ export async function criarMensalidadesGeradasLote(params: {
       });
       if (!plano?.length) {
         semVencimento += 1;
+        falhas.push({
+          cliente: nomeDe(clienteId),
+          tipo: 'mensalidade',
+          erro: 'Sem dia de vencimento no cadastro.',
+        });
         continue;
       }
       const loteId = newLoteId();
       for (const p of plano) {
         if (jaExisteCobranca(clienteId, p.data_vencimento)) {
           duplicados += 1;
+          falhas.push({
+            cliente: nomeDe(clienteId),
+            tipo: 'mensalidade',
+            erro: `Já havia cobrança neste vencimento (${p.data_vencimento}).`,
+          });
           continue;
         }
         rows.push({
@@ -500,6 +530,11 @@ export async function criarMensalidadesGeradasLote(params: {
       });
     } catch {
       semVencimento += 1;
+      falhas.push({
+        cliente: nomeDe(clienteId),
+        tipo: 'mensalidade',
+        erro: 'Sem dia de vencimento no cadastro.',
+      });
       continue;
     }
 
@@ -516,12 +551,22 @@ export async function criarMensalidadesGeradasLote(params: {
       });
       if (!plano?.length) {
         semVencimento += 1;
+        falhas.push({
+          cliente: nomeDe(clienteId),
+          tipo: 'mensalidade',
+          erro: 'Sem dia de vencimento no cadastro.',
+        });
         continue;
       }
       const loteId = newLoteId();
       for (const p of plano) {
         if (jaExisteCobranca(clienteId, p.data_vencimento)) {
           duplicados += 1;
+          falhas.push({
+            cliente: nomeDe(clienteId),
+            tipo: 'mensalidade',
+            erro: `Já havia cobrança neste vencimento (${p.data_vencimento}).`,
+          });
           continue;
         }
         rows.push({
@@ -543,6 +588,11 @@ export async function criarMensalidadesGeradasLote(params: {
 
     if (jaExisteCobranca(clienteId, dataVenc)) {
       duplicados += 1;
+      falhas.push({
+        cliente: nomeDe(clienteId),
+        tipo: 'mensalidade',
+        erro: `Já havia cobrança neste vencimento (${dataVenc}).`,
+      });
       continue;
     }
 
@@ -563,6 +613,7 @@ export async function criarMensalidadesGeradasLote(params: {
       ignorados,
       semVencimento,
       duplicados,
+      falhas,
     };
   }
 
@@ -610,6 +661,7 @@ export async function criarMensalidadesGeradasLote(params: {
 
   let avisoBoleto: string | undefined;
   let avisoEmail: string | undefined;
+  let falhasBoleto: { mensalidadeId: string | null; erro: string }[] = [];
   if (criadosRows.length) {
     try {
       const boletoRes = await gerarBoletosParaMensalidades(
@@ -625,11 +677,23 @@ export async function criarMensalidadesGeradasLote(params: {
       );
       avisoBoleto = boletoRes.avisoBoleto ?? boletoRes.avisoSicoob;
       avisoEmail = boletoRes.avisoEmail;
+      falhasBoleto = boletoRes.falhasBoleto ?? [];
     } catch (eb) {
       // Não apaga mensalidades: o C6 pode ter registrado boletos órfãos no banco.
       // Mantém carnês para o usuário concluir com “Registrar no C6” / cancelar.
       avisoBoleto = (eb as Error).message ?? 'Falha ao gerar carnês em contas a receber.';
+      falhasBoleto = criadosRows.map((m) => ({ mensalidadeId: m.id, erro: avisoBoleto! }));
     }
+  }
+
+  const clientePorMensalidade = new Map(criadosRows.map((m) => [m.id, m.cliente_id]));
+  for (const f of falhasBoleto) {
+    const cid = f.mensalidadeId ? clientePorMensalidade.get(f.mensalidadeId) : undefined;
+    falhas.push({
+      cliente: cid ? nomeDe(cid) : 'Cliente',
+      tipo: 'boleto',
+      erro: f.erro,
+    });
   }
 
   let nfResult;
@@ -655,11 +719,29 @@ export async function criarMensalidadesGeradasLote(params: {
         rejeitadas: criadosRows.length,
         ignoradas: 0,
         erros: [(e as Error).message],
+        emails_enviados: 0,
       };
+    }
+    for (const linha of nfResult?.erros ?? []) {
+      const idx = linha.indexOf(': ');
+      if (idx > 0) {
+        falhas.push({ cliente: linha.slice(0, idx), tipo: 'nota', erro: linha.slice(idx + 2) });
+      } else {
+        falhas.push({ cliente: 'Lote', tipo: 'nota', erro: linha });
+      }
     }
   }
 
-  return { criados: criadosRows.length, ignorados, semVencimento, duplicados, avisoBoleto, avisoEmail, nf: nfResult };
+  return {
+    criados: criadosRows.length,
+    ignorados,
+    semVencimento,
+    duplicados,
+    avisoBoleto,
+    avisoEmail,
+    nf: nfResult,
+    falhas,
+  };
 }
 
 export async function registrarPagamentoMensalidadeGerada(

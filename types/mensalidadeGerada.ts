@@ -30,6 +30,14 @@ export interface MensalidadeGerada {
   cliente_emitente_nf_id?: string | null;
 }
 
+export type FalhaEmissaoTipo = 'nota' | 'mensalidade' | 'boleto';
+
+export type FalhaEmissao = {
+  cliente: string;
+  tipo: FalhaEmissaoTipo;
+  erro: string;
+};
+
 export interface PagamentoMensalidadeGerada {
   id: string;
   mensalidade_id: string;

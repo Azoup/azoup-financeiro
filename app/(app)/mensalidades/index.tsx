@@ -1,4 +1,5 @@
 import { AcoesMenuModal, type AcaoMenuItem } from '@/components/AcoesMenuModal';
+import { FalhaEmissaoLista } from '@/components/FalhaEmissaoLista';
 import { Card } from '@/components/Card';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmitirNfseModal';
@@ -33,6 +34,7 @@ import {
 } from '@/services/notaFiscalService';
 import { colors, radius, spacing } from '@/theme/colors';
 import type {
+  FalhaEmissao,
   MensalidadeGerada,
   MensalidadeGeradaStatusVisual,
   PagamentoMensalidadeGerada,
@@ -43,7 +45,7 @@ import { reaisParaCentavos } from '@/utils/vendasParcelas';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -158,6 +160,11 @@ export default function HistoricoMensalidadesGeradasScreen() {
   const [nfFiltro, setNfFiltro] = useState<NfFiltro>('todas');
   const [selecionadas, setSelecionadas] = useState<string[]>([]);
   const [nfLoteBusy, setNfLoteBusy] = useState(false);
+  const [falhasTela, setFalhasTela] = useState<FalhaEmissao[]>([]);
+  const listaRef = useRef<FlatList<unknown>>(null);
+  const irParaFalhas = () => {
+    requestAnimationFrame(() => listaRef.current?.scrollToOffset({ offset: 0, animated: true }));
+  };
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [pagamentos, setPagamentos] = useState<Record<string, PagamentoMensalidadeGerada[]>>({});
@@ -520,16 +527,39 @@ export default function HistoricoMensalidadesGeradasScreen() {
           router.push('/(app)/notas-fiscais');
         }
       } else if (res.ignorada) {
+        setFalhasTela((prev) => [
+          {
+            cliente: unwrapCliente(m).nome,
+            tipo: 'nota',
+            erro: res.message ?? 'Cliente sem NF no cadastro. A nota não foi gerada.',
+          },
+          ...prev,
+        ]);
+        irParaFalhas();
         showAppInfo(res.message ?? 'Cliente sem NF no cadastro (lote automático).');
       } else {
-        showAppError(
-          res.message ?? 'Não foi possível emitir a NFS-e.',
-          res.notaId ? 'Toque em Notas fiscais para ver o motivo e reemitir.' : undefined,
-        );
-        if (res.notaId) router.push('/(app)/notas-fiscais');
+        setFalhasTela((prev) => [
+          {
+            cliente: unwrapCliente(m).nome,
+            tipo: 'nota',
+            erro: res.message ?? 'Não foi possível emitir a NFS-e.',
+          },
+          ...prev,
+        ]);
+        irParaFalhas();
+        showAppError(res.message ?? 'Não foi possível emitir a NFS-e.', 'O erro ficou listado nesta tela.');
       }
     } catch (e) {
-      showAppError((e as Error).message);
+      setFalhasTela((prev) => [
+        {
+          cliente: unwrapCliente(m).nome,
+          tipo: 'nota',
+          erro: (e as Error).message,
+        },
+        ...prev,
+      ]);
+      irParaFalhas();
+      showAppError((e as Error).message, 'O erro ficou listado nesta tela.');
     } finally {
       setNfBusyId(null);
     }
@@ -580,7 +610,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
     }
     setNfLoteBusy(true);
     let ok = 0;
-    const erros: string[] = [];
+    const lista: FalhaEmissao[] = [];
     try {
       for (const m of alvos) {
         const nome = unwrapCliente(m).nome;
@@ -600,27 +630,26 @@ export default function HistoricoMensalidadesGeradasScreen() {
             setNfEmitidas((prev) => ({ ...prev, [m.id]: { numero: null } }));
             setSelecionadas((prev) => prev.filter((id) => id !== m.id));
           } else {
-            erros.push(`${nome}: ${res.message ?? 'não emitida'}`);
+            lista.push({ cliente: nome, tipo: 'nota', erro: res.message ?? 'Não emitida.' });
           }
         } catch (e) {
-          erros.push(`${nome}: ${(e as Error).message}`);
+          lista.push({ cliente: nome, tipo: 'nota', erro: (e as Error).message });
         }
       }
     } finally {
       setNfLoteBusy(false);
+      setFalhasTela(lista);
+      if (lista.length) irParaFalhas();
     }
-    if (ok && !erros.length) {
+    if (ok && !lista.length) {
       showAppSuccess(
         ok === 1 ? '1 NFS-e emitida.' : `${ok} NFS-e emitidas.`,
         'As que falharem continuam sem nota para tentar de novo.',
       );
-    } else if (ok && erros.length) {
-      showAppInfo(
-        `${ok} emitida(s), ${erros.length} com erro.`,
-        erros.slice(0, 3).join(' · '),
-      );
+    } else if (ok && lista.length) {
+      showAppInfo(`${ok} emitida(s), ${lista.length} com erro.`, 'A lista ficou nesta tela.');
     } else {
-      showAppError(erros[0] ?? 'Nenhuma NFS-e foi emitida.', erros.slice(1, 3).join(' · ') || undefined);
+      showAppError(lista[0]?.erro ?? 'Nenhuma NFS-e foi emitida.', 'A lista ficou nesta tela.');
     }
   };
 
@@ -874,6 +903,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
 
   const listHeader = (
     <>
+      <FalhaEmissaoLista falhas={falhasTela} onFechar={() => setFalhasTela([])} />
       {clienteFiltro ? (
         <View style={styles.banner}>
           <Text style={styles.bannerTxt}>Filtrando por um cliente</Text>
@@ -1183,6 +1213,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
   return (
     <View style={styles.root}>
       <FlatList
+        ref={listaRef}
         data={itemsPagina}
         keyExtractor={(it) => it.id}
         renderItem={renderLinha}

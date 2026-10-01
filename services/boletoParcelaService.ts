@@ -352,7 +352,7 @@ export async function gerarBoletosParaMensalidades(
     banco?: 'sicoob' | 'c6' | null;
     usarEmitenteDoCliente?: boolean;
   },
-): Promise<{ avisoSicoob?: string; avisoBoleto?: string; avisoEmail?: string }> {
+): Promise<{ avisoSicoob?: string; avisoBoleto?: string; avisoEmail?: string; falhasBoleto?: { mensalidadeId: string | null; erro: string }[] }> {
   if (!mensalidades.length) return {};
 
   const usarDoCliente = opts?.usarEmitenteDoCliente !== false;
@@ -486,35 +486,85 @@ export async function gerarBoletosParaMensalidades(
   const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
   const avisos: string[] = [];
   const emails: string[] = [];
+  const falhas: { mensalidadeId: string | null; erro: string }[] = [];
+  const vistosBoleto = new Set<string>();
+  const mensalidadePorBoleto = new Map(
+    insertedRows.map((b) => [b.id, b.mensalidade_id] as const),
+  );
+
+  const registrarFalhaBoleto = (boletoId: string | null, erro: string) => {
+    const texto = erro.trim();
+    if (!texto) return;
+    if (boletoId) {
+      if (vistosBoleto.has(boletoId)) return;
+      vistosBoleto.add(boletoId);
+    }
+    falhas.push({
+      mensalidadeId: boletoId ? (mensalidadePorBoleto.get(boletoId) ?? null) : null,
+      erro: texto,
+    });
+  };
+
+  const registrarTextoBoleto = (texto: string, idsGrupo: string[]) => {
+    const linhas = texto.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+    const comId = new Set<string>();
+    for (const linha of linhas) {
+      const m = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):\s*([\s\S]+)$/i.exec(
+        linha,
+      );
+      if (m) {
+        comId.add(m[1]);
+        registrarFalhaBoleto(m[1], m[2]);
+      }
+    }
+    if (!comId.size) {
+      for (const id of idsGrupo) registrarFalhaBoleto(id, linhas.join(' ') || texto);
+    }
+  };
 
   for (const g of grupos.values()) {
     if (g.banco === 'c6') {
       if (!g.emitenteId) {
-        avisos.push(
-          'Falta empresa C6 no cadastro do cliente. Defina a empresa (CNPJ) no cliente ou em Configurações › NFS-e.',
-        );
+        const msg =
+          'Falta empresa C6 no cadastro do cliente. Defina a empresa (CNPJ) no cliente ou em Configurações › NFS-e.';
+        avisos.push(msg);
+        registrarTextoBoleto(msg, g.ids);
         continue;
       }
       try {
         const lote = await emitirBoletosC6Lote(userId, g.emitenteId, g.ids, { modoRapido: true });
         const msg = resumoEmailBoletosLote(lote);
         if (msg) emails.push(msg);
+        if (lote.erros?.length) registrarTextoBoleto(lote.erros.join('\n'), g.ids);
+        for (const r of lote.resultados ?? []) {
+          if (r && r.success === false && r.message) {
+            registrarFalhaBoleto(r.boletoId ?? null, r.message);
+          }
+        }
       } catch (e) {
-        avisos.push(
+        const msg =
           (e as Error).message ??
-            'Registro C6 pendente. Use “Registrar no C6” na mensalidade.',
-        );
+          'Registro C6 pendente. Use “Registrar no C6” na mensalidade.';
+        avisos.push(msg);
+        registrarTextoBoleto(msg, g.ids);
       }
     } else {
       try {
         const lote = await emitirBoletosSicoobLote(userId, g.ids, { exigirRegistro: true });
         const msg = resumoEmailBoletosLote(lote);
         if (msg) emails.push(msg);
+        if (lote.erros?.length) registrarTextoBoleto(lote.erros.join('\n'), g.ids);
+        for (const r of lote.resultados ?? []) {
+          if (r && r.success === false && r.message) {
+            registrarFalhaBoleto(r.boletoId ?? null, r.message);
+          }
+        }
       } catch (e) {
-        avisos.push(
+        const msg =
           (e as Error).message ??
-            'Registro bancário Sicoob não concluído; carnê permanece em A receber.',
-        );
+          'Registro bancário Sicoob não concluído; carnê permanece em A receber.';
+        avisos.push(msg);
+        registrarTextoBoleto(msg, g.ids);
       }
     }
   }
@@ -525,6 +575,7 @@ export async function gerarBoletosParaMensalidades(
     avisoBoleto,
     avisoSicoob: avisoBoleto,
     avisoEmail,
+    falhasBoleto: falhas,
   };
 }
 

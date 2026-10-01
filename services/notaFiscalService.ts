@@ -860,6 +860,8 @@ export async function gerarNotasFiscaisParaMensalidades(
   for (const m of mensalidades) {
     if (!emitePorCliente.get(m.cliente_id)) {
       ignoradas += 1;
+      const nome = nomePorCliente.get(m.cliente_id) ?? 'Cliente';
+      erros.push(`${nome}: Cadastro marcado como sem NF. A nota não foi gerada.`);
       continue;
     }
 

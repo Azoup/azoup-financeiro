@@ -1,4 +1,5 @@
 import { Card } from '@/components/Card';
+import { FalhaEmissaoLista } from '@/components/FalhaEmissaoLista';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { buildGerarMensalidadeExport } from '@/utils/exportReportBuilders';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -20,6 +21,7 @@ import { fetchCertificadoAtivoEmitente, ensureEmitentes } from '@/services/nfseE
 import { fetchCertificadoAtivo } from '@/services/nfeConfigService';
 import { fetchSegmentosCliente } from '@/services/segmentoClienteService';
 import { colors, radius, spacing } from '@/theme/colors';
+import type { FalhaEmissao } from '@/types/mensalidadeGerada';
 import type { ClienteListItem, SegmentoClienteRow } from '@/types/models';
 import { formatBRL } from '@/utils/currency';
 import {
@@ -95,7 +97,9 @@ export default function GerarMensalidadeScreen() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [enviarModalOpen, setEnviarModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [falhasTela, setFalhasTela] = useState<FalhaEmissao[]>([]);
   const envioEmAndamento = useRef(false);
+  const scrollRef = useRef<ScrollView>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   /** Mantém dados dos clientes selecionados mesmo se saírem do filtro. */
   const [selectedCache, setSelectedCache] = useState<Map<string, ClienteListItem>>(new Map());
@@ -517,7 +521,7 @@ export default function GerarMensalidadeScreen() {
         setPercentStr('');
         await load();
       }
-      const { criados, ignorados, semVencimento, duplicados, avisoBoleto, avisoEmail, nf } =
+      const { criados, ignorados, semVencimento, duplicados, avisoBoleto, avisoEmail, nf, falhas } =
         await criarMensalidadesGeradasLote({
         userId: user.id,
         clienteIds: ids,
@@ -578,19 +582,27 @@ export default function GerarMensalidadeScreen() {
           : null);
 
       Toast.show({
-        type: nfFalhou ? 'error' : 'success',
+        type: falhas.length || nfFalhou ? 'error' : 'success',
         text1: `${criados} mensalidade(s) gerada(s).${extras.length ? ` ${extras.join('; ')}.` : ''}`,
-        text2: nfFalhou
-          ? (nf?.erros?.slice(0, 2).join(' · ') ||
-              nfDetalhe ||
-              'Nenhuma NFS-e foi autorizada. Verifique certificado e configurações.')
-          : gerarNotaFiscal
-            ? 'Veja as notas em Notas fiscais.'
-            : 'Confira em A receber.',
-        visibilityTime: nfFalhou ? 12000 : 5000,
+        text2: falhas.length
+          ? 'A lista do que não gerou ficou nesta tela.'
+          : nfFalhou
+            ? (nf?.erros?.slice(0, 2).join(' · ') ||
+                nfDetalhe ||
+                'Nenhuma NFS-e foi autorizada. Verifique certificado e configurações.')
+            : gerarNotaFiscal
+              ? 'Veja as notas em Notas fiscais.'
+              : 'Confira em A receber.',
+        visibilityTime: falhas.length || nfFalhou ? 12000 : 5000,
       });
       setEnviarModalOpen(false);
-      router.replace(gerarNotaFiscal ? '/(app)/notas-fiscais' : '/(app)/contas-receber');
+      if (falhas.length) {
+        setFalhasTela(falhas);
+        requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: true }));
+      } else {
+        setFalhasTela([]);
+        router.replace(gerarNotaFiscal ? '/(app)/notas-fiscais' : '/(app)/contas-receber');
+      }
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
@@ -632,7 +644,11 @@ export default function GerarMensalidadeScreen() {
 
   return (
     <View style={styles.root}>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="always">
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="always"
+      >
         <ExportReportButtons
           compact
           disabled={loading}
@@ -649,6 +665,17 @@ export default function GerarMensalidadeScreen() {
             })
           }
         />
+        <FalhaEmissaoLista falhas={falhasTela} onFechar={() => setFalhasTela([])} />
+        {falhasTela.length > 0 ? (
+          <View style={styles.falhaAcoes}>
+            <Pressable onPress={() => router.push('/(app)/mensalidades')}>
+              <Text style={styles.falhaLink}>Abrir histórico</Text>
+            </Pressable>
+            <Pressable onPress={() => router.push('/(app)/notas-fiscais')}>
+              <Text style={styles.falhaLink}>Abrir notas fiscais</Text>
+            </Pressable>
+          </View>
+        ) : null}
         <Text style={styles.lead}>
           Filtre por mês de reajuste, selecione os clientes, aplique o percentual e gere as mensalidades.
         </Text>
@@ -1122,6 +1149,18 @@ const styles = StyleSheet.create({
     color: colors.gray600,
     lineHeight: 17,
     marginBottom: spacing.sm,
+  },
+  falhaAcoes: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.md,
+  },
+  falhaLink: {
+    color: colors.petroleum,
+    fontWeight: '700',
+    fontSize: 13,
   },
   card: {
     marginBottom: spacing.sm,
