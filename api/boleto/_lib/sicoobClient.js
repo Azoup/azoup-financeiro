@@ -239,7 +239,10 @@ async function emitirBoletoSicoobApi({ config, certPath, senha, payload, ambient
       res.json?.error_description ??
       res.raw ??
       `Sicoob rejeitou a emissão (${res.status}).`;
-    throw new Error(msg);
+    const err = new Error(msg);
+    err.status = res.status;
+    err.bancoRecusou = res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429;
+    throw err;
   }
 
   return extractBoletoResponse(res.json);
@@ -367,6 +370,7 @@ async function listarBoletosPagadorSicoobApi({ config, certPath, senha, numeroCp
   const agent = createMtlsAgent(certPath, senha);
   const params = new URLSearchParams({
     numeroCliente: String(config.numero_cliente),
+    codigoModalidade: String(config.codigo_modalidade ?? 1),
     codigoSituacao: '1',
     dataInicio,
     dataFim,

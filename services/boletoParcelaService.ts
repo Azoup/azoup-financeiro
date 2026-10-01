@@ -619,77 +619,13 @@ export async function registrarBoletosPendentesClientes(
   }[];
   if (!rows.length) return vazio;
 
-  const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
-  const avisos: string[] = [];
-  const emails: string[] = [];
-  const falhasBoleto: { mensalidadeId: string | null; clienteId: string | null; erro: string }[] = [];
-
-  const anotar = (loteErros: string[] | undefined, ids: string[], mensagemGrupo?: string) => {
-    const linhas = [...(loteErros ?? [])];
-    if (!linhas.length && mensagemGrupo) linhas.push(mensagemGrupo);
-    const comId = new Set<string>();
-    for (const linha of linhas) {
-      const m = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):\s*([\s\S]+)$/i.exec(
-        linha.trim(),
-      );
-      if (!m) continue;
-      comId.add(m[1]);
-      const bol = rows.find((b) => b.id === m[1]);
-      falhasBoleto.push({
-        mensalidadeId: bol?.mensalidade_id ?? null,
-        clienteId: bol?.mensalidade_id ? (clientePorMensalidade.get(bol.mensalidade_id) ?? null) : null,
-        erro: m[2].trim(),
-      });
-    }
-    if (!comId.size && mensagemGrupo) {
-      for (const id of ids) {
-        const bol = rows.find((b) => b.id === id);
-        falhasBoleto.push({
-          mensalidadeId: bol?.mensalidade_id ?? null,
-          clienteId: bol?.mensalidade_id ? (clientePorMensalidade.get(bol.mensalidade_id) ?? null) : null,
-          erro: mensagemGrupo,
-        });
-      }
-    }
-  };
-
-  const sicoobIds = rows.filter((b) => b.tipo_emissao !== 'c6').map((b) => b.id);
-  if (sicoobIds.length) {
-    try {
-      const lote = await emitirBoletosSicoobLote(userId, sicoobIds, { exigirRegistro: true });
-      const msg = resumoEmailBoletosLote(lote);
-      if (msg) emails.push(msg);
-      if (lote.erros?.length) anotar(lote.erros, sicoobIds);
-    } catch (e) {
-      const msg = (e as Error).message ?? 'Registro Sicoob não concluído.';
-      avisos.push(msg);
-      anotar(undefined, sicoobIds, msg);
-    }
-  }
-
-  const porEmitente = new Map<string, string[]>();
-  for (const b of rows) {
-    if (b.tipo_emissao !== 'c6' || !b.emitente_id) continue;
-    const lista = porEmitente.get(b.emitente_id) ?? [];
-    lista.push(b.id);
-    porEmitente.set(b.emitente_id, lista);
-  }
-  for (const [emitenteId, ids] of porEmitente) {
-    try {
-      const lote = await emitirBoletosC6Lote(userId, emitenteId, ids, { modoRapido: true });
-      const msg = resumoEmailBoletosLote(lote);
-      if (msg) emails.push(msg);
-      if (lote.erros?.length) anotar(lote.erros, ids);
-    } catch (e) {
-      const msg = (e as Error).message ?? 'Registro C6 não concluído.';
-      avisos.push(msg);
-      anotar(undefined, ids, msg);
-    }
-  }
-
+  const falhasBoleto = rows.map((b) => ({
+    mensalidadeId: b.mensalidade_id,
+    clienteId: b.mensalidade_id ? (clientePorMensalidade.get(b.mensalidade_id) ?? null) : null,
+    erro: 'Reemissão automática desligada. Um novo envio pode gerar outro boleto e outra tarifa no banco.',
+  }));
   return {
-    avisoBoleto: avisos.length ? avisos.join('\n') : undefined,
-    avisoEmail: emails.length ? emails.join('\n') : undefined,
+    avisoBoleto: 'Boletos pendentes não foram reenviados ao banco.',
     falhasBoleto,
   };
 }

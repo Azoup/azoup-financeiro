@@ -360,7 +360,10 @@ async function emitirBoletoC6Api({ config, certPath, keyPath, payload }) {
   });
 
   if (res.status < 200 || res.status >= 300) {
-    throw new Error(extractC6ApiError(res));
+    const err = new Error(extractC6ApiError(res));
+    err.status = res.status;
+    err.bancoRecusou = res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429;
+    throw err;
   }
 
   return extractC6BoletoResponse(res.json);

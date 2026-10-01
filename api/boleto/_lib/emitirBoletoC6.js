@@ -203,30 +203,45 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint, opts = 
       payload = { external_reference_id: boleto.c6_external_id };
     } else {
       payload = buildC6Payload({ boleto: boletoComValor, config: creds.config, cliente });
-      let lastErr = null;
-      // No máx. 2 tentativas e só em erro de rede/timeout — se o C6 já criou o boleto
-      // e a resposta falhou, um novo POST geraria duplicata no banco.
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          if (attempt > 0) await sleep(2500);
-          c6 = await emitirBoletoC6Api({
-            config: creds.config,
-            certPath: creds.certPath,
-            keyPath: creds.keyPath,
-            payload,
-          });
-          lastErr = null;
-          break;
-        } catch (e) {
-          lastErr = e;
-          const msg = String(e.message || '');
-          const redeOuTimeout = /timeout|ECONN|ENOTFOUND|EAI_AGAIN|socket|network|504|502|503/i.test(
-            msg,
-          );
-          if (!redeOuTimeout || attempt > 0) break;
-        }
+      const { data: ultima, error: histErr } = await admin
+        .from('historico_boleto_sicoob')
+        .select('acao')
+        .eq('boleto_id', boletoId)
+        .in('acao', ['TENTATIVA_EMISSAO_C6', 'EMISSAO_RECUSADA_C6', 'EMISSAO'])
+        .order('criado_em', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (histErr) throw new Error(histErr.message);
+      if (ultima?.acao === 'TENTATIVA_EMISSAO_C6') {
+        throw new Error(
+          'Não enviei outro boleto ao C6. Uma tentativa anterior pode ter sido aceita. Confira no banco antes de tentar de novo.',
+        );
       }
-      if (lastErr) throw lastErr;
+      const { error: tentErr } = await admin.from('historico_boleto_sicoob').insert({
+        boleto_id: boletoId,
+        acao: 'TENTATIVA_EMISSAO_C6',
+        usuario_id: userId,
+        detalhes: 'Enviando registro ao C6. Se esta chamada cair, a próxima não emite outro título.',
+      });
+      if (tentErr) throw new Error(tentErr.message);
+      try {
+        c6 = await emitirBoletoC6Api({
+          config: creds.config,
+          certPath: creds.certPath,
+          keyPath: creds.keyPath,
+          payload,
+        });
+      } catch (e) {
+        if (e?.bancoRecusou) {
+          await admin.from('historico_boleto_sicoob').insert({
+            boleto_id: boletoId,
+            acao: 'EMISSAO_RECUSADA_C6',
+            usuario_id: userId,
+            detalhes: e.message,
+          });
+        }
+        throw e;
+      }
     }
 
     if (!c6?.id) {

@@ -27,10 +27,19 @@ function diaIso(offsetDias) {
   return d.toISOString().slice(0, 10);
 }
 
-/** O Sicoob guarda o seu número com no máximo 15 caracteres (ex.: MEN-A8C6EBBA-SE). */
-async function acharBoletoJaEmitido({ config, certPath, senha, cliente, seuNumero, vencimento }) {
-  const alvo = String(seuNumero ?? '').trim().slice(0, 15).toUpperCase();
-  if (!alvo) return null;
+function seuNumeroAlvo(valor) {
+  return String(valor ?? '').trim().slice(0, 15).toUpperCase();
+}
+
+function numeroBanco(boleto) {
+  const n = Number(String(boleto?.nossoNumero ?? boleto?.nosso_numero ?? '').replace(/\D/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Consulta títulos em aberto do pagador. consultaOk false = não dá para afirmar que o banco não tem o boleto. */
+async function acharBoletosJaEmitidos({ config, certPath, senha, cliente, seuNumero, vencimento }) {
+  const alvo = seuNumeroAlvo(seuNumero);
+  if (!alvo) return { boletos: [], consultaOk: false, erro: 'Seu número vazio.' };
   const doc = String(cliente?.cnpj ?? cliente?.cpf ?? cliente?.documento ?? '');
   const venc = String(vencimento ?? '').slice(0, 10);
   const dataInicio = venc && venc < diaIso(-120) ? venc : diaIso(-120);
@@ -45,13 +54,71 @@ async function acharBoletoJaEmitido({ config, certPath, senha, cliente, seuNumer
       dataInicio,
       dataFim,
     });
-  } catch {
-    return null;
+  } catch (error) {
+    return { boletos: [], consultaOk: false, erro: error?.message ?? 'Consulta do pagador falhou.' };
   }
-  return (
-    lista.find((b) => String(b?.seuNumero ?? b?.seu_numero ?? '').trim().slice(0, 15).toUpperCase() === alvo) ??
-    null
-  );
+  const boletos = lista
+    .filter((b) => seuNumeroAlvo(b?.seuNumero ?? b?.seu_numero) === alvo)
+    .sort((a, b) => numeroBanco(b) - numeroBanco(a));
+  return { boletos, consultaOk: true, erro: null };
+}
+
+async function acoesEmissao(admin, boletoId) {
+  const { data, error } = await admin
+    .from('historico_boleto_sicoob')
+    .select('acao, criado_em')
+    .eq('boleto_id', boletoId)
+    .in('acao', ['TENTATIVA_EMISSAO', 'EMISSAO', 'EMISSAO_RECUSADA', 'CONSULTA_SEM_TITULO', 'ERRO'])
+    .order('criado_em', { ascending: false })
+    .limit(30);
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+/** Tentativa que pode ter chegado no banco e ainda não foi encerrada. */
+function tentativaIncerta(acoes) {
+  for (const acao of acoes) {
+    if (acao.acao === 'EMISSAO' || acao.acao === 'EMISSAO_RECUSADA' || acao.acao === 'CONSULTA_SEM_TITULO') {
+      return null;
+    }
+    if (acao.acao === 'TENTATIVA_EMISSAO' || acao.acao === 'ERRO') return acao;
+  }
+  return null;
+}
+
+async function registrarAcao(admin, boletoId, userId, acao, detalhes, payload) {
+  const { error } = await admin.from('historico_boleto_sicoob').insert({
+    boleto_id: boletoId,
+    acao,
+    usuario_id: userId,
+    detalhes,
+    payload_resposta: payload ?? null,
+  });
+  if (error) throw new Error(error.message);
+}
+
+/** Só uma emissão por carnê segue. A segunda requisição paralela não chama o banco. */
+async function reivindicarEmissao(admin, boleto) {
+  const claim = `LOCK:${Date.now()}`;
+  let q = admin
+    .from('boletos_parcela_venda')
+    .update({
+      tipo_emissao: 'sicoob',
+      status_registro: 'pendente',
+      mensagem_erro_registro: claim,
+    })
+    .eq('id', boleto.id)
+    .eq('user_id', boleto.user_id)
+    .in('status_registro', ['informativo', 'pendente', 'erro']);
+  if (boleto.mensagem_erro_registro == null) q = q.is('mensagem_erro_registro', null);
+  else q = q.eq('mensagem_erro_registro', boleto.mensagem_erro_registro);
+  const { data, error } = await q.select('id');
+  if (error) throw new Error(error.message);
+  if (!data?.length) {
+    const err = new Error('Outra emissão deste boleto já está em andamento. Não enviei outro título ao Sicoob.');
+    err.emAndamento = true;
+    throw err;
+  }
 }
 
 async function emitirUmBoleto(admin, userId, boletoId) {
@@ -74,6 +141,34 @@ async function emitirUmBoleto(admin, userId, boletoId) {
       nosso_numero_banco: boleto.nosso_numero_banco,
       pdf_url: boleto.pdf_url,
       message: 'Boleto já registrado no Sicoob.',
+    };
+  }
+
+  if (boleto.status_registro === 'pago' || boleto.status_registro === 'baixado') {
+    return {
+      success: true,
+      boletoId,
+      emitido_agora: false,
+      status_registro: boleto.status_registro,
+      message: 'Boleto já liquidado ou baixado. Não emiti outro.',
+    };
+  }
+
+  if (boleto.nosso_numero_banco) {
+    await admin
+      .from('boletos_parcela_venda')
+      .update({ status_registro: 'registrado', mensagem_erro_registro: null })
+      .eq('id', boletoId);
+    return {
+      success: true,
+      boletoId,
+      emitido_agora: false,
+      status_registro: 'registrado',
+      linha_digitavel: boleto.linha_digitavel,
+      codigo_barras: boleto.codigo_barras,
+      nosso_numero_banco: boleto.nosso_numero_banco,
+      pdf_url: boleto.pdf_url,
+      message: 'Este carnê já tem nosso número no Sicoob. Não emiti outro.',
     };
   }
 
@@ -178,17 +273,48 @@ async function emitirUmBoleto(admin, userId, boletoId) {
     notaFiscal = data;
   }
 
-  await admin
-    .from('boletos_parcela_venda')
-    .update({
-      tipo_emissao: 'sicoob',
-      status_registro: 'pendente',
-      mensagem_erro_registro: null,
-    })
-    .eq('id', boletoId);
-
   const certPath = await downloadCertToTemp(admin, cert.storage_path);
   const senha = await decryptCertPassword(admin, sec.senha_criptografada);
+
+  const adotar = async (jaNoBanco, payload, quantidade) => {
+    const updateRow = {
+      tipo_emissao: 'sicoob',
+      status_registro: 'registrado',
+      linha_digitavel: jaNoBanco.linhaDigitavel ?? jaNoBanco.linha_digitavel ?? boleto.linha_digitavel,
+      codigo_barras: jaNoBanco.codigoBarras ?? jaNoBanco.codigo_barras ?? boleto.codigo_barras,
+      nosso_numero_banco:
+        jaNoBanco.nossoNumero != null ? String(jaNoBanco.nossoNumero) : boleto.nosso_numero_banco,
+      sicoob_seu_numero: jaNoBanco.seuNumero ?? payload.seuNumero,
+      data_registro: boleto.data_registro || new Date().toISOString(),
+      mensagem_erro_registro: null,
+      nota_fiscal_id: notaFiscal?.id ?? boleto.nota_fiscal_id ?? null,
+    };
+    await admin.from('boletos_parcela_venda').update(updateRow).eq('id', boletoId);
+    await registrarAcao(
+      admin,
+      boletoId,
+      userId,
+      'EMISSAO',
+      quantidade > 1
+        ? `Havia ${quantidade} títulos com este seu número. Gravei o nosso número maior e não emiti outro.`
+        : 'Boleto já existia no Sicoob (seu número). Carnê atualizado sem emitir outro.',
+      jaNoBanco,
+    );
+    return {
+      success: true,
+      boletoId,
+      emitido_agora: false,
+      status_registro: 'registrado',
+      linha_digitavel: updateRow.linha_digitavel,
+      codigo_barras: updateRow.codigo_barras,
+      nosso_numero_banco: updateRow.nosso_numero_banco,
+      pdf_url: boleto.pdf_url,
+      message: 'Este boleto já estava no Sicoob. Atualizei o carnê e não emiti outro.',
+    };
+  };
+
+  let reservou = false;
+  let postIniciado = false;
 
   try {
     const payload = buildSicoobPayload({
@@ -199,47 +325,54 @@ async function emitirUmBoleto(admin, userId, boletoId) {
       beneficiarioDocumento: boleto.beneficiario_documento || perfil?.documento,
     });
 
-    const jaNoBanco = await acharBoletoJaEmitido({
+    const buscaArgs = {
       config,
       certPath,
       senha,
       cliente,
       seuNumero: payload.seuNumero,
       vencimento: boleto.data_vencimento,
-    });
-    if (jaNoBanco) {
-      const updateRow = {
-        tipo_emissao: 'sicoob',
-        status_registro: 'registrado',
-        linha_digitavel: jaNoBanco.linhaDigitavel ?? jaNoBanco.linha_digitavel ?? boleto.linha_digitavel,
-        codigo_barras: jaNoBanco.codigoBarras ?? jaNoBanco.codigo_barras ?? boleto.codigo_barras,
-        nosso_numero_banco:
-          jaNoBanco.nossoNumero != null ? String(jaNoBanco.nossoNumero) : boleto.nosso_numero_banco,
-        sicoob_seu_numero: jaNoBanco.seuNumero ?? payload.seuNumero,
-        data_registro: boleto.data_registro || new Date().toISOString(),
-        mensagem_erro_registro: null,
-        nota_fiscal_id: notaFiscal?.id ?? boleto.nota_fiscal_id ?? null,
-      };
-      await admin.from('boletos_parcela_venda').update(updateRow).eq('id', boletoId);
-      await admin.from('historico_boleto_sicoob').insert({
-        boleto_id: boletoId,
-        acao: 'EMISSAO',
-        usuario_id: userId,
-        detalhes: 'Boleto já existia no Sicoob (seu número). Carnê atualizado sem emitir outro.',
-        payload_resposta: jaNoBanco,
-      });
-      return {
-        success: true,
+    };
+
+    const ultima = tentativaIncerta(await acoesEmissao(admin, boletoId));
+    if (ultima) {
+      const busca = await acharBoletosJaEmitidos(buscaArgs);
+      if (busca.boletos.length) return await adotar(busca.boletos[0], payload, busca.boletos.length);
+      const idade = Date.now() - new Date(ultima.criado_em).getTime();
+      const recente = idade < 3 * 60 * 1000;
+      if (recente || !busca.consultaOk) {
+        const msg = recente
+          ? 'Emissão deste boleto ainda pode estar em andamento no Sicoob. Aguarde alguns minutos. Não enviei outro título.'
+          : 'Não emiti outro boleto. Uma tentativa anterior pode ter sido aceita pelo Sicoob e a consulta não confirmou. Confira no banco antes de tentar de novo.';
+        await admin
+          .from('boletos_parcela_venda')
+          .update({ tipo_emissao: 'sicoob', status_registro: 'erro', mensagem_erro_registro: msg })
+          .eq('id', boletoId);
+        throw new Error(msg);
+      }
+      await registrarAcao(
+        admin,
         boletoId,
-        emitido_agora: false,
-        status_registro: 'registrado',
-        linha_digitavel: updateRow.linha_digitavel,
-        codigo_barras: updateRow.codigo_barras,
-        nosso_numero_banco: updateRow.nosso_numero_banco,
-        pdf_url: boleto.pdf_url,
-        message: 'Este boleto já estava no Sicoob. Atualizei o carnê e não emiti outro.',
-      };
+        userId,
+        'CONSULTA_SEM_TITULO',
+        'Consulta do pagador não achou título em aberto com este seu número. Nova emissão liberada.',
+      );
     }
+
+    await reivindicarEmissao(admin, boleto);
+    reservou = true;
+
+    const buscaAntes = await acharBoletosJaEmitidos(buscaArgs);
+    if (buscaAntes.boletos.length) return await adotar(buscaAntes.boletos[0], payload, buscaAntes.boletos.length);
+
+    await registrarAcao(
+      admin,
+      boletoId,
+      userId,
+      'TENTATIVA_EMISSAO',
+      'Enviando registro ao Sicoob. Se esta chamada cair, a próxima não emite outro título sem confirmar no banco.',
+    );
+    postIniciado = true;
 
     const sicoob = await emitirBoletoSicoobApi({
       config,
@@ -278,13 +411,7 @@ async function emitirUmBoleto(admin, userId, boletoId) {
     };
 
     await admin.from('boletos_parcela_venda').update(updateRow).eq('id', boletoId);
-    await admin.from('historico_boleto_sicoob').insert({
-      boleto_id: boletoId,
-      acao: 'EMISSAO',
-      usuario_id: userId,
-      detalhes: 'Boleto registrado via API Sicoob V3.',
-      payload_resposta: sicoob.raw ?? null,
-    });
+    await registrarAcao(admin, boletoId, userId, 'EMISSAO', 'Boleto registrado via API Sicoob V3.', sicoob.raw ?? null);
 
     return {
       success: true,
@@ -299,21 +426,25 @@ async function emitirUmBoleto(admin, userId, boletoId) {
     };
   } catch (error) {
     const msg = error?.message ?? 'Falha na emissão Sicoob.';
+    if (!reservou) throw new Error(msg);
+    const recusou = Boolean(error?.bancoRecusou);
+    const texto = recusou || !postIniciado
+      ? msg
+      : `${msg} Não gere de novo sem conferir no Sicoob: o banco pode ter aceito este título.`;
+    if (recusou) {
+      await registrarAcao(admin, boletoId, userId, 'EMISSAO_RECUSADA', msg);
+    } else if (postIniciado) {
+      await registrarAcao(admin, boletoId, userId, 'ERRO', texto);
+    }
     await admin
       .from('boletos_parcela_venda')
       .update({
         tipo_emissao: 'sicoob',
         status_registro: 'erro',
-        mensagem_erro_registro: msg,
+        mensagem_erro_registro: texto,
       })
       .eq('id', boletoId);
-    await admin.from('historico_boleto_sicoob').insert({
-      boleto_id: boletoId,
-      acao: 'ERRO',
-      usuario_id: userId,
-      detalhes: msg,
-    });
-    throw new Error(msg);
+    throw new Error(texto);
   } finally {
     cleanupCert(certPath);
   }

@@ -73,7 +73,7 @@ export async function emitirBoletosSicoobLote(
 
     if (res.status === 504) {
       erros.push(
-        `${boletoId}: Tempo esgotado (504) ao registrar no Sicoob. O carnê ficou em A receber — use Registrar no Sicoob na mensalidade.`,
+        `${boletoId}: Tempo esgotado (504). O Sicoob pode já ter registrado este boleto. Não clique em Registrar de novo e não gere a mensalidade outra vez — confira no banco.`,
       );
       continue;
     }
