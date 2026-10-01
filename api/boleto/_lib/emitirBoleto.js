@@ -8,6 +8,7 @@ const {
   emitirBoletoSicoobApi,
   listarBoletosPagadorSicoobApi,
 } = require('./sicoobClient');
+const { recusarSegundoBoletoNoDia } = require('./umBoletoPorClienteDia');
 
 async function resolveClienteId(admin, boleto) {
   if (boleto.mensalidade_id) {
@@ -358,6 +359,8 @@ async function emitirUmBoleto(admin, userId, boletoId) {
         'Consulta do pagador não achou título em aberto com este seu número. Nova emissão liberada.',
       );
     }
+
+    await recusarSegundoBoletoNoDia(admin, userId, boleto, clienteId);
 
     await reivindicarEmissao(admin, boleto);
     reservou = true;

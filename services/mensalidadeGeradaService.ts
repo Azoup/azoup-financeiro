@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { gerarBoletosParaMensalidades } from '@/services/boletoParcelaService';
+import { chavesBoletoClienteDia, chavesCobrancaClienteDia, gerarBoletosParaMensalidades, textoDiaBoleto } from '@/services/boletoParcelaService';
 import { gerarNotasFiscaisParaMensalidades } from '@/services/notaFiscalService';
 import type {
   CriarMensalidadeGeradaInput,
@@ -371,24 +371,32 @@ export async function criarMensalidadesGeradasLote(params: {
   /** Evita 2º carnê/boleto se o usuário regenerar após timeout (ex.: 504 no C6). */
   const existentesAbertos = new Map<string, { vencimentos: Set<string>; competencias: Set<string> }>();
   if (params.clienteIds.length) {
-    const { data: jaTem, error: eDup } = await supabase
-      .from('mensalidades')
-      .select('cliente_id, data_vencimento, competencia, status')
-      .eq('user_id', params.userId)
-      .in('cliente_id', params.clienteIds)
-      .neq('status', 'cancelado');
-    if (eDup) throw new Error(eDup.message);
-    for (const r of jaTem ?? []) {
-      const cid = r.cliente_id as string;
-      let bucket = existentesAbertos.get(cid);
-      if (!bucket) {
-        bucket = { vencimentos: new Set(), competencias: new Set() };
-        existentesAbertos.set(cid, bucket);
+    const tamanho = 80;
+    for (let i = 0; i < params.clienteIds.length; i += tamanho) {
+      const fatia = params.clienteIds.slice(i, i + tamanho);
+      for (let from = 0; ; from += 1000) {
+        const { data: jaTem, error: eDup } = await supabase
+          .from('mensalidades')
+          .select('cliente_id, data_vencimento, competencia, status')
+          .eq('user_id', params.userId)
+          .in('cliente_id', fatia)
+          .neq('status', 'cancelado')
+          .range(from, from + 999);
+        if (eDup) throw new Error(eDup.message);
+        for (const r of jaTem ?? []) {
+          const cid = r.cliente_id as string;
+          let bucket = existentesAbertos.get(cid);
+          if (!bucket) {
+            bucket = { vencimentos: new Set(), competencias: new Set() };
+            existentesAbertos.set(cid, bucket);
+          }
+          const venc = String(r.data_vencimento ?? '').slice(0, 10);
+          if (venc) bucket.vencimentos.add(venc);
+          const c = (r.competencia as string | null)?.trim();
+          if (c) bucket.competencias.add(c);
+        }
+        if ((jaTem?.length ?? 0) < 1000) break;
       }
-      const venc = String(r.data_vencimento ?? '').slice(0, 10);
-      if (venc) bucket.vencimentos.add(venc);
-      const c = (r.competencia as string | null)?.trim();
-      if (c) bucket.competencias.add(c);
     }
   }
 
@@ -499,7 +507,7 @@ export async function criarMensalidadesGeradasLote(params: {
           falhas.push({
             cliente: nomeDe(clienteId),
             tipo: 'mensalidade',
-            erro: `Já havia cobrança neste vencimento (${p.data_vencimento}).`,
+            erro: `Este cliente já tem boleto neste dia (${textoDiaBoleto(p.data_vencimento)}).`,
           });
           continue;
         }
@@ -565,7 +573,7 @@ export async function criarMensalidadesGeradasLote(params: {
           falhas.push({
             cliente: nomeDe(clienteId),
             tipo: 'mensalidade',
-            erro: `Já havia cobrança neste vencimento (${p.data_vencimento}).`,
+            erro: `Este cliente já tem boleto neste dia (${textoDiaBoleto(p.data_vencimento)}).`,
           });
           continue;
         }
@@ -591,7 +599,7 @@ export async function criarMensalidadesGeradasLote(params: {
       falhas.push({
         cliente: nomeDe(clienteId),
         tipo: 'mensalidade',
-        erro: `Já havia cobrança neste vencimento (${dataVenc}).`,
+        erro: `Este cliente já tem boleto neste dia (${textoDiaBoleto(dataVenc)}).`,
       });
       continue;
     }
@@ -607,6 +615,32 @@ export async function criarMensalidadesGeradasLote(params: {
     });
     marcarComoExistente(clienteId, dataVenc);
   }
+
+  if (rows.length) {
+    const ocupados = await chavesCobrancaClienteDia(
+      params.userId,
+      rows.map((r) => r.cliente_id),
+      rows.map((r) => r.data_vencimento),
+    );
+    const livres: MensalidadeInsertRow[] = [];
+    for (const row of rows) {
+      const chave = `${row.cliente_id}|${row.data_vencimento.slice(0, 10)}`;
+      if (ocupados.has(chave)) {
+        duplicados += 1;
+        falhas.push({
+          cliente: nomeDe(row.cliente_id),
+          tipo: 'mensalidade',
+          erro: `Este cliente já tem boleto neste dia (${textoDiaBoleto(row.data_vencimento)}).`,
+        });
+        continue;
+      }
+      ocupados.add(chave);
+      livres.push(row);
+    }
+    rows.length = 0;
+    rows.push(...livres);
+  }
+
   if (!rows.length) {
     return {
       criados: 0,
@@ -623,6 +657,9 @@ export async function criarMensalidadesGeradasLote(params: {
     .select('id, cliente_id, valor, data_vencimento, competencia');
 
   if (error) {
+    if (/j[aá] tem boleto neste dia/i.test(error.message)) {
+      throw new Error('Este cliente já tem boleto neste dia. Não gere nem emita outro.');
+    }
     if (/lote_faturamento_id|parcela_numero|column|schema cache/i.test(error.message)) {
       throw new Error(
         'Falta a migration do faturamento anual. Rode supabase/migrations/040_cliente_faturamento_anual.sql no SQL Editor.',

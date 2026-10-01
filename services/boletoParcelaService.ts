@@ -26,7 +26,120 @@ function wrapBoletoDbError(error: { message?: string; code?: string } | null): E
   if (/mensalidade_id|origem|chk_boletos_parc_origem/i.test(msg)) {
     return new Error(`${SQL_MIGRATION_BOLETOS_HINT}\n\n${msg}`);
   }
+  if (/j[aá] tem boleto neste dia|j[aá] existe boleto deste cliente/i.test(msg)) {
+    return new Error('Este cliente já tem boleto neste dia. Não gere nem emita outro.');
+  }
   return new Error(msg);
+}
+
+function diaIsoBoleto(valor: string): string {
+  return String(valor ?? '').slice(0, 10);
+}
+
+export function textoDiaBoleto(valor: string): string {
+  const dia = diaIsoBoleto(valor);
+  const [ano, mes, diaNum] = dia.split('-');
+  if (!ano || !mes || !diaNum) return dia;
+  return `${diaNum}/${mes}/${ano}`;
+}
+
+function chaveClienteDia(clienteId: string, data: string): string {
+  return `${clienteId}|${diaIsoBoleto(data)}`;
+}
+
+/** Clientes que já têm carnê não baixado naquele vencimento. */
+export async function chavesBoletoClienteDia(
+  userId: string,
+  clienteIds: string[],
+  datas: string[],
+): Promise<Set<string>> {
+  const chaves = new Set<string>();
+  const ids = [...new Set(clienteIds.filter(Boolean))];
+  const dias = [...new Set(datas.map(diaIsoBoleto).filter(Boolean))];
+  if (!ids.length || !dias.length) return chaves;
+
+  for (let i = 0; i < ids.length; i += 80) {
+    const fatia = ids.slice(i, i + 80);
+    const { data: mens, error: eM } = await supabase
+      .from('mensalidades')
+      .select('id, cliente_id, data_vencimento')
+      .eq('user_id', userId)
+      .in('cliente_id', fatia)
+      .in('data_vencimento', dias)
+      .neq('status', 'cancelado');
+    if (eM) throw new Error(eM.message);
+    const mensRows = (mens ?? []) as { id: string; cliente_id: string; data_vencimento: string }[];
+    const clientePorMens = new Map(mensRows.map((m) => [m.id, m.cliente_id]));
+    for (let j = 0; j < mensRows.length; j += 80) {
+      const mensIds = mensRows.slice(j, j + 80).map((m) => m.id);
+      const { data: bols, error: eB } = await supabase
+        .from('boletos_parcela_venda')
+        .select('mensalidade_id, data_vencimento')
+        .eq('user_id', userId)
+        .in('mensalidade_id', mensIds)
+        .neq('status_registro', 'baixado');
+      if (eB) throw new Error(eB.message);
+      for (const b of bols ?? []) {
+        const cid = clientePorMens.get(b.mensalidade_id as string);
+        if (cid) chaves.add(chaveClienteDia(cid, b.data_vencimento as string));
+      }
+    }
+
+    const { data: vendas, error: eV } = await supabase
+      .from('vendas')
+      .select('id, cliente_id')
+      .eq('user_id', userId)
+      .in('cliente_id', fatia);
+    if (eV) throw new Error(eV.message);
+    const vendaRows = (vendas ?? []) as { id: string; cliente_id: string }[];
+    const clientePorVenda = new Map(vendaRows.map((v) => [v.id, v.cliente_id]));
+    for (let j = 0; j < vendaRows.length; j += 80) {
+      const vendaIds = vendaRows.slice(j, j + 80).map((v) => v.id);
+      const { data: bols, error: eB } = await supabase
+        .from('boletos_parcela_venda')
+        .select('venda_id, data_vencimento')
+        .eq('user_id', userId)
+        .in('venda_id', vendaIds)
+        .in('data_vencimento', dias)
+        .neq('status_registro', 'baixado');
+      if (eB) throw new Error(eB.message);
+      for (const b of bols ?? []) {
+        const cid = clientePorVenda.get(b.venda_id as string);
+        if (cid) chaves.add(chaveClienteDia(cid, b.data_vencimento as string));
+      }
+    }
+  }
+  return chaves;
+}
+
+/** Mensalidade em aberto ou carnê já gerado naquele dia. */
+export async function chavesCobrancaClienteDia(
+  userId: string,
+  clienteIds: string[],
+  datas: string[],
+): Promise<Set<string>> {
+  const chaves = await chavesBoletoClienteDia(userId, clienteIds, datas);
+  const ids = [...new Set(clienteIds.filter(Boolean))];
+  const dias = [...new Set(datas.map(diaIsoBoleto).filter(Boolean))];
+  for (let i = 0; i < ids.length; i += 80) {
+    const fatia = ids.slice(i, i + 80);
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase
+        .from('mensalidades')
+        .select('cliente_id, data_vencimento')
+        .eq('user_id', userId)
+        .in('cliente_id', fatia)
+        .in('data_vencimento', dias)
+        .neq('status', 'cancelado')
+        .range(from, from + 999);
+      if (error) throw new Error(error.message);
+      for (const r of data ?? []) {
+        chaves.add(chaveClienteDia(r.cliente_id as string, r.data_vencimento as string));
+      }
+      if ((data?.length ?? 0) < 1000) break;
+    }
+  }
+  return chaves;
 }
 
 const PLACEHOLDER_BENEF = '— Preencha em Configurações › Dados do beneficiário —';
@@ -288,8 +401,29 @@ export async function gerarBoletosParaVendaCriada(
   }[];
   if (!plist.length) throw new Error('Nenhuma parcela para gerar boletos.');
 
+  const ocupados = await chavesCobrancaClienteDia(
+    userId,
+    [clienteId],
+    plist.map((p) => p.data_vencimento),
+  );
+  const bloqueadas: string[] = [];
+  const livres = plist.filter((p) => {
+    const chave = `${clienteId}|${String(p.data_vencimento).slice(0, 10)}`;
+    if (ocupados.has(chave)) {
+      bloqueadas.push(textoDiaBoleto(p.data_vencimento));
+      return false;
+    }
+    ocupados.add(chave);
+    return true;
+  });
+  if (!livres.length) {
+    throw new Error(
+      `Este cliente já tem boleto neste dia (${bloqueadas.join(', ')}). Não gere nem emita outro.`,
+    );
+  }
+
   const total = plist.length;
-  const rows = plist.map((p) => {
+  const rows = livres.map((p) => {
     const descResumo = `${opts.descricao.trim()}\nParcela ${p.numero_parcela} de ${total}.`;
     return {
       user_id: userId,
@@ -316,20 +450,27 @@ export async function gerarBoletosParaVendaCriada(
   if (e3) throw wrapBoletoDbError(e3);
 
   const boletoIds = ((inserted ?? []) as { id: string }[]).map((r) => r.id);
+  let avisoEmail: string | undefined;
   if (boletoIds.length) {
     const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
     try {
       if (banco === 'c6' && emitente?.id) {
         const lote = await emitirBoletosC6Lote(userId, emitente.id, boletoIds, { modoRapido: true });
-        return { avisoEmail: resumoEmailBoletosLote(lote) ?? undefined };
+        avisoEmail = resumoEmailBoletosLote(lote) ?? undefined;
+      } else {
+        const lote = await emitirBoletosSicoobLote(userId, boletoIds);
+        avisoEmail = resumoEmailBoletosLote(lote) ?? undefined;
       }
-      const lote = await emitirBoletosSicoobLote(userId, boletoIds);
-      return { avisoEmail: resumoEmailBoletosLote(lote) ?? undefined };
     } catch {
       // Carnê informativo permanece em A receber; banco pode ser reemitido depois.
     }
   }
-  return {};
+  if (bloqueadas.length) {
+    throw new Error(
+      `Este cliente já tem boleto neste dia (${bloqueadas.join(', ')}). Não gerei outro nesses vencimentos.`,
+    );
+  }
+  return { avisoEmail };
 }
 
 export type MensalidadeParaBoleto = {
@@ -379,10 +520,32 @@ export async function gerarBoletosParaMensalidades(
   const mensalidadesNovas = unicos.filter((m) => !comBoleto.has(m.id));
   if (!mensalidadesNovas.length) return {};
 
+  const ocupados = await chavesBoletoClienteDia(
+    userId,
+    mensalidadesNovas.map((m) => m.cliente_id),
+    mensalidadesNovas.map((m) => m.data_vencimento),
+  );
+  const falhasDia: { mensalidadeId: string | null; erro: string }[] = [];
+  const mensalidadesLivres = mensalidadesNovas.filter((m) => {
+    const chave = `${m.cliente_id}|${String(m.data_vencimento).slice(0, 10)}`;
+    if (ocupados.has(chave)) {
+      falhasDia.push({
+        mensalidadeId: m.id,
+        erro: `Este cliente já tem boleto neste dia (${textoDiaBoleto(m.data_vencimento)}). Não gere nem emita outro.`,
+      });
+      return false;
+    }
+    ocupados.add(chave);
+    return true;
+  });
+  if (!mensalidadesLivres.length) {
+    return { falhasBoleto: falhasDia };
+  }
+
   const emitentesList = await ensureEmitentes(userId).catch(() => [] as NfseEmitente[]);
   const emitenteById = new Map(emitentesList.map((e) => [e.id, e]));
 
-  const clienteIds = [...new Set(mensalidadesNovas.map((m) => m.cliente_id))];
+  const clienteIds = [...new Set(mensalidadesLivres.map((m) => m.cliente_id))];
   const { data: clientesRows, error: eCli } = await supabase
     .from('clientes')
     .select('id, emitente_nf_id')
@@ -400,7 +563,7 @@ export async function gerarBoletosParaMensalidades(
   const rows: Record<string, unknown>[] = [];
   const meta: { banco: 'sicoob' | 'c6'; emitenteId: string | null }[] = [];
 
-  for (const m of mensalidadesNovas) {
+  for (const m of mensalidadesLivres) {
     const emitenteClienteId = emitenteNfPorCliente.get(m.cliente_id) ?? null;
     let emitente: NfseEmitente | null = null;
     let banco: 'sicoob' | 'c6';
@@ -465,10 +628,10 @@ export async function gerarBoletosParaMensalidades(
   }
 
   const insertedRows = (inserted ?? []) as { id: string; mensalidade_id: string | null }[];
-  if (!insertedRows.length) return {};
+  if (!insertedRows.length) return { falhasBoleto: falhasDia };
 
   const metaPorMensalidade = new Map<string, { banco: 'sicoob' | 'c6'; emitenteId: string | null }>();
-  mensalidadesNovas.forEach((m, i) => {
+  mensalidadesLivres.forEach((m, i) => {
     metaPorMensalidade.set(m.id, meta[i]!);
   });
 
@@ -575,7 +738,7 @@ export async function gerarBoletosParaMensalidades(
     avisoBoleto,
     avisoSicoob: avisoBoleto,
     avisoEmail,
-    falhasBoleto: falhas,
+    falhasBoleto: [...falhasDia, ...falhas],
   };
 }
 

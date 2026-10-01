@@ -10,6 +10,7 @@ const {
   obterPdfBoletoC6Api,
 } = require('./c6Client');
 const { loadC6Credentials } = require('./c6Credentials');
+const { recusarSegundoBoletoNoDia } = require('./umBoletoPorClienteDia');
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -217,6 +218,7 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint, opts = 
           'Não enviei outro boleto ao C6. Uma tentativa anterior pode ter sido aceita. Confira no banco antes de tentar de novo.',
         );
       }
+      await recusarSegundoBoletoNoDia(admin, userId, boleto, clienteId);
       const { error: tentErr } = await admin.from('historico_boleto_sicoob').insert({
         boleto_id: boletoId,
         acao: 'TENTATIVA_EMISSAO_C6',
