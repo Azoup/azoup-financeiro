@@ -358,6 +358,49 @@ async function baixarBoletoSicoobApi({ config, certPath, senha, nossoNumero }) {
   return { success: true, status: res.status, raw: res.json ?? res.raw };
 }
 
+/** Boletos em aberto do pagador. dataInicio/dataFim são vencimento (yyyy-MM-dd). */
+async function listarBoletosPagadorSicoobApi({ config, certPath, senha, numeroCpfCnpj, dataInicio, dataFim }) {
+  const doc = onlyDigits(numeroCpfCnpj);
+  if (doc.length !== 11 && doc.length !== 14) return [];
+
+  const token = await getSicoobAccessToken({ config, certPath, senha });
+  const agent = createMtlsAgent(certPath, senha);
+  const params = new URLSearchParams({
+    numeroCliente: String(config.numero_cliente),
+    codigoSituacao: '1',
+    dataInicio,
+    dataFim,
+  });
+  const res = await httpsRequest(
+    `${apiBaseUrl(config.ambiente)}/pagadores/${doc}/boletos?${params.toString()}`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        client_id: config.client_id,
+        Accept: 'application/json',
+      },
+      agent,
+    },
+  );
+
+  if (res.status === 204 || res.status === 404) return [];
+  if (res.status < 200 || res.status >= 300) {
+    const msg =
+      res.json?.mensagens?.map((m) => m.mensagem).join(' · ') ??
+      res.json?.message ??
+      `Consulta de boletos do pagador falhou (${res.status}).`;
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+
+  const resultado = res.json?.resultado ?? res.json;
+  if (Array.isArray(resultado)) return resultado;
+  if (Array.isArray(resultado?.boletos)) return resultado.boletos;
+  return resultado ? [resultado] : [];
+}
+
 module.exports = {
   apiBaseUrl,
   authUrl,
@@ -371,5 +414,6 @@ module.exports = {
   extractDataPagamento,
   extractValorPago,
   isBoletoLiquidado,
+  listarBoletosPagadorSicoobApi,
   onlyDigits,
 };

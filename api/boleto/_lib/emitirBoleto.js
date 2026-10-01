@@ -6,6 +6,7 @@ const {
   cleanupCert,
   downloadCertToTemp,
   emitirBoletoSicoobApi,
+  listarBoletosPagadorSicoobApi,
 } = require('./sicoobClient');
 
 async function resolveClienteId(admin, boleto) {
@@ -18,6 +19,39 @@ async function resolveClienteId(admin, boleto) {
     return data?.cliente_id ?? null;
   }
   return null;
+}
+
+function diaIso(offsetDias) {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDias);
+  return d.toISOString().slice(0, 10);
+}
+
+/** O Sicoob guarda o seu número com no máximo 15 caracteres (ex.: MEN-A8C6EBBA-SE). */
+async function acharBoletoJaEmitido({ config, certPath, senha, cliente, seuNumero, vencimento }) {
+  const alvo = String(seuNumero ?? '').trim().slice(0, 15).toUpperCase();
+  if (!alvo) return null;
+  const doc = String(cliente?.cnpj ?? cliente?.cpf ?? cliente?.documento ?? '');
+  const venc = String(vencimento ?? '').slice(0, 10);
+  const dataInicio = venc && venc < diaIso(-120) ? venc : diaIso(-120);
+  const dataFim = venc && venc > diaIso(180) ? venc : diaIso(180);
+  let lista = [];
+  try {
+    lista = await listarBoletosPagadorSicoobApi({
+      config,
+      certPath,
+      senha,
+      numeroCpfCnpj: doc,
+      dataInicio,
+      dataFim,
+    });
+  } catch {
+    return null;
+  }
+  return (
+    lista.find((b) => String(b?.seuNumero ?? b?.seu_numero ?? '').trim().slice(0, 15).toUpperCase() === alvo) ??
+    null
+  );
 }
 
 async function emitirUmBoleto(admin, userId, boletoId) {
@@ -164,6 +198,49 @@ async function emitirUmBoleto(admin, userId, boletoId) {
       notaFiscal,
       beneficiarioDocumento: boleto.beneficiario_documento || perfil?.documento,
     });
+
+    const jaNoBanco = await acharBoletoJaEmitido({
+      config,
+      certPath,
+      senha,
+      cliente,
+      seuNumero: payload.seuNumero,
+      vencimento: boleto.data_vencimento,
+    });
+    if (jaNoBanco) {
+      const updateRow = {
+        tipo_emissao: 'sicoob',
+        status_registro: 'registrado',
+        linha_digitavel: jaNoBanco.linhaDigitavel ?? jaNoBanco.linha_digitavel ?? boleto.linha_digitavel,
+        codigo_barras: jaNoBanco.codigoBarras ?? jaNoBanco.codigo_barras ?? boleto.codigo_barras,
+        nosso_numero_banco:
+          jaNoBanco.nossoNumero != null ? String(jaNoBanco.nossoNumero) : boleto.nosso_numero_banco,
+        sicoob_seu_numero: jaNoBanco.seuNumero ?? payload.seuNumero,
+        data_registro: boleto.data_registro || new Date().toISOString(),
+        mensagem_erro_registro: null,
+        nota_fiscal_id: notaFiscal?.id ?? boleto.nota_fiscal_id ?? null,
+      };
+      await admin.from('boletos_parcela_venda').update(updateRow).eq('id', boletoId);
+      await admin.from('historico_boleto_sicoob').insert({
+        boleto_id: boletoId,
+        acao: 'EMISSAO',
+        usuario_id: userId,
+        detalhes: 'Boleto já existia no Sicoob (seu número). Carnê atualizado sem emitir outro.',
+        payload_resposta: jaNoBanco,
+      });
+      return {
+        success: true,
+        boletoId,
+        emitido_agora: false,
+        status_registro: 'registrado',
+        linha_digitavel: updateRow.linha_digitavel,
+        codigo_barras: updateRow.codigo_barras,
+        nosso_numero_banco: updateRow.nosso_numero_banco,
+        pdf_url: boleto.pdf_url,
+        message: 'Este boleto já estava no Sicoob. Atualizei o carnê e não emiti outro.',
+      };
+    }
+
     const sicoob = await emitirBoletoSicoobApi({
       config,
       certPath,
