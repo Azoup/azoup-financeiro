@@ -751,45 +751,88 @@ async function selectInChunks<T>(ids: string[], run: (slice: string[]) => Promis
   return out;
 }
 
-export async function fetchContasReceberLista(userId: string): Promise<ContaReceberListRow[]> {
-  const blist: BoletoParcelaVendaRow[] = [];
-  const pagina = 400;
-  for (let from = 0; ; from += pagina) {
-    const { data: boletos, error } = await supabase
-      .from('boletos_parcela_venda')
-      .select('*')
-      .eq('user_id', userId)
-      .order('data_vencimento', { ascending: true })
-      .order('id', { ascending: true })
-      .range(from, from + pagina - 1);
-    if (error) throw new Error(error.message);
-    const lote = (boletos ?? []) as BoletoParcelaVendaRow[];
-    blist.push(...lote);
-    if (lote.length < pagina) break;
-  }
-  if (!blist.length) return [];
+const PAGINA_CONTAS_RECEBER = 40;
+const STATUS_ABERTO = ['pendente', 'parcial', 'atrasado'];
+const STATUS_PAGO = ['pago', 'quitada', 'quitado'];
+const STATUS_CANCELADO = ['cancelado', 'cancelada'];
 
-  const parcelaIds = blist.map((b) => b.parcela_id).filter((id): id is string => Boolean(id));
-  const mensalidadeIds = blist
-    .map((b) => b.mensalidade_id)
-    .filter((id): id is string => Boolean(id));
+export type ContasReceberConsulta = {
+  page?: number;
+  search?: string;
+  origem?: 'todos' | 'mensalidade' | 'venda';
+  situacao?: 'todos' | 'aberto' | 'pago' | 'cancelado';
+  vencimentoDe?: string | null;
+  vencimentoAte?: string | null;
+  emitenteId?: string | null;
+  soDuplicados?: boolean;
+};
+
+export type ContasReceberPagina = {
+  rows: ContaReceberListRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+function statusesDaSituacao(situacao: ContasReceberConsulta['situacao']): string[] | null {
+  if (situacao === 'pago') return STATUS_PAGO;
+  if (situacao === 'cancelado') return STATUS_CANCELADO;
+  if (situacao === 'aberto') return STATUS_ABERTO;
+  return null;
+}
+
+function textoBusca(valor: string | undefined): string {
+  return String(valor ?? '')
+    .replace(/[%_,.()]/g, ' ')
+    .trim();
+}
+
+type BoletoConsulta = BoletoParcelaVendaRow & {
+  mensalidades?: { status?: string; cliente_id?: string } | { status?: string; cliente_id?: string }[] | null;
+  parcelas_venda?: { status?: string } | { status?: string }[] | null;
+};
+
+function umRelacionado<T>(valor: T | T[] | null | undefined): T | null {
+  if (!valor) return null;
+  return Array.isArray(valor) ? (valor[0] ?? null) : valor;
+}
+
+async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): Promise<ContaReceberListRow[]> {
+  if (!brutos.length) return [];
 
   const stParcela = new Map<string, string>();
-  const parcs = await selectInChunks(parcelaIds, async (slice) => {
-    const { data, error: e2 } = await supabase.from('parcelas_venda').select('id, status').in('id', slice);
-    if (e2) throw new Error(e2.message);
+  const stMens = new Map<string, string>();
+  const clientePorMensalidade = new Map<string, string>();
+  const clientePorVenda = new Map<string, string>();
+
+  const parcelaSemStatus: string[] = [];
+  const mensalidadeSemStatus: string[] = [];
+  const vendaSemCliente: string[] = [];
+
+  for (const b of brutos) {
+    const men = umRelacionado(b.mensalidades);
+    const parc = umRelacionado(b.parcelas_venda);
+    if (b.mensalidade_id && men?.status) stMens.set(b.mensalidade_id, men.status);
+    else if (b.mensalidade_id) mensalidadeSemStatus.push(b.mensalidade_id);
+    if (men?.cliente_id && b.mensalidade_id) clientePorMensalidade.set(b.mensalidade_id, men.cliente_id);
+    if (b.parcela_id && parc?.status) stParcela.set(b.parcela_id, parc.status);
+    else if (b.parcela_id) parcelaSemStatus.push(b.parcela_id);
+    if (b.venda_id && !b.mensalidade_id) vendaSemCliente.push(b.venda_id);
+  }
+
+  const parcs = await selectInChunks(parcelaSemStatus, async (slice) => {
+    const { data, error } = await supabase.from('parcelas_venda').select('id, status').in('id', slice);
+    if (error) throw new Error(error.message);
     return (data ?? []) as { id: string; status: string }[];
   });
   for (const p of parcs) stParcela.set(p.id, p.status);
 
-  const stMens = new Map<string, string>();
-  const clientePorMensalidade = new Map<string, string>();
-  const mens = await selectInChunks(mensalidadeIds, async (slice) => {
-    const { data, error: e3 } = await supabase
+  const mens = await selectInChunks(mensalidadeSemStatus, async (slice) => {
+    const { data, error } = await supabase
       .from('mensalidades')
       .select('id, status, cliente_id')
       .in('id', slice);
-    if (e3) throw new Error(e3.message);
+    if (error) throw new Error(error.message);
     return (data ?? []) as { id: string; status: string; cliente_id: string }[];
   });
   for (const m of mens) {
@@ -797,17 +840,15 @@ export async function fetchContasReceberLista(userId: string): Promise<ContaRece
     clientePorMensalidade.set(m.id, m.cliente_id);
   }
 
-  const vendaIds = blist.map((b) => b.venda_id).filter((id): id is string => Boolean(id));
-  const clientePorVenda = new Map<string, string>();
-  const vendas = await selectInChunks(vendaIds, async (slice) => {
-    const { data, error: e4 } = await supabase.from('vendas').select('id, cliente_id').in('id', slice);
-    if (e4) throw new Error(e4.message);
+  const vendas = await selectInChunks(vendaSemCliente, async (slice) => {
+    const { data, error } = await supabase.from('vendas').select('id, cliente_id').in('id', slice);
+    if (error) throw new Error(error.message);
     return (data ?? []) as { id: string; cliente_id: string }[];
   });
   for (const v of vendas) clientePorVenda.set(v.id, v.cliente_id);
 
   const clientePorBoleto = new Map<string, string>();
-  for (const b of blist) {
+  for (const b of brutos) {
     if (b.mensalidade_id) {
       const cid = clientePorMensalidade.get(b.mensalidade_id);
       if (cid) clientePorBoleto.set(b.id, cid);
@@ -838,20 +879,16 @@ export async function fetchContasReceberLista(userId: string): Promise<ContaRece
     });
     for (const c of contatos) {
       if (c.tipo_contato === 'whatsapp' && !whatsappPorCliente.has(c.cliente_id)) {
-        whatsappPorCliente.set(c.cliente_id, {
-          valor: c.valor_contato,
-          nome: c.nome_contato,
-        });
+        whatsappPorCliente.set(c.cliente_id, { valor: c.valor_contato, nome: c.nome_contato });
       }
       if (c.tipo_contato === 'email' && !emailPorCliente.has(c.cliente_id)) {
-        emailPorCliente.set(c.cliente_id, {
-          valor: c.valor_contato,
-          nome: c.nome_contato,
-        });
+        emailPorCliente.set(c.cliente_id, { valor: c.valor_contato, nome: c.nome_contato });
       }
     }
   }
 
+  const mensalidadeIds = brutos.map((b) => b.mensalidade_id).filter((id): id is string => Boolean(id));
+  const vendaIds = brutos.map((b) => b.venda_id).filter((id): id is string => Boolean(id));
   const nfPorMensalidade = new Map<string, { id: string }>();
   const nfPorVenda = new Map<string, { id: string }>();
   const nfMens = await selectInChunks(mensalidadeIds, async (slice) => {
@@ -869,43 +906,44 @@ export async function fetchContasReceberLista(userId: string): Promise<ContaRece
     if (!nfPorVenda.has(id)) nfPorVenda.set(id, nota);
   }
 
-  return blist.map((b) => {
-    const isMen = b.origem === 'mensalidade' || Boolean(b.mensalidade_id);
+  return brutos.map((b) => {
+    const { mensalidades: _m, parcelas_venda: _p, ...boleto } = b;
+    const isMen = boleto.origem === 'mensalidade' || Boolean(boleto.mensalidade_id);
     const status = isMen
-      ? stMens.get(b.mensalidade_id ?? '') ?? '—'
-      : stParcela.get(b.parcela_id ?? '') ?? '—';
+      ? (stMens.get(boleto.mensalidade_id ?? '') ?? '—')
+      : (stParcela.get(boleto.parcela_id ?? '') ?? '—');
 
     let referencia_label: string;
     if (isMen) {
-      const linha = String(b.venda_descricao_resumo ?? '')
+      const linha = String(boleto.venda_descricao_resumo ?? '')
         .split('\n')
         .find((l) => l.startsWith('Competência:'));
       referencia_label = linha
         ? `Mensalidade · ${linha.replace('Competência: ', '').trim()}`
         : 'Mensalidade recorrente';
     } else {
-      referencia_label = `Venda · parcela ${b.numero_parcela}/${b.total_parcelas_venda}`;
+      referencia_label = `Venda · parcela ${boleto.numero_parcela}/${boleto.total_parcelas_venda}`;
     }
 
-    const clienteId = clientePorBoleto.get(b.id) ?? null;
+    const clienteId = clientePorBoleto.get(boleto.id) ?? null;
     const wa = clienteId ? whatsappPorCliente.get(clienteId) : undefined;
     const em = clienteId ? emailPorCliente.get(clienteId) : undefined;
 
-    let nota_fiscal_id = b.nota_fiscal_id;
-    if (!nota_fiscal_id && b.mensalidade_id) {
-      nota_fiscal_id = nfPorMensalidade.get(b.mensalidade_id)?.id ?? null;
+    let nota_fiscal_id = boleto.nota_fiscal_id;
+    if (!nota_fiscal_id && boleto.mensalidade_id) {
+      nota_fiscal_id = nfPorMensalidade.get(boleto.mensalidade_id)?.id ?? null;
     }
-    if (!nota_fiscal_id && b.venda_id) {
-      nota_fiscal_id = nfPorVenda.get(b.venda_id)?.id ?? null;
+    if (!nota_fiscal_id && boleto.venda_id) {
+      nota_fiscal_id = nfPorVenda.get(boleto.venda_id)?.id ?? null;
     }
 
     return {
-      ...b,
+      ...boleto,
       nota_fiscal_id,
       origem: isMen ? 'mensalidade' : 'venda',
       parcela_status: status,
       situacao_cobranca: situacaoCobrancaDeStatus(status),
-      nome_cliente: b.pagador_nome || '—',
+      nome_cliente: boleto.pagador_nome || '—',
       referencia_label,
       cliente_id: clienteId,
       whatsapp: wa?.valor ?? null,
@@ -914,6 +952,181 @@ export async function fetchContasReceberLista(userId: string): Promise<ContaRece
       email_contato_nome: em?.nome ?? null,
     };
   });
+}
+
+function aplicarFiltrosBoleto(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  q: any,
+  userId: string,
+  opts: ContasReceberConsulta,
+  lado?: 'mensalidade' | 'venda',
+) {
+  let query = q.eq('user_id', userId);
+  if (lado) query = query.eq('origem', lado);
+  else if (opts.origem && opts.origem !== 'todos') query = query.eq('origem', opts.origem);
+  if (opts.emitenteId) query = query.eq('emitente_id', opts.emitenteId);
+  if (opts.vencimentoDe) query = query.gte('data_vencimento', opts.vencimentoDe);
+  if (opts.vencimentoAte) query = query.lte('data_vencimento', opts.vencimentoAte);
+  const busca = textoBusca(opts.search);
+  if (busca) {
+    query = query.or(`pagador_nome.ilike.%${busca}%,numero_documento.ilike.%${busca}%`);
+  }
+  return query;
+}
+
+async function consultarLado(
+  userId: string,
+  lado: 'mensalidade' | 'venda',
+  opts: ContasReceberConsulta,
+  from: number,
+  to: number,
+): Promise<{ rows: BoletoConsulta[]; total: number }> {
+  const statuses = statusesDaSituacao(opts.situacao);
+  const select =
+    lado === 'venda'
+      ? statuses
+        ? '*, parcelas_venda!inner(status)'
+        : '*, parcelas_venda(status)'
+      : statuses
+        ? '*, mensalidades!inner(status, cliente_id)'
+        : '*, mensalidades(status, cliente_id)';
+  let q = aplicarFiltrosBoleto(
+    supabase.from('boletos_parcela_venda').select(select, { count: 'exact' }),
+    userId,
+    opts,
+    lado,
+  );
+  if (statuses) {
+    q = q.in(lado === 'venda' ? 'parcelas_venda.status' : 'mensalidades.status', statuses);
+  }
+  const { data, error, count } = await q
+    .order('pagador_nome', { ascending: true })
+    .order('data_vencimento', { ascending: true })
+    .order('id', { ascending: true })
+    .range(from, to);
+  if (error) throw new Error(error.message);
+  return { rows: (data ?? []) as BoletoConsulta[], total: count ?? 0 };
+}
+
+async function buscarDuplicadosPagina(
+  userId: string,
+  opts: ContasReceberConsulta,
+  page: number,
+): Promise<ContasReceberPagina> {
+  const lados: Array<'mensalidade' | 'venda'> =
+    opts.origem === 'venda' || opts.origem === 'mensalidade' ? [opts.origem] : ['mensalidade', 'venda'];
+  const chaves = new Map<string, string[]>();
+  const tamanho = 200;
+  for (const lado of lados) {
+    for (let from = 0; ; from += tamanho) {
+      const { rows, total } = await consultarLado(userId, lado, opts, from, from + tamanho - 1);
+      for (const b of rows) {
+        const k = [
+          String(b.pagador_nome ?? '').trim().toUpperCase(),
+          String(b.data_vencimento).slice(0, 10),
+          Number(b.valor_documento).toFixed(2),
+          b.origem,
+          b.emitente_id ?? '',
+        ].join('|');
+        const lista = chaves.get(k) ?? [];
+        lista.push(b.id);
+        chaves.set(k, lista);
+      }
+      if (from + rows.length >= total || rows.length < tamanho) break;
+    }
+  }
+
+  const ids = [...chaves.values()].filter((lista) => lista.length > 1).flat();
+  const inicio = (page - 1) * PAGINA_CONTAS_RECEBER;
+  const fatia = ids.slice(inicio, inicio + PAGINA_CONTAS_RECEBER);
+  if (!fatia.length) {
+    return { rows: [], total: ids.length, page, pageSize: PAGINA_CONTAS_RECEBER };
+  }
+  const { data, error } = await supabase
+    .from('boletos_parcela_venda')
+    .select('*, mensalidades(status, cliente_id), parcelas_venda(status)')
+    .in('id', fatia);
+  if (error) throw new Error(error.message);
+  const porId = new Map(((data ?? []) as BoletoConsulta[]).map((b) => [b.id, b]));
+  const ordenados = fatia.map((id) => porId.get(id)).filter((b): b is BoletoConsulta => Boolean(b));
+  const rows = await hidratarContasReceber(userId, ordenados);
+  rows.sort((a, b) => String(a.nome_cliente).localeCompare(String(b.nome_cliente), 'pt-BR', { sensitivity: 'base' }));
+  return { rows, total: ids.length, page, pageSize: PAGINA_CONTAS_RECEBER };
+}
+
+export async function fetchContasReceberPagina(
+  userId: string,
+  opts: ContasReceberConsulta = {},
+): Promise<ContasReceberPagina> {
+  const page = Math.max(1, opts.page ?? 1);
+  const pageSize = PAGINA_CONTAS_RECEBER;
+  if (opts.soDuplicados) return buscarDuplicadosPagina(userId, opts, page);
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  const origem = opts.origem ?? 'todos';
+  const situacao = opts.situacao ?? 'todos';
+
+  if (origem !== 'todos') {
+    const { rows, total } = await consultarLado(userId, origem, opts, from, to);
+    return { rows: await hidratarContasReceber(userId, rows), total, page, pageSize };
+  }
+
+  if (situacao === 'todos') {
+    const { data, error, count } = await aplicarFiltrosBoleto(
+      supabase
+        .from('boletos_parcela_venda')
+        .select('*, mensalidades(status, cliente_id), parcelas_venda(status)', { count: 'exact' }),
+      userId,
+      opts,
+    )
+      .order('pagador_nome', { ascending: true })
+      .order('data_vencimento', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to);
+    if (error) throw new Error(error.message);
+    return {
+      rows: await hidratarContasReceber(userId, (data ?? []) as BoletoConsulta[]),
+      total: count ?? 0,
+      page,
+      pageSize,
+    };
+  }
+
+  const [mensalidades, vendasCabeca] = await Promise.all([
+    consultarLado(userId, 'mensalidade', opts, 0, 0),
+    consultarLado(userId, 'venda', opts, 0, 0),
+  ]);
+  const totalM = mensalidades.total;
+  const totalV = vendasCabeca.total;
+  const total = totalM + totalV;
+  let brutos: BoletoConsulta[] = [];
+  if (from < totalM) {
+    const take = Math.min(pageSize, totalM - from);
+    const parteM = await consultarLado(userId, 'mensalidade', opts, from, from + take - 1);
+    brutos = parteM.rows;
+    const resto = pageSize - brutos.length;
+    if (resto > 0 && totalV > 0) {
+      const parteV = await consultarLado(userId, 'venda', opts, 0, resto - 1);
+      brutos = [...brutos, ...parteV.rows];
+    }
+  } else if (totalV > 0) {
+    const vFrom = from - totalM;
+    const parteV = await consultarLado(userId, 'venda', opts, vFrom, vFrom + pageSize - 1);
+    brutos = parteV.rows;
+  }
+  return { rows: await hidratarContasReceber(userId, brutos), total, page, pageSize };
+}
+
+export async function fetchContasReceberLista(userId: string): Promise<ContaReceberListRow[]> {
+  const primeira = await fetchContasReceberPagina(userId, { page: 1, situacao: 'todos', origem: 'todos' });
+  const rows = [...primeira.rows];
+  const paginas = Math.ceil(primeira.total / primeira.pageSize);
+  for (let page = 2; page <= paginas; page += 1) {
+    const proxima = await fetchContasReceberPagina(userId, { page, situacao: 'todos', origem: 'todos' });
+    rows.push(...proxima.rows);
+  }
+  return rows;
 }
 
 export async function fetchBoletoParcelaById(

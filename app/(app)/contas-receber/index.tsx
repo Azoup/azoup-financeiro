@@ -9,7 +9,7 @@ import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import {
   fetchBoletoParcelaById,
-  fetchContasReceberLista,
+  fetchContasReceberPagina,
 } from '@/services/boletoParcelaService';
 import { reemitirBoletosC6 } from '@/services/c6BoletoService';
 import { reemitirBoletosSicoob } from '@/services/sicoobBoletoService';
@@ -55,7 +55,7 @@ import {
 } from '@/utils/whatsappCobranca';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -120,11 +120,15 @@ function boletoRegistroLabel(
 
 export default function ContasReceberScreen() {
   const { user } = useAuth();
-  const { matchEmpresa, emitenteInicial } = useEmpresaFiltro();
+  const { emitenteInicial, empresaId } = useEmpresaFiltro();
   const router = useRouter();
   useHardwareBackToConsulta(CONSULTA.contasReceber);
 
   const [allRows, setAllRows] = useState<ContaReceberListRow[]>([]);
+  const [pagina, setPagina] = useState(1);
+  const [totalDocumentos, setTotalDocumentos] = useState(0);
+  const syncBancoFeito = useRef(false);
+  const pedidoLista = useRef(0);
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, 300);
   const [vencimentoDe, setVencimentoDe] = useState<string | null>(null);
@@ -164,75 +168,87 @@ export default function ContasReceberScreen() {
   const [nfConfirmCompetencia, setNfConfirmCompetencia] = useState<string | null>(null);
   const [nfConfirmDisc, setNfConfirmDisc] = useState<string | undefined>(undefined);
 
-  const load = useCallback(async () => {
+  const carregar = useCallback(async () => {
     if (!user?.id) return;
+    const pedido = ++pedidoLista.current;
     setLoading(true);
     try {
-      const [list, perfil] = await Promise.all([
-        fetchContasReceberLista(user.id),
+      const [lista, perfil] = await Promise.all([
+        fetchContasReceberPagina(user.id, {
+          page: pagina,
+          search: debouncedSearch,
+          origem: origemFilter,
+          situacao: situacaoFilter,
+          vencimentoDe,
+          vencimentoAte,
+          emitenteId: empresaId === 'todos' ? null : empresaId,
+          soDuplicados,
+        }),
         fetchPerfilCobranca(user.id).catch(() => null),
       ]);
-      setAllRows(list);
+      if (pedido !== pedidoLista.current) return;
+      setAllRows(lista.rows);
+      setTotalDocumentos(lista.total);
+      const ultima = Math.max(1, Math.ceil(lista.total / lista.pageSize) || 1);
+      if (pagina > ultima) setPagina(ultima);
       setNomeBeneficiario(perfil?.razao_social?.trim() || null);
     } catch (e) {
+      if (pedido !== pedidoLista.current) return;
       Toast.show({ type: 'error', text1: (e as Error).message });
       setAllRows([]);
+      setTotalDocumentos(0);
     } finally {
-      setLoading(false);
+      if (pedido === pedidoLista.current) setLoading(false);
     }
-    void sincronizarBoletosPendentes()
-      .then((sicoobSync) => {
-        if (sicoobSync.baixados > 0) {
-          Toast.show({
-            type: 'success',
-            text1: `${sicoobSync.baixados} boleto(s) quitado(s) automaticamente via Sicoob.`,
-          });
-        }
-      })
-      .catch(() => undefined);
-  }, [user?.id]);
+  }, [
+    user?.id,
+    pagina,
+    debouncedSearch,
+    origemFilter,
+    situacaoFilter,
+    vencimentoDe,
+    vencimentoAte,
+    empresaId,
+    soDuplicados,
+  ]);
+
+  useEffect(() => {
+    setPagina(1);
+  }, [debouncedSearch, origemFilter, situacaoFilter, vencimentoDe, vencimentoAte, empresaId, soDuplicados]);
 
   useFocusEffect(
     useCallback(() => {
-      void load();
-    }, [load]),
+      void carregar();
+      if (syncBancoFeito.current) return;
+      syncBancoFeito.current = true;
+      void sincronizarBoletosPendentes()
+        .then((sicoobSync) => {
+          if (sicoobSync.baixados > 0) {
+            Toast.show({
+              type: 'success',
+              text1: `${sicoobSync.baixados} boleto(s) quitado(s) automaticamente via Sicoob.`,
+            });
+          }
+        })
+        .catch(() => undefined);
+    }, [carregar]),
   );
 
   const onRefresh = async () => {
-    if (!user?.id) return;
     setRefreshing(true);
     try {
-      const [list, perfil] = await Promise.all([
-        fetchContasReceberLista(user.id),
-        fetchPerfilCobranca(user.id).catch(() => null),
-      ]);
-      setAllRows(list);
-      setNomeBeneficiario(perfil?.razao_social?.trim() || null);
-    } catch (e) {
-      Toast.show({ type: 'error', text1: (e as Error).message });
+      await carregar();
     } finally {
       setRefreshing(false);
     }
   };
 
-  const resumo = useMemo(() => {
-    let aberto = 0;
-    let pago = 0;
-    let valorAberto = 0;
-    for (const r of allRows) {
-      if (r.situacao_cobranca === 'pago') pago += 1;
-      else if (r.situacao_cobranca === 'aberto') {
-        aberto += 1;
-        valorAberto += Number(r.valor_documento) || 0;
-      }
-    }
-    return { aberto, pago, valorAberto };
-  }, [allRows]);
-
   const duplicadosIds = useMemo(() => {
+    if (soDuplicados) {
+      return { ids: new Set(allRows.map((r) => r.id)), clientes: allRows.length };
+    }
     const groups = new Map<string, string[]>();
     for (const r of allRows) {
-      if (!matchEmpresa(r.emitente_id)) continue;
       if (r.situacao_cobranca === 'cancelado') continue;
       const quem = String(r.cliente_id || r.nome_cliente || '').trim().toUpperCase();
       const valor = Number(r.valor_documento).toFixed(2);
@@ -249,34 +265,10 @@ export default function ContasReceberScreen() {
       for (const id of lista) ids.add(id);
     }
     return { ids, clientes };
-  }, [allRows, matchEmpresa]);
+  }, [allRows, soDuplicados]);
 
   const filteredRows = useMemo(() => {
-    let list = allRows.filter((r) => matchEmpresa(r.emitente_id));
-    const term = debouncedSearch.trim().toLowerCase();
-    if (term) {
-      list = list.filter(
-        (r) =>
-          String(r.nome_cliente ?? '').toLowerCase().includes(term) ||
-          String(r.numero_documento ?? '').toLowerCase().includes(term) ||
-          String(r.referencia_label ?? '').toLowerCase().includes(term),
-      );
-    }
-    if (origemFilter !== 'todos') {
-      list = list.filter((r) => r.origem === origemFilter);
-    }
-    if (situacaoFilter !== 'todos') {
-      list = list.filter((r) => r.situacao_cobranca === situacaoFilter);
-    }
-    if (vencimentoDe) {
-      list = list.filter((r) => r.data_vencimento >= vencimentoDe);
-    }
-    if (vencimentoAte) {
-      list = list.filter((r) => r.data_vencimento <= vencimentoAte);
-    }
-    if (soDuplicados) {
-      list = list.filter((r) => duplicadosIds.ids.has(r.id));
-    }
+    const list = [...allRows];
     list.sort((a, b) => {
       const nome = String(a.nome_cliente ?? '').localeCompare(String(b.nome_cliente ?? ''), 'pt-BR', {
         sensitivity: 'base',
@@ -286,17 +278,23 @@ export default function ContasReceberScreen() {
       return Number(a.valor_documento) - Number(b.valor_documento);
     });
     return list;
-  }, [
-    allRows,
-    debouncedSearch,
-    origemFilter,
-    situacaoFilter,
-    vencimentoDe,
-    vencimentoAte,
-    matchEmpresa,
-    soDuplicados,
-    duplicadosIds,
-  ]);
+  }, [allRows]);
+
+  const totalPaginas = Math.max(1, Math.ceil(totalDocumentos / 40));
+
+  const resumo = useMemo(() => {
+    let aberto = 0;
+    let pago = 0;
+    let valorAberto = 0;
+    for (const r of allRows) {
+      if (r.situacao_cobranca === 'pago') pago += 1;
+      else if (r.situacao_cobranca === 'aberto') {
+        aberto += 1;
+        valorAberto += Number(r.valor_documento) || 0;
+      }
+    }
+    return { aberto, pago, valorAberto };
+  }, [allRows]);
 
   const temFiltroAtivo =
     Boolean(search.trim()) ||
@@ -403,10 +401,8 @@ export default function ContasReceberScreen() {
   };
 
   const refreshLista = useCallback(async () => {
-    if (!user?.id) return;
-    const list = await fetchContasReceberLista(user.id);
-    setAllRows(list);
-  }, [user?.id]);
+    await carregar();
+  }, [carregar]);
 
   const abrirAcoes = (item: ContaReceberListRow) => {
     setAcoesItem(item);
@@ -913,15 +909,15 @@ export default function ContasReceberScreen() {
       <View style={styles.resumoStrip}>
         <View style={styles.resumoItem}>
           <Text style={styles.resumoVal}>{resumo.aberto}</Text>
-          <Text style={styles.resumoLab}>Em aberto</Text>
+          <Text style={styles.resumoLab}>Em aberto nesta página</Text>
         </View>
         <View style={styles.resumoItem}>
           <Text style={styles.resumoVal}>{formatBRL(resumo.valorAberto)}</Text>
-          <Text style={styles.resumoLab}>Total a cobrar</Text>
+          <Text style={styles.resumoLab}>A cobrar nesta página</Text>
         </View>
         <View style={styles.resumoItem}>
           <Text style={styles.resumoVal}>{resumo.pago}</Text>
-          <Text style={styles.resumoLab}>Pagos</Text>
+          <Text style={styles.resumoLab}>Pagos nesta página</Text>
         </View>
       </View>
 
@@ -944,15 +940,13 @@ export default function ContasReceberScreen() {
         })}
       </ScrollView>
 
-      {duplicadosIds.clientes > 0 ? (
+      {duplicadosIds.clientes > 0 || soDuplicados ? (
         <Pressable
           style={[styles.dupChip, soDuplicados && styles.dupChipOn]}
           onPress={() => setSoDuplicados((v) => !v)}
         >
           <Text style={[styles.dupChipTxt, soDuplicados && styles.dupChipTxtOn]}>
-            {soDuplicados
-              ? `Mostrando ${duplicadosIds.clientes} cliente(s) com boleto repetido`
-              : `Ver só os repetidos (${duplicadosIds.clientes} cliente(s))`}
+            {soDuplicados ? 'Mostrando só os boletos repetidos' : 'Ver só os repetidos'}
           </Text>
         </Pressable>
       ) : null}
@@ -980,8 +974,21 @@ export default function ContasReceberScreen() {
 
       <View style={styles.filterMeta}>
         <Text style={styles.resultCount}>
-          {loading ? 'Carregando…' : `${filteredRows.length} de ${allRows.length} documento(s)`}
+          {loading
+            ? 'Carregando…'
+            : `Página ${pagina} de ${totalPaginas} · ${totalDocumentos} documento(s)`}
         </Text>
+        <View style={styles.pagerBtns}>
+          <Pressable disabled={pagina <= 1 || loading} onPress={() => setPagina((p) => Math.max(1, p - 1))}>
+            <Text style={[styles.pagerTxt, pagina <= 1 && styles.pagerTxtOff]}>Anterior</Text>
+          </Pressable>
+          <Pressable
+            disabled={pagina >= totalPaginas || loading}
+            onPress={() => setPagina((p) => p + 1)}
+          >
+            <Text style={[styles.pagerTxt, pagina >= totalPaginas && styles.pagerTxtOff]}>Próxima</Text>
+          </Pressable>
+        </View>
         {temFiltroAtivo ? (
           <Pressable onPress={limparFiltros}>
             <Text style={styles.clearLink}>Limpar filtros</Text>
@@ -1284,7 +1291,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: spacing.md,
     marginBottom: spacing.sm,
+    gap: 8,
   },
+  pagerBtns: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  pagerTxt: { fontSize: 13, fontWeight: '700', color: colors.petroleum },
+  pagerTxtOff: { color: colors.gray400 },
   dupChip: {
     marginHorizontal: spacing.md,
     marginBottom: spacing.sm,
@@ -1298,7 +1309,7 @@ const styles = StyleSheet.create({
   dupChipOn: { backgroundColor: '#7a4e00', borderColor: '#7a4e00' },
   dupChipTxt: { fontSize: 13, fontWeight: '700', color: '#7a4e00' },
   dupChipTxtOn: { color: colors.white },
-  resultCount: { fontSize: 12, color: colors.gray600 },
+  resultCount: { flex: 1, fontSize: 12, color: colors.gray600 },
   cliNn: { fontSize: 11, color: colors.gray600, marginTop: 2 },
   cliDup: { fontSize: 11, fontWeight: '700', color: '#9a3412', marginTop: 2 },
   clearLink: { fontSize: 12, fontWeight: '700', color: colors.orange },
