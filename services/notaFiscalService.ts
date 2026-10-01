@@ -64,8 +64,77 @@ function resolverDescricaoServico(
   return descricaoItem(competencia, padrao);
 }
 
+function isNumeroSerieDuplicado(msg?: string): boolean {
+  return /nota_fiscal_user_id_serie_numero_key|duplicate key value violates unique constraint/i.test(msg ?? '');
+}
+
+/** A unique da nota é (usuário, série, número), compartilhada entre os CNPJs. */
+async function proximoNumeroLivre(userId: string, serie: string, sugerido: number): Promise<number> {
+  const { data, error } = await supabase
+    .from('nota_fiscal')
+    .select('numero')
+    .eq('user_id', userId)
+    .eq('serie', serie)
+    .order('numero', { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  const maior = Number(data?.[0]?.numero) || 0;
+  return Math.max(Number(sugerido) || 1, maior + 1);
+}
+
+async function inserirRascunhoNota(params: {
+  userId: string;
+  emitente: NfseEmitente;
+  row: Record<string, unknown>;
+  descricao: string;
+  valor: number;
+}): Promise<string> {
+  const serie = String(params.emitente.serie ?? '1');
+  let numero = await proximoNumeroLivre(params.userId, serie, params.emitente.proximo_numero);
+  let ultimoErro: string | undefined;
+
+  for (let tentativa = 0; tentativa < 8; tentativa++) {
+    const insertRow: Record<string, unknown> = {
+      ...params.row,
+      serie,
+      numero,
+    };
+    if (params.emitente.id) insertRow.emitente_id = params.emitente.id;
+
+    const { data: nf, error: nfErr } = await supabase
+      .from('nota_fiscal')
+      .insert(insertRow)
+      .select('id')
+      .single();
+
+    if (!nfErr && nf) {
+      const notaId = nf.id as string;
+      await inserirItensNotaFiscal(notaId, params.emitente, params.descricao, params.valor);
+      await bumpProximoNumero(params.userId, params.emitente, numero + 1);
+      await supabase
+        .from('nfse_emitente')
+        .update({ proximo_numero: numero + 1 })
+        .eq('user_id', params.userId)
+        .eq('serie', serie)
+        .lt('proximo_numero', numero + 1);
+      return notaId;
+    }
+
+    ultimoErro = nfErr?.message;
+    if (!isNumeroSerieDuplicado(ultimoErro)) throw wrapNotaFiscalInsertError(ultimoErro);
+    numero += 1;
+  }
+
+  throw new Error(
+    'O número desta série de NFS-e já está em uso em outra nota. Tente emitir de novo.',
+  );
+}
+
 function wrapNotaFiscalInsertError(msg?: string): Error {
   if (!msg) return new Error('Falha ao criar rascunho da NFS-e.');
+  if (isNumeroSerieDuplicado(msg)) {
+    return new Error('O número desta série de NFS-e já está em uso em outra nota. Tente emitir de novo.');
+  }
   if (/emitente_id|nfse_emitente/i.test(msg) && /does not exist|column|schema cache|42P01/i.test(msg)) {
     return new Error(
       'Falta a migration de emitentes. Rode supabase/migrations/037_nfse_emitente.sql no SQL Editor do Supabase.',
@@ -423,41 +492,30 @@ export async function criarNotaFiscalRascunhoMensalidade(
 
   const { emitente } = await validarPreEmissaoNfse(userId, mensalidade.cliente_id, opts?.emitenteId, opts);
 
-  const numero = emitente.proximo_numero;
   const descricao = resolverDescricaoServico(
     opts,
     mensalidade.competencia,
     emitente.descricao_servico_padrao,
   );
 
-  const insertRow: Record<string, unknown> = {
-    user_id: userId,
-    mensalidade_id: mensalidade.id,
-    venda_id: null,
-    cliente_id: mensalidade.cliente_id,
-    serie: emitente.serie,
-    numero,
-    status: 'rascunho',
-    valor_total: mensalidade.valor,
-    natureza_operacao: emitente.natureza_operacao,
-    ambiente: AMBIENTE_FISCAL_ATUAL,
-    tipo_documento: 'nfse',
-    competencia: mensalidade.competencia,
-  };
-  if (emitente.id) insertRow.emitente_id = emitente.id;
-
-  const { data: nf, error: nfErr } = await supabase
-    .from('nota_fiscal')
-    .insert(insertRow)
-    .select('id')
-    .single();
-  if (nfErr || !nf) throw wrapNotaFiscalInsertError(nfErr?.message);
-
-  const notaId = nf.id as string;
-  await inserirItensNotaFiscal(notaId, emitente, descricao, mensalidade.valor);
-  await bumpProximoNumero(userId, emitente, numero + 1);
-
-  return notaId;
+  return inserirRascunhoNota({
+    userId,
+    emitente,
+    descricao,
+    valor: mensalidade.valor,
+    row: {
+      user_id: userId,
+      mensalidade_id: mensalidade.id,
+      venda_id: null,
+      cliente_id: mensalidade.cliente_id,
+      status: 'rascunho',
+      valor_total: mensalidade.valor,
+      natureza_operacao: emitente.natureza_operacao,
+      ambiente: AMBIENTE_FISCAL_ATUAL,
+      tipo_documento: 'nfse',
+      competencia: mensalidade.competencia,
+    },
+  });
 }
 
 export async function criarNotaFiscalRascunhoVenda(
@@ -479,40 +537,29 @@ export async function criarNotaFiscalRascunhoVenda(
 
   const { emitente } = await validarPreEmissaoNfse(userId, venda.cliente_id, opts?.emitenteId, opts);
 
-  const numero = emitente.proximo_numero;
   const descricao =
     opts?.descricaoServico?.trim().slice(0, 2000) ||
     venda.descricao.trim().slice(0, 2000) ||
     emitente.descricao_servico_padrao;
 
-  const insertRow: Record<string, unknown> = {
-    user_id: userId,
-    mensalidade_id: null,
-    venda_id: venda.id,
-    cliente_id: venda.cliente_id,
-    serie: emitente.serie,
-    numero,
-    status: 'rascunho',
-    valor_total: venda.valor_total,
-    natureza_operacao: emitente.natureza_operacao,
-    ambiente: AMBIENTE_FISCAL_ATUAL,
-    tipo_documento: 'nfse',
-    competencia: null,
-  };
-  if (emitente.id) insertRow.emitente_id = emitente.id;
-
-  const { data: nf, error: nfErr } = await supabase
-    .from('nota_fiscal')
-    .insert(insertRow)
-    .select('id')
-    .single();
-  if (nfErr || !nf) throw wrapNotaFiscalInsertError(nfErr?.message);
-
-  const notaId = nf.id as string;
-  await inserirItensNotaFiscal(notaId, emitente, descricao, venda.valor_total);
-  await bumpProximoNumero(userId, emitente, numero + 1);
-
-  return notaId;
+  return inserirRascunhoNota({
+    userId,
+    emitente,
+    descricao,
+    valor: venda.valor_total,
+    row: {
+      user_id: userId,
+      mensalidade_id: null,
+      venda_id: venda.id,
+      cliente_id: venda.cliente_id,
+      status: 'rascunho',
+      valor_total: venda.valor_total,
+      natureza_operacao: emitente.natureza_operacao,
+      ambiente: AMBIENTE_FISCAL_ATUAL,
+      tipo_documento: 'nfse',
+      competencia: null,
+    },
+  });
 }
 
 export async function gerarNotaFiscalParaVenda(
@@ -570,39 +617,28 @@ export async function criarNotaFiscalRascunhoAvulsa(
 ): Promise<string> {
   const { emitente } = await validarPreEmissaoNfse(userId, input.cliente_id, opts?.emitenteId, opts);
 
-  const numero = emitente.proximo_numero;
   const descricao =
     input.descricao.trim().slice(0, 2000) ||
     descricaoItem(input.competencia ?? null, emitente.descricao_servico_padrao);
 
-  const insertRow: Record<string, unknown> = {
-    user_id: userId,
-    mensalidade_id: null,
-    venda_id: null,
-    cliente_id: input.cliente_id,
-    serie: emitente.serie,
-    numero,
-    status: 'rascunho',
-    valor_total: input.valor,
-    natureza_operacao: emitente.natureza_operacao,
-    ambiente: AMBIENTE_FISCAL_ATUAL,
-    tipo_documento: 'nfse',
-    competencia: input.competencia ?? null,
-  };
-  if (emitente.id) insertRow.emitente_id = emitente.id;
-
-  const { data: nf, error: nfErr } = await supabase
-    .from('nota_fiscal')
-    .insert(insertRow)
-    .select('id')
-    .single();
-  if (nfErr || !nf) throw wrapNotaFiscalInsertError(nfErr?.message);
-
-  const notaId = nf.id as string;
-  await inserirItensNotaFiscal(notaId, emitente, descricao, input.valor);
-  await bumpProximoNumero(userId, emitente, numero + 1);
-
-  return notaId;
+  return inserirRascunhoNota({
+    userId,
+    emitente,
+    descricao,
+    valor: input.valor,
+    row: {
+      user_id: userId,
+      mensalidade_id: null,
+      venda_id: null,
+      cliente_id: input.cliente_id,
+      status: 'rascunho',
+      valor_total: input.valor,
+      natureza_operacao: emitente.natureza_operacao,
+      ambiente: AMBIENTE_FISCAL_ATUAL,
+      tipo_documento: 'nfse',
+      competencia: input.competencia ?? null,
+    },
+  });
 }
 
 export async function gerarNotaFiscalAvulsa(
