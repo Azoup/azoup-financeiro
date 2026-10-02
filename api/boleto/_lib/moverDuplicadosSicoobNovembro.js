@@ -109,22 +109,27 @@ function candidatosNovembro(boletos, mensalidades, vendas) {
   return alvos;
 }
 
-/** A data limite precisa sair antes do vencimento. Com limite em outubro, novembro é recusado. */
-async function limparDataLimitePagamento(credenciais, nossoNumero) {
-  let ultimoErro = null;
-  for (const dataLimitePagamento of [null, '']) {
-    try {
-      await alterarBoletoSicoobApi({
-        ...credenciais,
-        nossoNumero,
-        objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento } },
-      });
-      return;
-    } catch (e) {
-      ultimoErro = e;
-    }
-  }
-  throw ultimoErro ?? new Error('Sicoob não removeu a data limite de pagamento.');
+/** O Sicoob exige yyyy-MM-dd e recusa "". O vencimento tem de ser anterior à data limite. */
+function dataLimitePosterior(iso) {
+  const [ano, mes, dia] = diaIso(iso).split('-').map(Number);
+  const alvo = new Date(ano + 4, (mes || 1) - 1, dia || 1);
+  const y = alvo.getFullYear();
+  const m = String(alvo.getMonth() + 1).padStart(2, '0');
+  const d = String(alvo.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+async function prorrogacaoSicoob(credenciais, nossoNumero, nova) {
+  await alterarBoletoSicoobApi({
+    ...credenciais,
+    nossoNumero,
+    objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento: dataLimitePosterior(nova) } },
+  });
+  await alterarBoletoSicoobApi({
+    ...credenciais,
+    nossoNumero,
+    objeto: { prorrogacaoVencimento: { dataVencimento: nova } },
+  });
 }
 
 async function atualizarLocal(admin, alvo) {
@@ -183,12 +188,7 @@ async function moverDuplicadosSicoobParaNovembro(admin, userId, limite = 6) {
       let noBanco = false;
       if (alvo.boleto.nosso_numero_banco) {
         if (!credenciais) throw new Error('Sicoob não configurado para alterar o vencimento.');
-        await limparDataLimitePagamento(credenciais, alvo.boleto.nosso_numero_banco);
-        await alterarBoletoSicoobApi({
-          ...credenciais,
-          nossoNumero: alvo.boleto.nosso_numero_banco,
-          objeto: { prorrogacaoVencimento: { dataVencimento: alvo.nova } },
-        });
+        await prorrogacaoSicoob(credenciais, alvo.boleto.nosso_numero_banco, alvo.nova);
         noBanco = true;
       }
       await atualizarLocal(admin, alvo);
