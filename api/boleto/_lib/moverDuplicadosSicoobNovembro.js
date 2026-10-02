@@ -109,18 +109,23 @@ function candidatosNovembro(boletos, mensalidades, vendas) {
   return alvos;
 }
 
-/**
- * Tira a data limite antes de mudar o vencimento.
- * Não envia "", null nem outra data: o Sicoob rejeita string vazia
- * ("formato da data é inválido") e, se o campo já está preenchido, só
- * mandar o vencimento não apaga o limite antigo.
- */
-async function limparDataLimitePagamento(credenciais, nossoNumero) {
-  await alterarBoletoSicoobApi({
-    ...credenciais,
-    nossoNumero,
-    objeto: { prorrogacaoLimitePagamento: {} },
-  });
+function somarMeses(iso, meses) {
+  const [ano, mes, dia] = diaIso(iso).split('-').map(Number);
+  if (!ano || !mes || !dia) return null;
+  const indice = mes - 1 + meses;
+  const ultimo = new Date(ano, indice + 1, 0).getDate();
+  const d = new Date(ano, indice, Math.min(dia, ultimo));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** O Sicoob recusa data limite vazia. Seis meses após a geração, e sempre depois do novo vencimento. */
+function dataLimiteSeisMeses(geracaoIso, vencimentoNovo) {
+  const base = diaIso(geracaoIso) || diaIso(vencimentoNovo);
+  let limite = somarMeses(base, 6);
+  if (!limite || limite <= diaIso(vencimentoNovo)) {
+    limite = somarMeses(vencimentoNovo, 6);
+  }
+  return limite;
 }
 
 async function atualizarLocal(admin, alvo) {
@@ -179,7 +184,12 @@ async function moverDuplicadosSicoobParaNovembro(admin, userId, limite = 6) {
       let noBanco = false;
       if (alvo.boleto.nosso_numero_banco) {
         if (!credenciais) throw new Error('Sicoob não configurado para alterar o vencimento.');
-        await limparDataLimitePagamento(credenciais, alvo.boleto.nosso_numero_banco);
+        const limite = dataLimiteSeisMeses(alvo.boleto.created_at, alvo.nova);
+        await alterarBoletoSicoobApi({
+          ...credenciais,
+          nossoNumero: alvo.boleto.nosso_numero_banco,
+          objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento: limite } },
+        });
         await alterarBoletoSicoobApi({
           ...credenciais,
           nossoNumero: alvo.boleto.nosso_numero_banco,
