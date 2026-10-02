@@ -109,26 +109,17 @@ function candidatosNovembro(boletos, mensalidades, vendas) {
   return alvos;
 }
 
-/** O Sicoob exige yyyy-MM-dd e recusa "". O vencimento tem de ser anterior à data limite. */
-function dataLimitePosterior(iso) {
-  const [ano, mes, dia] = diaIso(iso).split('-').map(Number);
-  const alvo = new Date(ano + 4, (mes || 1) - 1, dia || 1);
-  const y = alvo.getFullYear();
-  const m = String(alvo.getMonth() + 1).padStart(2, '0');
-  const d = String(alvo.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-async function prorrogacaoSicoob(credenciais, nossoNumero, nova) {
+/**
+ * Tira a data limite antes de mudar o vencimento.
+ * Não envia "", null nem outra data: o Sicoob rejeita string vazia
+ * ("formato da data é inválido") e, se o campo já está preenchido, só
+ * mandar o vencimento não apaga o limite antigo.
+ */
+async function limparDataLimitePagamento(credenciais, nossoNumero) {
   await alterarBoletoSicoobApi({
     ...credenciais,
     nossoNumero,
-    objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento: dataLimitePosterior(nova) } },
-  });
-  await alterarBoletoSicoobApi({
-    ...credenciais,
-    nossoNumero,
-    objeto: { prorrogacaoVencimento: { dataVencimento: nova } },
+    objeto: { prorrogacaoLimitePagamento: {} },
   });
 }
 
@@ -188,7 +179,12 @@ async function moverDuplicadosSicoobParaNovembro(admin, userId, limite = 6) {
       let noBanco = false;
       if (alvo.boleto.nosso_numero_banco) {
         if (!credenciais) throw new Error('Sicoob não configurado para alterar o vencimento.');
-        await prorrogacaoSicoob(credenciais, alvo.boleto.nosso_numero_banco, alvo.nova);
+        await limparDataLimitePagamento(credenciais, alvo.boleto.nosso_numero_banco);
+        await alterarBoletoSicoobApi({
+          ...credenciais,
+          nossoNumero: alvo.boleto.nosso_numero_banco,
+          objeto: { prorrogacaoVencimento: { dataVencimento: alvo.nova } },
+        });
         noBanco = true;
       }
       await atualizarLocal(admin, alvo);
