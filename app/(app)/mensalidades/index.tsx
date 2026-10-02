@@ -189,6 +189,29 @@ export default function HistoricoMensalidadesGeradasScreen() {
   const [pagina, setPagina] = useState(1);
   const [lotesExpandidos, setLotesExpandidos] = useState<Set<string>>(new Set());
   const [acoesM, setAcoesM] = useState<MensalidadeGerada | null>(null);
+  const [gerandoFaltantes, setGerandoFaltantes] = useState(false);
+
+  const gerarBoletosQueFaltaram = async () => {
+    if (!user?.id || gerandoFaltantes) return;
+    setGerandoFaltantes(true);
+    try {
+      const r = await sincronizarCarnesMensalidadesFaltantes(user.id);
+      if (!r.gerados) {
+        showAppInfo('Não há mensalidade recente sem boleto. Só entra o que foi gerado nos últimos 15 dias e ainda não tem carnê.');
+        return;
+      }
+      if (r.falhas.length) {
+        showAppError(r.falhas[0]?.erro ?? 'Alguns boletos não saíram.');
+        return;
+      }
+      showAppSuccess(`${r.gerados} boleto(s) gerado(s), sem criar outra mensalidade.`);
+      await load();
+    } catch (e) {
+      showAppError((e as Error).message);
+    } finally {
+      setGerandoFaltantes(false);
+    }
+  };
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -1012,6 +1035,13 @@ export default function HistoricoMensalidadesGeradasScreen() {
             Clientes sem mensalidade gerada neste mês. Quem já foi gerado, como ontem, fica de fora.
           </Text>
         ) : null}
+        <PrimaryButton
+          title={gerandoFaltantes ? 'Gerando boletos que faltaram…' : 'Gerar boletos que faltaram'}
+          onPress={() => void gerarBoletosQueFaltaram()}
+          disabled={gerandoFaltantes}
+          loading={gerandoFaltantes}
+          style={styles.btnGerar}
+        />
 
         {soNaoGerados ? null : (
           <>
