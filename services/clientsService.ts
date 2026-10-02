@@ -11,7 +11,7 @@ import type {
 } from '@/types/models';
 import { getSegmentoNomePorCodigo } from '@/services/segmentoClienteService';
 import { parseBRLMasked } from '@/utils/currency';
-import { clienteEstaCongelado, clienteProntoParaGerarMensalidade, toISODate } from '@/utils/date';
+import { clienteEstaCongelado, clienteProntoParaGerarMensalidade, isoRangeMesCalendario, toISODate } from '@/utils/date';
 import {
   CLIENTE_DETAIL_SELECT,
   CLIENTE_LIST_SELECT,
@@ -525,6 +525,10 @@ export type GerarMensalidadeFiltrosClientes = {
   somenteProntosParaGerar: boolean;
   /** Quando false (padrão), omite clientes paralisados (congelado_ate >= hoje). */
   incluirCongelados: boolean;
+  /**
+   * Quando true, omite quem já tem mensalidade não cancelada com vencimento ou competência neste mês.
+   */
+  ocultarJaGeradasNoMes: boolean;
 };
 
 export async function fetchClientesParaGerarMensalidades(
@@ -572,7 +576,50 @@ export async function fetchClientesParaGerarMensalidades(
     rows = rows.filter((r) => !clienteEstaCongelado(r.congelado_ate));
   }
 
+  if (filters.ocultarJaGeradasNoMes) {
+    const agora = new Date();
+    const comCobranca = await clienteIdsComMensalidadeNoMes(
+      userId,
+      agora.getFullYear(),
+      agora.getMonth() + 1,
+    );
+    rows = rows.filter((r) => !comCobranca.has(r.id));
+  }
+
   return rows;
+}
+
+async function clienteIdsComMensalidadeNoMes(
+  userId: string,
+  year: number,
+  month: number,
+): Promise<Set<string>> {
+  const { de, ate } = isoRangeMesCalendario(year, month);
+  const mm = String(month).padStart(2, '0');
+  const partes = [
+    `and(data_vencimento.gte.${de},data_vencimento.lte.${ate})`,
+    `competencia.ilike.${mm}/${year}%`,
+    `competencia.ilike.${year}-${mm}%`,
+  ];
+  if (month < 10) partes.push(`competencia.ilike.${month}/${year}%`);
+
+  const ids = new Set<string>();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from('mensalidades')
+      .select('cliente_id')
+      .eq('user_id', userId)
+      .neq('status', 'cancelado')
+      .or(partes.join(','))
+      .range(from, from + 999);
+    if (error) throw new Error(error.message);
+    for (const row of data ?? []) {
+      const id = (row as { cliente_id: string }).cliente_id;
+      if (id) ids.add(id);
+    }
+    if ((data?.length ?? 0) < 1000) break;
+  }
+  return ids;
 }
 
 export async function applyReajusteMensalidadePercentual(

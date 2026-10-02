@@ -86,6 +86,7 @@ export default function GerarMensalidadeScreen() {
   const [filtrarPorMesReajuste, setFiltrarPorMesReajuste] = useState(false);
   /** Só clientes cujo mês de próxima geração já chegou (ou sem data). */
   const [somenteProntosParaGerar, setSomenteProntosParaGerar] = useState(true);
+  const [ocultarJaGeradasNoMes, setOcultarJaGeradasNoMes] = useState(true);
   const [incluirCongelados, setIncluirCongelados] = useState(false);
   const [proximaGeracaoStr, setProximaGeracaoStr] = useState(() => {
     const n = addMonthsMesAno(new Date().getFullYear(), new Date().getMonth() + 1, 1);
@@ -133,6 +134,7 @@ export default function GerarMensalidadeScreen() {
       mesReajusteAte: mesReajusteRange?.ate ?? null,
       somenteProntosParaGerar,
       incluirCongelados,
+      ocultarJaGeradasNoMes,
     }),
     [
       debouncedSearch,
@@ -142,6 +144,7 @@ export default function GerarMensalidadeScreen() {
       mesReajusteRange,
       somenteProntosParaGerar,
       incluirCongelados,
+      ocultarJaGeradasNoMes,
     ],
   );
 
@@ -822,6 +825,20 @@ export default function GerarMensalidadeScreen() {
             chegar. Desligue para antecipar.
           </Text>
           <View style={styles.switchRow}>
+            <Text style={[styles.label, { flex: 1 }]}>
+              Ocultar quem já tem mensalidade neste mês
+            </Text>
+            <View style={styles.switchScale}>
+              <Switch
+                value={ocultarJaGeradasNoMes}
+                onValueChange={setOcultarJaGeradasNoMes}
+              />
+            </View>
+          </View>
+          <Text style={styles.hint}>
+            Quem já tem cobrança gerada no mês atual sai da lista. Desligue para ver esses clientes.
+          </Text>
+          <View style={styles.switchRow}>
             <Text style={[styles.label, { flex: 1 }]}>Incluir paralisados</Text>
             <View style={styles.switchScale}>
               <Switch value={incluirCongelados} onValueChange={setIncluirCongelados} />
@@ -886,9 +903,11 @@ export default function GerarMensalidadeScreen() {
           <Text style={styles.empty}>
             {filtrarPorMesReajuste
               ? 'Nenhum cliente com reajuste neste mês. Desative o filtro por mês ou altere MM/AAAA.'
-              : somenteProntosParaGerar
-                ? 'Nenhum cliente na data de gerar. Desligue “Só quem está na data de gerar” para ver todos, ou aguarde o mês agendado.'
-                : 'Nenhum cliente com os filtros atuais.'}
+              : ocultarJaGeradasNoMes
+                ? 'Nenhum cliente sem mensalidade neste mês. Desligue “Ocultar quem já tem mensalidade neste mês” para ver quem já foi gerado.'
+                : somenteProntosParaGerar
+                  ? 'Nenhum cliente na data de gerar. Desligue “Só quem está na data de gerar” para ver todos, ou aguarde o mês agendado.'
+                  : 'Nenhum cliente com os filtros atuais.'}
           </Text>
         ) : (
           rowsPagina.map((r) => {
