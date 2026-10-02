@@ -2,7 +2,8 @@ import type { ContaReceberListRow } from '@/types/contasReceber';
 import { buildBoletoCobrancaHtml } from '@/utils/boletoCobrancaHtml';
 import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate } from '@/utils/date';
-import { resolveBoletoPdfUrl } from '@/utils/openBoletoDocumento';
+import { htmlDanfseParaPdf } from '@/utils/baixarDanfseArquivos';
+import { nomeEmpresaPagador } from '@/utils/openBoletoDocumento';
 import { safeTrim } from '@/utils/safeTrim';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -142,14 +143,6 @@ export function abrirWhatsAppCobrancaNaConversa(
   abrirUrlWhatsApp(resolveWhatsAppCobrancaUrl(row, opts));
 }
 
-async function fetchPdfBlob(url: string): Promise<Blob> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Não foi possível baixar o PDF do boleto.');
-  const blob = await res.blob();
-  if (blob.type === 'application/pdf') return blob;
-  return new Blob([await blob.arrayBuffer()], { type: 'application/pdf' });
-}
-
 async function htmlParaPdf(html: string): Promise<{ blob: Blob; uri: string }> {
   const { uri } = await Print.printToFileAsync({ html });
   if (isWeb() && typeof fetch !== 'undefined') {
@@ -194,29 +187,12 @@ async function obterPdfBoleto(
     );
   }
 
-  const pdfUrl = await resolveBoletoPdfUrl(row);
-  if (pdfUrl) {
-    if (isWeb()) {
-      const blob = await fetchPdfBlob(pdfUrl);
-      return { blob, pdfUrl };
-    }
-    const FileSystem = await import('expo-file-system/legacy');
-    const path = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}boleto_wa_${row.id}.pdf`;
-    const dl = await FileSystem.downloadAsync(pdfUrl, path);
-    const base64 = await FileSystem.readAsStringAsync(dl.uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return {
-      blob: new Blob([bytes], { type: 'application/pdf' }),
-      uri: dl.uri,
-      pdfUrl,
-    };
+  const pagador_nome = await nomeEmpresaPagador(row);
+  const html = buildBoletoCobrancaHtml({ ...row, pagador_nome });
+  if (isWeb()) {
+    const blob = await htmlDanfseParaPdf(html);
+    return { blob, pdfUrl: null };
   }
-
-  const html = buildBoletoCobrancaHtml(row);
   const { blob, uri } = await htmlParaPdf(html);
   return { blob, uri, pdfUrl: null };
 }

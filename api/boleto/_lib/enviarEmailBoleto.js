@@ -63,6 +63,41 @@ async function resolveClienteId(admin, boleto) {
   return null;
 }
 
+function pdfParaClienteBytes({ nomePagador, boleto }) {
+  const { jsPDF } = require('jspdf');
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+  let y = 18;
+  const write = (text, size = 11, bold = false) => {
+    pdf.setFont('helvetica', bold ? 'bold' : 'normal');
+    pdf.setFontSize(size);
+    const lines = pdf.splitTextToSize(String(text ?? ''), 180);
+    pdf.text(lines, 14, y);
+    y += lines.length * (size * 0.42) + 3;
+  };
+  write('Boleto para pagamento', 16, true);
+  write(`Pagador: ${nomePagador}`, 13, true);
+  write(`Documento: ${safeTrim(boleto.pagador_documento) || '—'}`);
+  write(`Valor: ${formatBRL(boleto.valor_documento)}`, 12, true);
+  write(`Vencimento: ${formatBRDate(boleto.data_vencimento)}`, 12, true);
+  if (safeTrim(boleto.numero_documento)) write(`Número do documento: ${safeTrim(boleto.numero_documento)}`);
+  if (safeTrim(boleto.nosso_numero_banco)) write(`Nosso número: ${safeTrim(boleto.nosso_numero_banco)}`);
+  if (safeTrim(boleto.linha_digitavel)) {
+    write('Linha digitável', 11, true);
+    write(safeTrim(boleto.linha_digitavel), 11, true);
+  }
+  if (safeTrim(boleto.codigo_barras)) write(`Código de barras: ${safeTrim(boleto.codigo_barras)}`, 9);
+  const pix = safeTrim(boleto.pix_copia_cola);
+  if (pix) {
+    write('Pix Copia e Cola', 11, true);
+    write(pix, 8);
+  }
+  write(
+    'Pague pela linha digitável ou pelo código de barras. O título no banco é o mesmo; este arquivo mostra o nome da empresa.',
+    9,
+  );
+  return Buffer.from(pdf.output('arraybuffer'));
+}
+
 async function baixarPdfBytes(admin, boleto) {
   if (boleto.pdf_url) {
     try {
@@ -258,12 +293,18 @@ async function tentarEnviarEmailAposEmissao(admin, userId, emitResult) {
       }
     }
 
-    const pdfBuffer = await baixarPdfBytes(admin, boleto);
+    const nomeCliente = safeTrim(cliente?.nome) || safeTrim(cliente?.nome_fantasia) || 'cliente';
+    let pdfBuffer = null;
+    try {
+      pdfBuffer = pdfParaClienteBytes({ nomePagador: nomeCliente, boleto });
+    } catch (e) {
+      console.warn('[email-boleto] PDF com nome da empresa indisponível:', e.message);
+    }
+    if (!pdfBuffer?.length) pdfBuffer = await baixarPdfBytes(admin, boleto);
     if (!pdfBuffer?.length) {
       return { skipped: true, reason: 'sem_pdf', to };
     }
 
-    const nomeCliente = safeTrim(cliente?.nome_fantasia) || safeTrim(cliente?.nome) || 'cliente';
     const referencia =
       safeTrim(boleto.venda_descricao_resumo)?.split('\n')[0] ||
       (boleto.origem === 'mensalidade' ? 'Mensalidade' : 'Cobrança');

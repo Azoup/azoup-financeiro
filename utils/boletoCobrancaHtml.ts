@@ -13,6 +13,50 @@ function brl(n: number): string {
   return esc(formatBRL(n));
 }
 
+const ITF: Record<string, string> = {
+  '0': 'nnwwn',
+  '1': 'wnnnw',
+  '2': 'nwnnw',
+  '3': 'wwnnn',
+  '4': 'nnwnw',
+  '5': 'wnwnn',
+  '6': 'nwwnn',
+  '7': 'nnnww',
+  '8': 'wnnwn',
+  '9': 'nwnwn',
+};
+
+/** Código de barras ITF (Febraban, 44 dígitos) para o cliente pagar pelo mesmo título. */
+function barcodeSvg(codigo: string): string {
+  const digits = codigo.replace(/\D/g, '');
+  if (digits.length < 2 || digits.length % 2 !== 0) return '';
+  if ([...digits].some((d) => !ITF[d])) return '';
+  const narrow = 1;
+  const wide = 3;
+  const seq: { bar: boolean; w: number }[] = [
+    { bar: true, w: narrow },
+    { bar: false, w: narrow },
+    { bar: true, w: narrow },
+    { bar: false, w: narrow },
+  ];
+  for (let i = 0; i < digits.length; i += 2) {
+    const bars = ITF[digits[i]];
+    const spaces = ITF[digits[i + 1]];
+    for (let j = 0; j < 5; j += 1) {
+      seq.push({ bar: true, w: bars[j] === 'w' ? wide : narrow });
+      seq.push({ bar: false, w: spaces[j] === 'w' ? wide : narrow });
+    }
+  }
+  seq.push({ bar: true, w: wide }, { bar: false, w: narrow }, { bar: true, w: narrow });
+  let x = 0;
+  const rects: string[] = [];
+  for (const s of seq) {
+    if (s.bar) rects.push(`<rect x="${x}" y="0" width="${s.w}" height="46" fill="#000"/>`);
+    x += s.w;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${x} 46" width="100%" height="52" preserveAspectRatio="none" role="img" aria-label="Código de barras">${rects.join('')}</svg>`;
+}
+
 /** Carnê no estilo boleto; quando registrado exibe linha digitável e código de barras. */
 export function buildBoletoCobrancaHtml(row: BoletoParcelaVendaRow): string {
   const registrado = row.status_registro === 'registrado' || row.status_registro === 'pago';
@@ -20,8 +64,9 @@ export function buildBoletoCobrancaHtml(row: BoletoParcelaVendaRow): string {
     row.tipo_emissao === 'c6' ? 'C6 Bank' : row.tipo_emissao === 'sicoob' ? 'Sicoob' : null;
   const nossoNumero = registrado && row.nosso_numero_banco ? row.nosso_numero_banco : row.nosso_numero;
   const avisoTopo = registrado
-    ? `Boleto registrado${banco ? ` no ${banco}` : ''} — utilize a linha digitável ou o PDF oficial para pagamento.`
+    ? `Boleto registrado${banco ? ` no ${banco}` : ''}. Pague pela linha digitável ou pelo código de barras. O nome do pagador é o da empresa.`
     : 'Documento de cobrança para controle interno — não é boleto registrado em instituição financeira (sem compensação automática).';
+  const barras = registrado && row.codigo_barras ? barcodeSvg(row.codigo_barras) : '';
   const venc = esc(row.data_vencimento.split('-').reverse().join('/'));
   const doc = esc(row.data_documento.split('-').reverse().join('/'));
   const desconto = brl(0);
@@ -60,9 +105,11 @@ export function buildBoletoCobrancaHtml(row: BoletoParcelaVendaRow): string {
       : ''
   }
   ${
-    registrado && row.codigo_barras
-      ? `<div class="full"><div class="lbl">Código de barras</div><span style="font-family:monospace;font-size:11px">${esc(row.codigo_barras)}</span></div>`
-      : ''
+    barras
+      ? `<div class="full" style="padding:8px 6px 4px"><div class="lbl">Código de barras</div>${barras}<div style="font-family:monospace;font-size:10px;margin-top:4px">${esc(row.codigo_barras ?? '')}</div></div>`
+      : registrado && row.codigo_barras
+        ? `<div class="full"><div class="lbl">Código de barras</div><span style="font-family:monospace;font-size:11px">${esc(row.codigo_barras)}</span></div>`
+        : ''
   }
 
   <div class="grid3">
@@ -128,7 +175,7 @@ export function buildBoletoCobrancaHtml(row: BoletoParcelaVendaRow): string {
   }
 
   <div class="ficha">
-    <div class="tit">${registrado ? 'Ficha de compensação (Sicoob)' : 'Ficha de compensação (informativa)'}</div>
+    <div class="tit">${registrado ? `Ficha de compensação${banco ? ` (${banco})` : ''}` : 'Ficha de compensação (informativa)'}</div>
     <div class="grid3">
       <div><div class="lbl">Vencimento</div><div class="val">${venc}</div></div>
       <div><div class="lbl">Nosso número</div><strong>${esc(nossoNumero)}</strong></div>
