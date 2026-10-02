@@ -71,8 +71,6 @@ export function buildMensagemCobrancaWhatsapp(
     opts?.incluirTelefone && row.whatsapp
       ? formatWhatsAppDisplay(row.whatsapp)
       : null;
-  const pdfUrl = safeTrim(opts?.pdfUrl);
-
   const linhas = [
     `Olá, ${row.nome_cliente.trim() || 'cliente'}!`,
     '',
@@ -84,9 +82,8 @@ export function buildMensagemCobrancaWhatsapp(
     row.numero_documento ? `• Documento: ${row.numero_documento}` : null,
     row.linha_digitavel ? `\n*Linha digitável do boleto:*\n${row.linha_digitavel}` : null,
     row.pix_copia_cola ? `\n*Pix Copia e Cola:*\n${row.pix_copia_cola}` : null,
-    pdfUrl ? `\n*PDF do boleto:*\n${pdfUrl}` : null,
     '',
-    'O boleto segue em anexo (ou no link acima).',
+    'O boleto segue em anexo.',
     'Qualquer dúvida, estamos à disposição.',
     'WhatsApp: (19) 98111-1724',
     'Obrigado!',
@@ -221,11 +218,6 @@ async function obterPdfBoleto(
   return { blob, uri, pdfUrl: null };
 }
 
-function legendaCurta(row: ContaReceberListRow, nome: string): string {
-  const venc = formatBRDate(parseISODate(row.data_vencimento)) || row.data_vencimento;
-  return `Boleto ${nome} · ${formatBRL(row.valor_documento)} · venc. ${venc}`;
-}
-
 /**
  * O WhatsApp não aceita anexo por link (wa.me). O PDF só entra na conversa
  * pelo compartilhamento do celular/navegador.
@@ -261,16 +253,15 @@ export async function compartilharBoletoWhatsAppComPdf(
   const phone = whatsappPhoneToInternational(raw);
   if (!phone) throw new Error('Número de WhatsApp inválido no cadastro do cliente.');
 
-  const { blob, uri, pdfUrl } = await obterPdfBoleto(row);
+  const { blob, uri } = await obterPdfBoleto(row);
   const filename = `boleto_${safeTrim(row.numero_documento) || row.id}.pdf`;
   const message = buildMensagemCobrancaWhatsapp(row, {
     nomeBeneficiario: opts?.nomeBeneficiario,
-    pdfUrl,
   });
 
   if (isWeb() && typeof File !== 'undefined') {
     const file = new File([blob], filename, { type: 'application/pdf' });
-    const compartilhou = await compartilharPdf(file, legendaCurta(row, row.nome_cliente));
+    const compartilhou = await compartilharPdf(file, message);
     if (compartilhou === 'ok') return { modo: 'compartilhado' };
     if (compartilhou === 'cancelado') return { modo: 'cancelado' };
   }
