@@ -438,7 +438,7 @@ async function emitirNfsePaulistana({
     tomadorNome:
       Number(ambiente) === 2
         ? 'TESTE HOMOLOGACAO PAULISTANA - SEM VALOR FISCAL'
-        : cliente.nome_fantasia || cliente.nome_cliente || cliente.nome || 'Tomador',
+        : cliente.nome || cliente.razao_social || cliente.nome_empresa || cliente.nome_fantasia || cliente.nome_cliente || 'Tomador',
     tomadorEnd: {
       logradouro: cliente.logradouro || perfil.logradouro,
       numero: cliente.numero || perfil.numero,

@@ -214,7 +214,7 @@ function buildEnviarLoteRpsSincronoXml({
   const desc =
     itens[0]?.descricao ?? config.descricao_servico_padrao ?? 'Prestacao de servicos';
   const tomadorNome =
-    cliente.nome_fantasia || cliente.nome_cliente || cliente.nome || 'Tomador';
+    cliente.nome || cliente.razao_social || cliente.nome_empresa || cliente.nome_fantasia || cliente.nome_cliente || 'Tomador';
   // ABRASF OptanteSimplesNacional: 1=Sim (optante), 2=Não.
   // CRT 3 (Regime Normal) → sempre XML 2. op_simp_nac=1 também → 2.
   // _forceOptanteXml: '1'|'2' — retry X327 quando cadastro TipLan ≠ Azoup.

@@ -112,7 +112,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
             prestadorMunicipio: (perfil.cidade || 'AMERICANA').toUpperCase(),
             prestadorUf: (perfil.uf || 'SP').toUpperCase(),
             tomadorNome:
-              cliente.nome || cliente.nome_fantasia || cliente.nome_cliente || 'Tomador',
+              cliente.nome || cliente.razao_social || cliente.nome_empresa || cliente.nome_fantasia || cliente.nome_cliente || 'Tomador',
             tomadorDoc: onlyDigits(cliente.cnpj) || onlyDigits(cliente.documento),
             tomadorIe: cliente.inscricao_estadual || '',
             tomadorTel: cliente.celular || '',

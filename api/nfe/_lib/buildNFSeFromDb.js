@@ -22,7 +22,7 @@ function dhEmiBr(isoDate) {
 }
 
 function nomeCliente(cliente) {
-  return (cliente.nome_fantasia || cliente.nome_cliente || cliente.nome || '').trim();
+  return (cliente.nome || cliente.razao_social || cliente.nome_empresa || cliente.nome_fantasia || cliente.nome_cliente || '').trim();
 }
 
 function ufCliente(cliente) {

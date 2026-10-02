@@ -93,7 +93,7 @@ function buildNFeLayout({ nota, itens, pagamentos, perfil, cliente, config }) {
     },
     dest: {
       ...(isCnpjDest ? { CNPJ: destDoc } : { CPF: destDoc }),
-      xNome: cliente.nome_cliente,
+      xNome: cliente.nome || cliente.nome_empresa || cliente.razao_social || cliente.nome_fantasia || cliente.nome_cliente,
       enderDest: {
         xLgr: cliente.logradouro || 'Não informado',
         nro: cliente.numero || 'S/N',

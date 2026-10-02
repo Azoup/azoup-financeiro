@@ -75,7 +75,7 @@ module.exports = async function handler(req, res) {
         prestadorEndereco: joinEndereco(prest),
         prestadorMunicipio: str(prest.cidade || 'AMERICANA').toUpperCase(),
         prestadorUf: str(prest.uf || 'SP').toUpperCase(),
-        tomadorNome: str(cliente?.nome || cliente?.nome_fantasia) || 'Tomador',
+        tomadorNome: str(cliente?.nome || cliente?.razao_social || cliente?.nome_empresa || cliente?.nome_fantasia || cliente?.nome_cliente) || 'Tomador',
         tomadorDoc: onlyDigits(cliente?.cnpj) || onlyDigits(cliente?.documento),
         tomadorIm: '',
         tomadorIe: str(cliente?.inscricao_estadual),
