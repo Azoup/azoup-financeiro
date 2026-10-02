@@ -197,41 +197,66 @@ async function obterPdfBoleto(
   return { blob, uri, pdfUrl: null };
 }
 
+function legendaCurta(row: ContaReceberListRow, nome: string): string {
+  const venc = formatBRDate(parseISODate(row.data_vencimento)) || row.data_vencimento;
+  return `Boleto ${nome} · ${formatBRL(row.valor_documento)} · venc. ${venc}`;
+}
+
+/**
+ * O WhatsApp não aceita anexo por link (wa.me). O PDF só entra na conversa
+ * pelo compartilhamento do celular/navegador.
+ */
+async function compartilharPdf(file: File, legenda: string): Promise<'ok' | 'cancelado' | 'indisponivel'> {
+  if (!isWeb() || typeof navigator === 'undefined' || !navigator.share || !navigator.canShare) {
+    return 'indisponivel';
+  }
+  const comLegenda: ShareData = { files: [file], title: 'Boleto', text: legenda };
+  const soArquivo: ShareData = { files: [file] };
+  const data = navigator.canShare(comLegenda) ? comLegenda : navigator.canShare(soArquivo) ? soArquivo : null;
+  if (!data) return 'indisponivel';
+  try {
+    await navigator.share(data);
+    return 'ok';
+  } catch (e) {
+    if ((e as { name?: string }).name === 'AbortError') return 'cancelado';
+    return 'indisponivel';
+  }
+}
+
 /**
  * Compartilha cobrança no WhatsApp com PDF do boleto.
- * 1) Tenta compartilhar arquivo + texto (share sheet — escolha WhatsApp)
- * 2) Senão baixa o PDF e abre o WhatsApp com a mensagem (e link do PDF se houver)
+ * No celular, o compartilhar abre o WhatsApp já com o PDF.
+ * O link wa.me não anexa arquivo; só entra se o compartilhar não existir.
  */
 export async function compartilharBoletoWhatsAppComPdf(
   row: ContaReceberListRow,
   opts?: { nomeBeneficiario?: string },
-): Promise<EnvioWhatsappCobrancaResultado> {
+): Promise<EnvioWhatsappCobrancaResultado | { modo: 'cancelado' }> {
   const raw = row.whatsapp?.trim();
   if (!raw) throw new Error('Cadastre um contato WhatsApp no cliente.');
   const phone = whatsappPhoneToInternational(raw);
   if (!phone) throw new Error('Número de WhatsApp inválido no cadastro do cliente.');
 
-  const { blob, uri, pdfUrl } = await obterPdfBoleto(row);
+  const { blob, uri } = await obterPdfBoleto(row);
   const filename = `boleto_${safeTrim(row.numero_documento) || row.id}.pdf`;
-  const message = buildMensagemCobrancaWhatsapp(row, {
-    nomeBeneficiario: opts?.nomeBeneficiario,
-    pdfUrl,
-  });
+  const pagador = await nomeEmpresaPagador(row);
+  const message = buildMensagemCobrancaWhatsapp(
+    { ...row, nome_cliente: pagador },
+    { nomeBeneficiario: opts?.nomeBeneficiario },
+  );
 
-  if (isWeb() && typeof File !== 'undefined' && typeof navigator !== 'undefined' && navigator.share) {
+  if (isWeb() && typeof File !== 'undefined') {
     const file = new File([blob], filename, { type: 'application/pdf' });
-    const shareData: ShareData = { title: 'Boleto', text: message, files: [file] };
-    if (navigator.canShare?.(shareData)) {
-      await navigator.share(shareData);
-      return { modo: 'compartilhado' };
-    }
+    const compartilhou = await compartilharPdf(file, legendaCurta({ ...row, nome_cliente: pagador }, pagador));
+    if (compartilhou === 'ok') return { modo: 'compartilhado' };
+    if (compartilhou === 'cancelado') return { modo: 'cancelado' };
   }
 
   if (!isWeb() && uri && (await Sharing.isAvailableAsync())) {
     try {
       await Sharing.shareAsync(uri, {
         mimeType: 'application/pdf',
-        dialogTitle: 'Enviar boleto no WhatsApp',
+        dialogTitle: `Enviar boleto para ${pagador}`,
         UTI: 'com.adobe.pdf',
       });
       return { modo: 'compartilhado' };
@@ -244,7 +269,11 @@ export async function compartilharBoletoWhatsAppComPdf(
     baixarPdfWeb(blob, filename);
   }
 
-  abrirUrlWhatsApp(buildWhatsAppDeepLink(phone, message));
+  const noComputador = isWeb() && typeof window !== 'undefined' && window.matchMedia?.('(pointer: fine)').matches;
+  const url = noComputador
+    ? `https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`
+    : buildWhatsAppDeepLink(phone, message);
+  abrirUrlWhatsApp(url);
   return { modo: 'pdf_e_app' };
 }
 
@@ -254,11 +283,12 @@ export async function compartilharBoletoWhatsAppComFeedback(
 ): Promise<void> {
   const Toast = (await import('react-native-toast-message')).default;
   const result = await compartilharBoletoWhatsAppComPdf(row, opts);
+  if (result.modo === 'cancelado') return;
   if (result.modo === 'compartilhado') {
     Toast.show({
       type: 'success',
-      text1: 'Escolha o WhatsApp para enviar o boleto.',
-      text2: 'A mensagem e o PDF vão juntos.',
+      text1: 'O PDF do boleto está pronto para o WhatsApp.',
+      text2: 'Na janela que abriu, escolha o WhatsApp. O arquivo já vai junto.',
     });
     return;
   }
