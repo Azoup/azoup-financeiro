@@ -136,7 +136,10 @@ function splitInstrucoes(instrucoes) {
 
 function buildPagadorFromCliente(cliente) {
   const doc = onlyDigits(cliente.cnpj ?? cliente.cpf ?? cliente.documento ?? '');
-  const nome = textoSemAcento(cliente.nome_fantasia ?? cliente.nome ?? cliente.razao_social, 'Pagador');
+  const nome = textoSemAcento(
+    cliente.nome ?? cliente.razao_social ?? cliente.nome_empresa ?? cliente.nome_fantasia ?? cliente.nome_cliente,
+    'Pagador',
+  ).slice(0, 50);
   const logradouro = textoSemAcento(
     [cliente.logradouro, cliente.numero, cliente.complemento].filter(Boolean).join(' '),
     'Nao informado',

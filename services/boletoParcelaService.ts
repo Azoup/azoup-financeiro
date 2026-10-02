@@ -304,10 +304,7 @@ async function buildSnapshotBenefPag(
           })
         : '—';
 
-  const pagNome = trimJoin(
-    [cli.nome_cliente, cli.nome_empresa ? `(${cli.nome_empresa})` : ''],
-    ' ',
-  );
+  const pagNome = (cli.nome_empresa || cli.nome_cliente || '').trim();
 
   return {
     beneficiario_razao_social: benefRazao,

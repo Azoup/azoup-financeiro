@@ -235,7 +235,10 @@ function buildC6Payload({ boleto, config, cliente }) {
   const taxId = onlyDigits(cliente.cnpj ?? cliente.cpf ?? cliente.documento ?? '');
   if (!taxId) throw new Error('Cliente sem CPF/CNPJ válido para emissão de boleto C6.');
 
-  const name = textoC6(cliente.nome_fantasia ?? cliente.nome ?? cliente.razao_social, 'Pagador');
+  const name = textoC6(
+    cliente.nome ?? cliente.razao_social ?? cliente.nome_empresa ?? cliente.nome_fantasia ?? cliente.nome_cliente,
+    'Pagador',
+  );
   const street = textoC6(cliente.logradouro, 'Nao informado');
   let city = textoC6(cliente.cidade, 'Nao informado');
   if (city.length < 3) city = 'Nao informado';
@@ -473,7 +476,14 @@ function formatPixValor(valor) {
 
 function buildPixDevedor(cliente) {
   const taxId = onlyDigits(cliente?.cnpj ?? cliente?.cpf ?? cliente?.documento ?? '');
-  const nome = (cliente?.nome_fantasia ?? cliente?.nome ?? cliente?.razao_social ?? 'Pagador').trim();
+  const nome = (
+    cliente?.nome ??
+    cliente?.razao_social ??
+    cliente?.nome_empresa ??
+    cliente?.nome_fantasia ??
+    cliente?.nome_cliente ??
+    'Pagador'
+  ).trim();
   if (!taxId) return { nome };
   if (taxId.length > 11) return { nome, cnpj: taxId };
   return { nome, cpf: taxId.padStart(11, '0').slice(0, 11) };
