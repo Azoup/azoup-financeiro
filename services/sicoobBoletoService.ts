@@ -189,13 +189,13 @@ export async function moverDuplicadosSicoobParaNovembro(): Promise<{
   let alterados = 0;
   const erros: string[] = [];
   for (let volta = 0; volta < 40; volta += 1) {
-    const res = await fetch(`${base}/api/boleto/mover-duplicados-novembro`, {
+    const res = await fetch(`${base}/api/boleto/emitir-lote`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: '{}',
+      body: JSON.stringify({ action: 'mover-duplicados-novembro' }),
     });
     const body = (await res.json().catch(() => ({}))) as {
       success?: boolean;

@@ -4,6 +4,7 @@ const { emitirUmBoletoC6 } = require('./_lib/emitirBoletoC6');
 const { loadC6Credentials } = require('./_lib/c6Credentials');
 const { tentarEnviarEmailAposEmissao } = require('./_lib/enviarEmailBoleto');
 const { cancelarUmBoletoNoBanco } = require('./_lib/cancelarBoletoRegistrado');
+const { moverDuplicadosSicoobParaNovembro } = require('./_lib/moverDuplicadosSicoobNovembro');
 const {
   cleanupTemp,
   criarPixCobC6Api,
@@ -20,6 +21,7 @@ const {
  * - action=pix-cob | pix-cobv | pix-get | pix-patch | receivables | transactions
  * - action=enviar-email-boleto (reenvio pontual)
  * - action=cancelar-boletos (baixa/cancelamento no banco)
+ * - action=mover-duplicados-novembro (prorroga o boleto Sicoob repetido mais novo)
  * (evita nova serverless function no limite Hobby)
  */
 module.exports = async function handler(req, res) {
@@ -32,6 +34,11 @@ module.exports = async function handler(req, res) {
     const admin = getAdmin();
     const body = req.body ?? {};
     const action = String(body.action || '').trim();
+
+    if (action === 'mover-duplicados-novembro') {
+      const result = await moverDuplicadosSicoobParaNovembro(admin, user.id, 6);
+      return res.status(200).json({ success: true, ...result });
+    }
 
     if (action === 'cancelar-boletos') {
       const boletoIds = Array.isArray(body.boletoIds) ? body.boletoIds.filter(Boolean) : [];
