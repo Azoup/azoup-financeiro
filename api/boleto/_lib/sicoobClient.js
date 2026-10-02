@@ -187,7 +187,7 @@ function buildSicoobPayload({ boleto, config, cliente, notaFiscal, beneficiarioD
     identificacaoDistribuicaoBoleto: Number(config.identificacao_distribuicao_boleto ?? 1),
     valor: Number(boleto.valor_documento),
     dataVencimento: boleto.data_vencimento,
-    dataLimitePagamento: boleto.data_vencimento,
+    // Sem dataLimitePagamento: o Sicoob registra o boleto com a data limite em branco.
     tipoDesconto: 0,
     tipoMulta: 0,
     tipoJurosMora: 0,
