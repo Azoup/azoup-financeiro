@@ -1,4 +1,4 @@
-const { alterarBoletoSicoobApi, cleanupCert } = require('./sicoobClient');
+const { alterarBoletoSicoobApi, cleanupCert, consultarBoletoSicoobApi } = require('./sicoobClient');
 const { loadSicoobCredentials } = require('./sicoobCredentials');
 
 function diaIso(valor) {
@@ -122,15 +122,12 @@ function alteracaoJaFeita(erro) {
   return /ao menos um campo deve ser alterado/i.test(String(erro?.message ?? erro ?? ''));
 }
 
-/** O banco responde isso quando a data enviada já é a que está no boleto. */
-async function alterarOuJaFeito(args) {
-  try {
-    await alterarBoletoSicoobApi(args);
-    return false;
-  } catch (e) {
-    if (alteracaoJaFeita(e)) return true;
-    throw e;
-  }
+function datasNoBanco(resultado) {
+  const row = resultado?.resultado ?? resultado ?? {};
+  return {
+    vencimento: diaIso(row.dataVencimento),
+    limite: diaIso(row.dataLimitePagamento),
+  };
 }
 
 /** O Sicoob recusa data limite vazia. Seis meses após a geração, e sempre depois do novo vencimento. */
@@ -200,16 +197,23 @@ async function moverDuplicadosSicoobParaNovembro(admin, userId, limite = 6) {
       if (alvo.boleto.nosso_numero_banco) {
         if (!credenciais) throw new Error('Sicoob não configurado para alterar o vencimento.');
         const limite = dataLimiteSeisMeses(alvo.boleto.created_at, alvo.nova);
-        await alterarOuJaFeito({
-          ...credenciais,
-          nossoNumero: alvo.boleto.nosso_numero_banco,
-          objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento: limite } },
-        });
-        await alterarOuJaFeito({
-          ...credenciais,
-          nossoNumero: alvo.boleto.nosso_numero_banco,
-          objeto: { prorrogacaoVencimento: { dataVencimento: alvo.nova } },
-        });
+        const antes = datasNoBanco(
+          await consultarBoletoSicoobApi({ ...credenciais, boleto: alvo.boleto }),
+        );
+        if (!antes.limite || antes.limite <= antes.vencimento || antes.limite < limite) {
+          await alterarBoletoSicoobApi({
+            ...credenciais,
+            nossoNumero: alvo.boleto.nosso_numero_banco,
+            objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento: limite } },
+          });
+        }
+        if (antes.vencimento !== alvo.nova) {
+          await alterarBoletoSicoobApi({
+            ...credenciais,
+            nossoNumero: alvo.boleto.nosso_numero_banco,
+            objeto: { prorrogacaoVencimento: { dataVencimento: alvo.nova } },
+          });
+        }
         noBanco = true;
       }
       await atualizarLocal(admin, alvo);
@@ -235,95 +239,84 @@ async function moverDuplicadosSicoobParaNovembro(admin, userId, limite = 6) {
   };
 }
 
-function mesmoDia(a, b) {
-  return Math.abs(new Date(a).getTime() - new Date(b).getTime()) <= 7 * 24 * 60 * 60 * 1000;
-}
-
 function hojeBrasil() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 }
 
-/** Repetido que ficou em outubro: o par ainda está em outubro, ou o mais novo já foi para novembro. */
-function candidatosLimiteOutubro(boletos, mensalidades, vendas) {
-  const itens = [];
-  for (const boleto of boletos) {
-    const men = boleto.mensalidade_id ? mensalidades.get(boleto.mensalidade_id) : null;
-    if (men?.status === 'cancelado') continue;
-    const clienteId = men?.cliente_id ?? (boleto.venda_id ? vendas.get(boleto.venda_id)?.cliente_id : null);
-    if (!clienteId || !boleto.nosso_numero_banco) continue;
-    const dia = diaIso(boleto.data_vencimento);
-    if (dia.length < 10) continue;
-    itens.push({
-      boleto,
-      clienteId,
-      dia,
-      valor: Number(boleto.valor_documento).toFixed(2),
-    });
+async function atualizarLimiteDuplicadosOutubro(admin, userId, limite = 4, depoisDe = null) {
+  const boletos = (await listarBoletosSicoob(admin, userId))
+    .filter((b) => b.nosso_numero_banco && b.status_registro === 'registrado')
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  let inicio = 0;
+  if (depoisDe) {
+    const idx = boletos.findIndex((b) => b.id === depoisDe);
+    inicio = idx >= 0 ? idx + 1 : 0;
   }
-
-  const alvos = [];
-  for (const item of itens) {
-    if (item.dia.slice(5, 7) !== '10') continue;
-    const par = itens.some((outro) => {
-      if (outro.boleto.id === item.boleto.id) return false;
-      if (outro.clienteId !== item.clienteId || outro.valor !== item.valor) return false;
-      if (outro.dia.slice(0, 4) !== item.dia.slice(0, 4)) return false;
-      if (outro.dia.slice(8) !== item.dia.slice(8)) return false;
-      if (outro.dia === item.dia) return true;
-      return outro.dia.slice(5, 7) === '11' && mesmoDia(item.boleto.created_at, outro.boleto.created_at);
-    });
-    if (par) alvos.push(item);
-  }
-  return alvos;
-}
-
-async function atualizarLimiteDuplicadosOutubro(admin, userId, limite = 6) {
-  const boletos = await listarBoletosSicoob(admin, userId);
-  const { mensalidades, vendas } = await vinculos(admin, boletos);
-  const alvos = candidatosLimiteOutubro(boletos, mensalidades, vendas);
-  const lote = alvos.slice(0, limite);
+  const janela = boletos.slice(inicio, inicio + 40);
   const alterados = [];
   const erros = [];
-  const dataLimite = dataLimiteSeisMeses(hojeBrasil(), lote[0]?.dia ?? hojeBrasil());
+  let pulados = 0;
+  let examinados = 0;
 
   let credenciais = null;
   try {
     credenciais = await loadSicoobCredentials(admin, userId, null);
   } catch (e) {
-    if (lote.length) throw e;
+    if (janela.length) throw e;
   }
-  if (lote.length && !credenciais) {
+  if (janela.length && !credenciais) {
     throw new Error('Sicoob não configurado para alterar a data limite.');
   }
 
-  for (const alvo of lote) {
-    const nome = alvo.boleto.pagador_nome || 'Cliente';
+  for (const boleto of janela) {
+    if (alterados.length + erros.length >= limite) break;
+    examinados += 1;
+    const nome = boleto.pagador_nome || 'Cliente';
+    const vencimentoLocal = diaIso(boleto.data_vencimento);
     try {
-      const limitePagamento = dataLimiteSeisMeses(hojeBrasil(), alvo.dia);
-      await alterarOuJaFeito({
-        ...credenciais,
-        nossoNumero: alvo.boleto.nosso_numero_banco,
-        objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento: limitePagamento } },
-      });
+      const antes = datasNoBanco(await consultarBoletoSicoobApi({ ...credenciais, boleto }));
+      const vencimento = antes.vencimento || vencimentoLocal;
+      const novoLimite = dataLimiteSeisMeses(hojeBrasil(), vencimento);
+      if (antes.limite && antes.limite >= novoLimite) {
+        pulados += 1;
+        continue;
+      }
+      try {
+        await alterarBoletoSicoobApi({
+          ...credenciais,
+          nossoNumero: boleto.nosso_numero_banco,
+          objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento: novoLimite } },
+        });
+      } catch (e) {
+        if (!alteracaoJaFeita(e)) throw e;
+      }
+      const depois = datasNoBanco(await consultarBoletoSicoobApi({ ...credenciais, boleto }));
+      if (!depois.limite || depois.limite <= vencimento) {
+        throw new Error(
+          `O Sicoob não gravou a nova data limite. Continua em ${depois.limite || antes.limite || vencimento}.`,
+        );
+      }
       alterados.push({
-        boletoId: alvo.boleto.id,
+        boletoId: boleto.id,
         cliente: nome,
-        vencimento: alvo.dia,
-        dataLimite: limitePagamento,
+        vencimento,
+        dataLimite: depois.limite,
       });
     } catch (e) {
-      erros.push({ boletoId: alvo.boleto.id, cliente: nome, erro: e.message ?? 'Falha ao alterar.' });
+      erros.push({ boletoId: boleto.id, cliente: nome, erro: e.message ?? 'Falha ao alterar.' });
     }
   }
 
   if (credenciais?.certPath) cleanupCert(credenciais.certPath);
 
+  const pos = inicio + examinados;
   return {
     alterados: alterados.length,
-    restantes: Math.max(0, alvos.length - alterados.length),
+    pulados,
+    restantes: Math.max(0, boletos.length - pos),
+    proximoId: janela[examinados - 1]?.id ?? null,
     itens: alterados,
     erros,
-    dataLimite,
   };
 }
 

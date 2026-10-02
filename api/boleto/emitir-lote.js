@@ -42,7 +42,7 @@ module.exports = async function handler(req, res) {
     }
 
     if (action === 'limite-duplicados-outubro') {
-      const result = await atualizarLimiteDuplicadosOutubro(admin, user.id, 6);
+      const result = await atualizarLimiteDuplicadosOutubro(admin, user.id, 4, body.depoisDe || null);
       return res.status(200).json({ success: true, ...result });
     }
 

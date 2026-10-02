@@ -188,20 +188,23 @@ async function repetirAcaoSicoob(action: string): Promise<{
 
   let alterados = 0;
   const erros: string[] = [];
-  for (let volta = 0; volta < 40; volta += 1) {
+  let proximoId: string | null = null;
+  for (let volta = 0; volta < 80; volta += 1) {
     const res = await fetch(`${base}/api/boleto/emitir-lote`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, depoisDe: proximoId }),
     });
     const body = (await res.json().catch(() => ({}))) as {
       success?: boolean;
       message?: string;
       alterados?: number;
+      pulados?: number;
       restantes?: number;
+      proximoId?: string | null;
       erros?: { cliente?: string; erro?: string }[];
     };
     if (!res.ok || body.success === false) {
@@ -211,7 +214,10 @@ async function repetirAcaoSicoob(action: string): Promise<{
     for (const e of body.erros ?? []) {
       erros.push(`${e.cliente ?? 'Cliente'}: ${e.erro ?? 'falha'}`);
     }
-    if ((body.alterados ?? 0) === 0 || (body.restantes ?? 0) === 0) break;
+    const andou = (body.alterados ?? 0) > 0 || (body.pulados ?? 0) > 0;
+    if ((body.restantes ?? 0) === 0 || !andou) break;
+    proximoId = body.proximoId ?? null;
+    if (!proximoId) break;
   }
   return { alterados, erros };
 }

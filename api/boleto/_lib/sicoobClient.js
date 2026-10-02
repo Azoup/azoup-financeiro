@@ -282,7 +282,10 @@ async function consultarBoletoSicoobApi({ config, certPath, senha, boleto }) {
   });
 
   if (boleto.nosso_numero_banco) {
-    params.set('nossoNumero', String(boleto.nosso_numero_banco));
+    const bruto = String(boleto.nosso_numero_banco).trim();
+    const parte = bruto.includes('-') ? bruto.split('-')[0] : bruto;
+    const nn = parte.replace(/\D/g, '');
+    params.set('nossoNumero', nn || bruto);
   } else if (boleto.linha_digitavel) {
     params.set('linhaDigitavel', String(boleto.linha_digitavel));
   } else if (boleto.codigo_barras) {

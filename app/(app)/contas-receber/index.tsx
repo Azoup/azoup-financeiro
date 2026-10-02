@@ -263,8 +263,8 @@ export default function ContasReceberScreen() {
 
   const atualizarLimiteOutubro = async () => {
     const ok = await confirmDestructive(
-      'Data limite dos repetidos de outubro',
-      'Só muda a data limite de pagamento, para daqui a 6 meses, nos boletos Sicoob repetidos que continuam com vencimento em outubro. O vencimento não muda e não cria outro boleto.',
+      'Corrigir data limite igual ao vencimento',
+      'Consulta o Sicoob e, quando a data limite ainda é o mesmo dia do vencimento, grava daqui a 6 meses. O vencimento não muda e não cria outro boleto.',
     );
     if (!ok) return;
     setAlterandoLimite(true);
@@ -280,7 +280,7 @@ export default function ContasReceberScreen() {
       } else if (res.alterados === 0) {
         Toast.show({
           type: 'info',
-          text1: 'Nenhum repetido de outubro para alterar a data limite.',
+          text1: 'Nenhum boleto com a data limite igual ao vencimento.',
         });
       } else {
         Toast.show({
@@ -1039,8 +1039,8 @@ export default function ContasReceberScreen() {
       >
         <Text style={[styles.dupChipTxt, alterandoLimite && styles.dupChipTxtOn]}>
           {alterandoLimite
-            ? 'Alterando data limite no Sicoob…'
-            : 'Data limite dos repetidos de outubro para daqui a 6 meses'}
+            ? 'Consultando e alterando a data limite no Sicoob…'
+            : 'Corrigir data limite que está igual ao vencimento'}
         </Text>
       </Pressable>
 
