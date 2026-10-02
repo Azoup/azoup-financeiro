@@ -1,10 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import type { BoletoParcelaVendaRow } from '@/types/contasReceber';
-import { htmlDanfseParaPdf } from '@/utils/baixarDanfseArquivos';
 import { buildBoletoCobrancaHtml } from '@/utils/boletoCobrancaHtml';
-import { safeTrim } from '@/utils/safeTrim';
 import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { Linking, Platform } from 'react-native';
 
 function storageBucket(row: BoletoParcelaVendaRow): string {
@@ -32,6 +29,21 @@ export async function resolveBoletoPdfUrl(row: BoletoParcelaVendaRow): Promise<s
   return null;
 }
 
+function openHtmlInNewTabWeb(html: string): void {
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!win) {
+    // Popup bloqueado: baixa o HTML
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'boleto.html';
+    a.click();
+  }
+  // Libera depois (aba já carregou o blob)
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 async function openExternalUrl(url: string): Promise<void> {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -42,87 +54,36 @@ async function openExternalUrl(url: string): Promise<void> {
   await Linking.openURL(url);
 }
 
-async function clienteIdDoBoleto(row: BoletoParcelaVendaRow): Promise<string | null> {
-  const direto = safeTrim((row as BoletoParcelaVendaRow & { cliente_id?: string | null }).cliente_id);
-  if (direto) return direto;
-  if (row.mensalidade_id) {
-    const { data } = await supabase
-      .from('mensalidades')
-      .select('cliente_id')
-      .eq('id', row.mensalidade_id)
-      .maybeSingle();
-    const id = safeTrim((data as { cliente_id?: string | null } | null)?.cliente_id);
-    if (id) return id;
-  }
-  if (row.venda_id) {
-    const { data } = await supabase.from('vendas').select('cliente_id').eq('id', row.venda_id).maybeSingle();
-    const id = safeTrim((data as { cliente_id?: string | null } | null)?.cliente_id);
-    if (id) return id;
-  }
-  return null;
-}
-
-/** Nome da empresa no cadastro. Se estiver vazio, usa o nome do cliente já gravado no carnê. */
-export async function nomeEmpresaPagador(row: BoletoParcelaVendaRow): Promise<string> {
-  const clienteId = await clienteIdDoBoleto(row);
-  if (!clienteId) return row.pagador_nome;
-  const { data } = await supabase.from('clientes').select('nome, nome_fantasia').eq('id', clienteId).maybeSingle();
-  const empresa = safeTrim((data as { nome?: string | null } | null)?.nome);
-  const fantasia = safeTrim((data as { nome_fantasia?: string | null } | null)?.nome_fantasia);
-  return empresa || fantasia || row.pagador_nome;
-}
-
-function nomeArquivoBoleto(row: BoletoParcelaVendaRow): string {
-  const doc = safeTrim(row.numero_documento).replace(/[<>:"/\\|?*]+/g, '').slice(0, 40);
-  return `boleto_${doc || row.id}.pdf`;
-}
-
-function baixarBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.rel = 'noopener';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
-/** PDF para o cliente: nome da empresa, mesma linha digitável e o mesmo código de barras do banco. */
-export async function pdfBoletoParaCliente(row: BoletoParcelaVendaRow): Promise<Blob> {
-  const pagador_nome = await nomeEmpresaPagador(row);
-  const html = buildBoletoCobrancaHtml({ ...row, pagador_nome });
-  return htmlDanfseParaPdf(html);
-}
-
 /**
- * Baixa o PDF com o nome da empresa para enviar ao cliente.
- * Não abre o PDF do banco, que ficou com o nome antigo.
- * Boleto C6 sem registro: não gera arquivo pagável.
+ * Abre PDF oficial do banco ou carnê HTML.
+ * No web, NÃO usa Print.printToFileAsync (imprime a tela do app).
+ * Boleto C6 sem registro: não abre carnê HTML (não é boleto bancário pagável).
  */
 export async function abrirDocumentoBoleto(row: BoletoParcelaVendaRow): Promise<void> {
-  if (row.tipo_emissao === 'c6' && !row.linha_digitavel && row.status_registro !== 'registrado' && row.status_registro !== 'pago') {
-    throw new Error(
-      row.mensagem_erro_registro?.trim() ||
-        'Boleto C6 ainda não registrado no banco. Use “Registrar no C6” para gerar o boleto real (PDF/linha digitável).',
-    );
+  const pdfUrl = await resolveBoletoPdfUrl(row);
+  if (pdfUrl) {
+    await openExternalUrl(pdfUrl);
+    return;
   }
 
-  const pagador_nome = await nomeEmpresaPagador(row);
-  const html = buildBoletoCobrancaHtml({ ...row, pagador_nome });
-  const filename = nomeArquivoBoleto(row);
+  if (row.tipo_emissao === 'c6') {
+    if (row.linha_digitavel && row.status_registro === 'registrado') {
+      // PDF ainda não disponível no CIP — mostra carnê com linha digitável real
+    } else {
+      throw new Error(
+        row.mensagem_erro_registro?.trim() ||
+          'Boleto C6 ainda não registrado no banco. Use “Registrar no C6” para gerar o boleto real (PDF/linha digitável).',
+      );
+    }
+  }
 
-  if (Platform.OS === 'web' && typeof document !== 'undefined') {
-    const blob = await htmlDanfseParaPdf(html);
-    baixarBlob(blob, filename);
+  const html = buildBoletoCobrancaHtml(row);
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    openHtmlInNewTabWeb(html);
     return;
   }
 
   const { uri } = await Print.printToFileAsync({ html });
-  if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: filename, UTI: 'com.adobe.pdf' });
-    return;
-  }
   await openExternalUrl(uri);
 }
