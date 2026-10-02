@@ -13,16 +13,6 @@ function novembroMesmoDia(iso) {
   return `${ano}-11-${String(diaNovo).padStart(2, '0')}`;
 }
 
-function diaSeguinte(iso) {
-  const [ano, mes, dia] = diaIso(iso).split('-').map(Number);
-  const data = new Date(ano, mes - 1, dia);
-  data.setDate(data.getDate() + 1);
-  const y = data.getFullYear();
-  const m = String(data.getMonth() + 1).padStart(2, '0');
-  const d = String(data.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
 function trocarMes(texto, deIso, paraIso) {
   if (!texto) return texto;
   const [anoDe, mesDe] = diaIso(deIso).split('-');
@@ -119,6 +109,24 @@ function candidatosNovembro(boletos, mensalidades, vendas) {
   return alvos;
 }
 
+/** A data limite precisa sair antes do vencimento. Com limite em outubro, novembro é recusado. */
+async function limparDataLimitePagamento(credenciais, nossoNumero) {
+  let ultimoErro = null;
+  for (const dataLimitePagamento of [null, '']) {
+    try {
+      await alterarBoletoSicoobApi({
+        ...credenciais,
+        nossoNumero,
+        objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento } },
+      });
+      return;
+    } catch (e) {
+      ultimoErro = e;
+    }
+  }
+  throw ultimoErro ?? new Error('Sicoob não removeu a data limite de pagamento.');
+}
+
 async function atualizarLocal(admin, alvo) {
   const { boleto, nova, competencia } = alvo;
   const resumo = trocarMes(boleto.venda_descricao_resumo, boleto.data_vencimento, nova);
@@ -175,14 +183,7 @@ async function moverDuplicadosSicoobParaNovembro(admin, userId, limite = 6) {
       let noBanco = false;
       if (alvo.boleto.nosso_numero_banco) {
         if (!credenciais) throw new Error('Sicoob não configurado para alterar o vencimento.');
-        const limite = diaSeguinte(alvo.nova);
-        // O Sicoob exige vencimento anterior à data limite e só aceita um campo por PATCH.
-        // Primeiro empurra o limite para o dia seguinte; depois grava o vencimento de novembro.
-        await alterarBoletoSicoobApi({
-          ...credenciais,
-          nossoNumero: alvo.boleto.nosso_numero_banco,
-          objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento: limite } },
-        });
+        await limparDataLimitePagamento(credenciais, alvo.boleto.nosso_numero_banco);
         await alterarBoletoSicoobApi({
           ...credenciais,
           nossoNumero: alvo.boleto.nosso_numero_banco,
