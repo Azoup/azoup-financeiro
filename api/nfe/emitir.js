@@ -1,6 +1,6 @@
 const { getAdmin, getUserFromBearer } = require('./_lib/supabaseAdmin');
 const { emitirNfseSefaz } = require('./_lib/nfseEmit');
-const { isRpsChaveDuplicadaAdn } = require('./_lib/nfseErrors');
+const { isRpsChaveDuplicadaAdn, humanizeNfseRejection } = require('./_lib/nfseErrors');
 const { prepareServerlessCryptoEnv } = require('./_lib/serverlessEnv');
 const { resolveEmitenteContexto } = require('./_lib/nfseEmitenteResolve');
 const { tentarEnviarEmailDanfe } = require('./_lib/enviarEmailDanfe');
@@ -10,7 +10,7 @@ const { tentarEnviarEmailDanfe } = require('./_lib/enviarEmailDanfe');
  * Usado quando o ADN rejeita "RPS/chave já existe".
  */
 function falhaTransitoriaNfse(message) {
-  return /E999|E1000|HttpClient\.Timeout|Erro n[aã]o catalogado|prefeitura demorou|erro genérico \(E999\)/i.test(
+  return /E999|E1000|HttpClient\.Timeout|Erro n[aã]o catalogado|prefeitura demorou|erro genérico \(E999\)|ECONNRESET|ECONNREFUSED|socket hang up|ETIMEDOUT|\bL0\b|equipe t[eé]cnica detalhando/i.test(
     String(message ?? ''),
   );
 }
@@ -141,13 +141,22 @@ module.exports = async function handler(req, res) {
         senhaEnc: sec.senha_criptografada,
       });
 
-    let result = await emitir();
-
-    // E999/E1000: a calculadora da prefeitura falha ou estoura o tempo. Uma nova tentativa costuma passar.
-    if (!result.success && falhaTransitoriaNfse(result.message)) {
+    let result;
+    for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
+      try {
+        result = await emitir();
+      } catch (e) {
+        const msg = String(e?.message ?? e ?? '');
+        if (tentativa < 3 && falhaTransitoriaNfse(msg)) {
+          console.warn('[nfse] conexão caiu — tentando de novo', msg);
+          await esperar(2000 * tentativa);
+          continue;
+        }
+        throw e;
+      }
+      if (result.success || !falhaTransitoriaNfse(result.message) || tentativa === 3) break;
       console.warn('[nfse] falha transitória da prefeitura — tentando de novo', result.message);
-      await esperar(2000);
-      result = await emitir();
+      await esperar(2000 * tentativa);
     }
 
     // L1260/L1268: o RPS já está no ADN. Reenviar o mesmo número falha de novo.
@@ -212,10 +221,10 @@ module.exports = async function handler(req, res) {
     return res.status(200).json(result);
   } catch (e) {
     console.error('nfe/emitir', e);
-    const msg =
+    const raw =
       (e && typeof e === 'object' && 'message' in e && e.message) ||
       (typeof e === 'string' ? e : '') ||
       'Falha na emissão NFS-e.';
-    return res.status(500).json({ success: false, message: String(msg) });
+    return res.status(500).json({ success: false, message: humanizeNfseRejection(String(raw)) });
   }
 };

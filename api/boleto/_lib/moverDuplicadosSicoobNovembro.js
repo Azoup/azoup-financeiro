@@ -118,6 +118,21 @@ function somarMeses(iso, meses) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function alteracaoJaFeita(erro) {
+  return /ao menos um campo deve ser alterado/i.test(String(erro?.message ?? erro ?? ''));
+}
+
+/** O banco responde isso quando a data enviada já é a que está no boleto. */
+async function alterarOuJaFeito(args) {
+  try {
+    await alterarBoletoSicoobApi(args);
+    return false;
+  } catch (e) {
+    if (alteracaoJaFeita(e)) return true;
+    throw e;
+  }
+}
+
 /** O Sicoob recusa data limite vazia. Seis meses após a geração, e sempre depois do novo vencimento. */
 function dataLimiteSeisMeses(geracaoIso, vencimentoNovo) {
   const base = diaIso(geracaoIso) || diaIso(vencimentoNovo);
@@ -185,12 +200,12 @@ async function moverDuplicadosSicoobParaNovembro(admin, userId, limite = 6) {
       if (alvo.boleto.nosso_numero_banco) {
         if (!credenciais) throw new Error('Sicoob não configurado para alterar o vencimento.');
         const limite = dataLimiteSeisMeses(alvo.boleto.created_at, alvo.nova);
-        await alterarBoletoSicoobApi({
+        await alterarOuJaFeito({
           ...credenciais,
           nossoNumero: alvo.boleto.nosso_numero_banco,
           objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento: limite } },
         });
-        await alterarBoletoSicoobApi({
+        await alterarOuJaFeito({
           ...credenciais,
           nossoNumero: alvo.boleto.nosso_numero_banco,
           objeto: { prorrogacaoVencimento: { dataVencimento: alvo.nova } },
@@ -285,7 +300,7 @@ async function atualizarLimiteDuplicadosOutubro(admin, userId, limite = 6) {
     const nome = alvo.boleto.pagador_nome || 'Cliente';
     try {
       const limitePagamento = dataLimiteSeisMeses(hojeBrasil(), alvo.dia);
-      await alterarBoletoSicoobApi({
+      await alterarOuJaFeito({
         ...credenciais,
         nossoNumero: alvo.boleto.nosso_numero_banco,
         objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento: limitePagamento } },

@@ -8,6 +8,14 @@ function humanizeNfseRejection(message, ibge) {
     return 'A prefeitura demorou para calcular a NFS-e e cancelou a tentativa. Emita de novo só esta nota.';
   }
 
+  if (/ECONNRESET|ECONNREFUSED|socket hang up|ETIMEDOUT/i.test(raw)) {
+    return 'A conexão com a prefeitura caiu no meio da emissão (ECONNRESET). A mensalidade ficou gravada. Emita de novo só esta nota, sem gerar a mensalidade outra vez.';
+  }
+
+  if (/\bL0\b|equipe t[eé]cnica detalhando o ocorrido/i.test(raw)) {
+    return 'A prefeitura teve uma falha interna (L0) e não autorizou a nota. A mensalidade ficou gravada. Espere alguns minutos e emita de novo só esta nota.';
+  }
+
   if (/E999|Erro não catalogado|Erro nao catalogado/i.test(raw)) {
     return 'A prefeitura devolveu um erro genérico (E999) ao calcular o imposto. Emita de novo só esta nota.';
   }
