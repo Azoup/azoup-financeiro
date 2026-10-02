@@ -98,6 +98,7 @@ export default function GerarMensalidadeScreen() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [enviarModalOpen, setEnviarModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [gerandoFaltantes, setGerandoFaltantes] = useState(false);
   const [falhasTela, setFalhasTela] = useState<FalhaEmissao[]>([]);
   const envioEmAndamento = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
@@ -413,6 +414,46 @@ export default function GerarMensalidadeScreen() {
     }
   };
 
+  const gerarBoletosQueFaltaram = async () => {
+    if (!user?.id || gerandoFaltantes || busy || envioEmAndamento.current) return;
+    setGerandoFaltantes(true);
+    try {
+      const r = await sincronizarCarnesMensalidadesFaltantes(user.id);
+      if (!r.gerados) {
+        Toast.show({
+          type: 'info',
+          text1: 'Não há mensalidade recente sem boleto.',
+          text2: 'Só entra mensalidade dos últimos 15 dias que ainda não tem carnê.',
+        });
+        return;
+      }
+      if (r.falhas.length) {
+        Toast.show({
+          type: 'error',
+          text1: 'Alguns boletos não saíram',
+          text2: r.falhas[0]?.erro,
+          visibilityTime: 12000,
+        });
+        return;
+      }
+      Toast.show({
+        type: 'success',
+        text1: `${r.gerados} boleto(s) gerado(s).`,
+        text2: 'A mensalidade e a nota que já existiam não foram geradas de novo.',
+      });
+      setFalhasTela([]);
+    } catch (e) {
+      Toast.show({
+        type: 'error',
+        text1: 'Boleto não gerado',
+        text2: (e as Error).message,
+        visibilityTime: 12000,
+      });
+    } finally {
+      setGerandoFaltantes(false);
+    }
+  };
+
   const executarEnvio = async (
     gerarNotaFiscal: boolean,
     opts?: {
@@ -669,6 +710,17 @@ export default function GerarMensalidadeScreen() {
           }
         />
         <FalhaEmissaoLista falhas={falhasTela} onFechar={() => setFalhasTela([])} />
+        <Pressable
+          disabled={gerandoFaltantes || busy}
+          onPress={() => void gerarBoletosQueFaltaram()}
+          style={styles.falhaAcoes}
+        >
+          <Text style={styles.falhaLink}>
+            {gerandoFaltantes
+              ? 'Gerando boletos que faltaram…'
+              : 'Gerar boletos que faltaram (sem nova mensalidade)'}
+          </Text>
+        </Pressable>
         {falhasTela.length > 0 ? (
           <View style={styles.falhaAcoes}>
             <Pressable onPress={() => router.push('/(app)/mensalidades')}>

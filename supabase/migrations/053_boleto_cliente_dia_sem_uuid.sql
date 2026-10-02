@@ -1,5 +1,8 @@
--- Um boleto por cliente em cada dia de vencimento.
--- Carnê baixado ou mensalidade cancelada não ocupam o dia.
+-- A trava de um boleto por dia gravava o cliente numa variável uuid.
+-- Cliente com código numérico (ex.: 991) derrubava o carnê inteiro:
+-- invalid input syntax for type uuid: "991"
+-- Mensalidade e NFS-e não passam por essa variável, por isso só o boleto falhava.
+-- Rode no Supabase → SQL Editor → Run. Pode rodar de novo sem problema.
 
 create or replace function public.bloquear_segundo_boleto_cliente_dia()
 returns trigger
@@ -50,41 +53,3 @@ begin
   return new;
 end;
 $$;
-
-drop trigger if exists tr_um_boleto_cliente_dia on public.boletos_parcela_venda;
-create trigger tr_um_boleto_cliente_dia
-before insert on public.boletos_parcela_venda
-for each row execute procedure public.bloquear_segundo_boleto_cliente_dia();
-
-create or replace function public.bloquear_segunda_mensalidade_cliente_dia()
-returns trigger
-language plpgsql
-as $$
-declare
-  v_outros int;
-begin
-  if new.status = 'cancelado' then
-    return new;
-  end if;
-
-  select count(*) into v_outros
-  from public.mensalidades m
-  where m.user_id = new.user_id
-    and m.cliente_id = new.cliente_id
-    and m.data_vencimento = new.data_vencimento
-    and m.status <> 'cancelado'
-    and m.id is distinct from new.id;
-
-  if v_outros > 0 then
-    raise exception 'Este cliente já tem boleto neste dia.'
-      using errcode = '23505';
-  end if;
-
-  return new;
-end;
-$$;
-
-drop trigger if exists tr_uma_mensalidade_cliente_dia on public.mensalidades;
-create trigger tr_uma_mensalidade_cliente_dia
-before insert on public.mensalidades
-for each row execute procedure public.bloquear_segunda_mensalidade_cliente_dia();

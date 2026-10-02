@@ -29,6 +29,11 @@ function wrapBoletoDbError(error: { message?: string; code?: string } | null): E
   if (/j[aá] tem boleto neste dia|j[aá] existe boleto deste cliente/i.test(msg)) {
     return new Error('Este cliente já tem boleto neste dia. Não gere nem emita outro.');
   }
+  if (/invalid input syntax for type uuid/i.test(msg)) {
+    return new Error(
+      'O carnê não foi gravado: a trava de um boleto por dia rejeitou o código do cliente. Rode no SQL Editor o arquivo supabase/migrations/053_boleto_cliente_dia_sem_uuid.sql e depois toque em “Gerar boletos que faltaram”. Não gere a mensalidade de novo.',
+    );
+  }
   return new Error(msg);
 }
 
@@ -793,35 +798,41 @@ export async function registrarBoletosPendentesClientes(
   };
 }
 
-/** Recria carnês em A receber para mensalidades que foram geradas sem boleto (ex.: falha na migration 018). */
+/** Carnês das mensalidades recentes que foram gravadas sem boleto. Não cria outra mensalidade nem reenvia carnê que já existe. */
 export async function sincronizarCarnesMensalidadesFaltantes(
   userId: string,
-): Promise<{ gerados: number }> {
+): Promise<{ gerados: number; falhas: { mensalidadeId: string | null; erro: string }[] }> {
+  const desde = new Date();
+  desde.setDate(desde.getDate() - 15);
   const { data: mens, error: e0 } = await supabase
     .from('mensalidades')
     .select('id, cliente_id, valor, data_vencimento, competencia')
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .neq('status', 'cancelado')
+    .gte('data_geracao', desde.toISOString());
   if (e0) throw wrapBoletoDbError(e0);
   const todas = (mens ?? []) as MensalidadeParaBoleto[];
-  if (!todas.length) return { gerados: 0 };
+  if (!todas.length) return { gerados: 0, falhas: [] };
 
-  const { data: boletos, error: e1 } = await supabase
-    .from('boletos_parcela_venda')
-    .select('mensalidade_id')
-    .eq('user_id', userId)
-    .not('mensalidade_id', 'is', null);
-  if (e1) throw wrapBoletoDbError(e1);
-
-  const comCarne = new Set(
-    ((boletos ?? []) as { mensalidade_id: string | null }[])
-      .map((b) => b.mensalidade_id)
-      .filter((id): id is string => Boolean(id)),
-  );
+  const comCarne = new Set<string>();
+  for (let i = 0; i < todas.length; i += 80) {
+    const ids = todas.slice(i, i + 80).map((m) => m.id);
+    const { data: boletos, error: e1 } = await supabase
+      .from('boletos_parcela_venda')
+      .select('mensalidade_id')
+      .eq('user_id', userId)
+      .in('mensalidade_id', ids);
+    if (e1) throw wrapBoletoDbError(e1);
+    for (const b of boletos ?? []) {
+      const id = (b as { mensalidade_id: string | null }).mensalidade_id;
+      if (id) comCarne.add(id);
+    }
+  }
   const faltantes = todas.filter((m) => !comCarne.has(m.id));
-  if (!faltantes.length) return { gerados: 0 };
+  if (!faltantes.length) return { gerados: 0, falhas: [] };
 
-  await gerarBoletosParaMensalidades(userId, faltantes);
-  return { gerados: faltantes.length };
+  const res = await gerarBoletosParaMensalidades(userId, faltantes);
+  return { gerados: faltantes.length, falhas: res.falhasBoleto ?? [] };
 }
 
 /** Recria carnês em A receber para vendas que foram salvas sem boleto/carnê. */
