@@ -13,6 +13,16 @@ function novembroMesmoDia(iso) {
   return `${ano}-11-${String(diaNovo).padStart(2, '0')}`;
 }
 
+function diaSeguinte(iso) {
+  const [ano, mes, dia] = diaIso(iso).split('-').map(Number);
+  const data = new Date(ano, mes - 1, dia);
+  data.setDate(data.getDate() + 1);
+  const y = data.getFullYear();
+  const m = String(data.getMonth() + 1).padStart(2, '0');
+  const d = String(data.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 function trocarMes(texto, deIso, paraIso) {
   if (!texto) return texto;
   const [anoDe, mesDe] = diaIso(deIso).split('-');
@@ -165,20 +175,19 @@ async function moverDuplicadosSicoobParaNovembro(admin, userId, limite = 6) {
       let noBanco = false;
       if (alvo.boleto.nosso_numero_banco) {
         if (!credenciais) throw new Error('Sicoob não configurado para alterar o vencimento.');
+        const limite = diaSeguinte(alvo.nova);
+        // O Sicoob exige vencimento anterior à data limite e só aceita um campo por PATCH.
+        // Primeiro empurra o limite para o dia seguinte; depois grava o vencimento de novembro.
+        await alterarBoletoSicoobApi({
+          ...credenciais,
+          nossoNumero: alvo.boleto.nosso_numero_banco,
+          objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento: limite } },
+        });
         await alterarBoletoSicoobApi({
           ...credenciais,
           nossoNumero: alvo.boleto.nosso_numero_banco,
           objeto: { prorrogacaoVencimento: { dataVencimento: alvo.nova } },
         });
-        try {
-          await alterarBoletoSicoobApi({
-            ...credenciais,
-            nossoNumero: alvo.boleto.nosso_numero_banco,
-            objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento: alvo.nova } },
-          });
-        } catch {
-          // O vencimento já foi prorrogado. O limite de pagamento pode ser recusado sem desfazer a data.
-        }
         noBanco = true;
       }
       await atualizarLocal(admin, alvo);
