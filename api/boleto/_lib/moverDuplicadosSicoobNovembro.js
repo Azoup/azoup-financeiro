@@ -220,4 +220,99 @@ async function moverDuplicadosSicoobParaNovembro(admin, userId, limite = 6) {
   };
 }
 
-module.exports = { moverDuplicadosSicoobParaNovembro };
+function mesmoDia(a, b) {
+  return Math.abs(new Date(a).getTime() - new Date(b).getTime()) <= 7 * 24 * 60 * 60 * 1000;
+}
+
+function hojeBrasil() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+}
+
+/** Repetido que ficou em outubro: o par ainda está em outubro, ou o mais novo já foi para novembro. */
+function candidatosLimiteOutubro(boletos, mensalidades, vendas) {
+  const itens = [];
+  for (const boleto of boletos) {
+    const men = boleto.mensalidade_id ? mensalidades.get(boleto.mensalidade_id) : null;
+    if (men?.status === 'cancelado') continue;
+    const clienteId = men?.cliente_id ?? (boleto.venda_id ? vendas.get(boleto.venda_id)?.cliente_id : null);
+    if (!clienteId || !boleto.nosso_numero_banco) continue;
+    const dia = diaIso(boleto.data_vencimento);
+    if (dia.length < 10) continue;
+    itens.push({
+      boleto,
+      clienteId,
+      dia,
+      valor: Number(boleto.valor_documento).toFixed(2),
+    });
+  }
+
+  const alvos = [];
+  for (const item of itens) {
+    if (item.dia.slice(5, 7) !== '10') continue;
+    const par = itens.some((outro) => {
+      if (outro.boleto.id === item.boleto.id) return false;
+      if (outro.clienteId !== item.clienteId || outro.valor !== item.valor) return false;
+      if (outro.dia.slice(0, 4) !== item.dia.slice(0, 4)) return false;
+      if (outro.dia.slice(8) !== item.dia.slice(8)) return false;
+      if (outro.dia === item.dia) return true;
+      return outro.dia.slice(5, 7) === '11' && mesmoDia(item.boleto.created_at, outro.boleto.created_at);
+    });
+    if (par) alvos.push(item);
+  }
+  return alvos;
+}
+
+async function atualizarLimiteDuplicadosOutubro(admin, userId, limite = 6) {
+  const boletos = await listarBoletosSicoob(admin, userId);
+  const { mensalidades, vendas } = await vinculos(admin, boletos);
+  const alvos = candidatosLimiteOutubro(boletos, mensalidades, vendas);
+  const lote = alvos.slice(0, limite);
+  const alterados = [];
+  const erros = [];
+  const dataLimite = dataLimiteSeisMeses(hojeBrasil(), lote[0]?.dia ?? hojeBrasil());
+
+  let credenciais = null;
+  try {
+    credenciais = await loadSicoobCredentials(admin, userId, null);
+  } catch (e) {
+    if (lote.length) throw e;
+  }
+  if (lote.length && !credenciais) {
+    throw new Error('Sicoob não configurado para alterar a data limite.');
+  }
+
+  for (const alvo of lote) {
+    const nome = alvo.boleto.pagador_nome || 'Cliente';
+    try {
+      const limitePagamento = dataLimiteSeisMeses(hojeBrasil(), alvo.dia);
+      await alterarBoletoSicoobApi({
+        ...credenciais,
+        nossoNumero: alvo.boleto.nosso_numero_banco,
+        objeto: { prorrogacaoLimitePagamento: { dataLimitePagamento: limitePagamento } },
+      });
+      alterados.push({
+        boletoId: alvo.boleto.id,
+        cliente: nome,
+        vencimento: alvo.dia,
+        dataLimite: limitePagamento,
+      });
+    } catch (e) {
+      erros.push({ boletoId: alvo.boleto.id, cliente: nome, erro: e.message ?? 'Falha ao alterar.' });
+    }
+  }
+
+  if (credenciais?.certPath) cleanupCert(credenciais.certPath);
+
+  return {
+    alterados: alterados.length,
+    restantes: Math.max(0, alvos.length - alterados.length),
+    itens: alterados,
+    erros,
+    dataLimite,
+  };
+}
+
+module.exports = {
+  moverDuplicadosSicoobParaNovembro,
+  atualizarLimiteDuplicadosOutubro,
+};

@@ -176,7 +176,7 @@ export async function sincronizarBoletosPendentes(): Promise<{
   };
 }
 
-export async function moverDuplicadosSicoobParaNovembro(): Promise<{
+async function repetirAcaoSicoob(action: string): Promise<{
   alterados: number;
   erros: string[];
 }> {
@@ -195,7 +195,7 @@ export async function moverDuplicadosSicoobParaNovembro(): Promise<{
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ action: 'mover-duplicados-novembro' }),
+      body: JSON.stringify({ action }),
     });
     const body = (await res.json().catch(() => ({}))) as {
       success?: boolean;
@@ -214,4 +214,18 @@ export async function moverDuplicadosSicoobParaNovembro(): Promise<{
     if ((body.alterados ?? 0) === 0 || (body.restantes ?? 0) === 0) break;
   }
   return { alterados, erros };
+}
+
+export async function moverDuplicadosSicoobParaNovembro(): Promise<{
+  alterados: number;
+  erros: string[];
+}> {
+  return repetirAcaoSicoob('mover-duplicados-novembro');
+}
+
+export async function atualizarLimiteDuplicadosOutubro(): Promise<{
+  alterados: number;
+  erros: string[];
+}> {
+  return repetirAcaoSicoob('limite-duplicados-outubro');
 }

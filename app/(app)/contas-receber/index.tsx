@@ -13,7 +13,7 @@ import {
 } from '@/services/boletoParcelaService';
 import { reemitirBoletosC6 } from '@/services/c6BoletoService';
 import { pickEmitenteC6 } from '@/services/c6ConfigService';
-import { reemitirBoletosSicoob, moverDuplicadosSicoobParaNovembro } from '@/services/sicoobBoletoService';
+import { reemitirBoletosSicoob, moverDuplicadosSicoobParaNovembro, atualizarLimiteDuplicadosOutubro } from '@/services/sicoobBoletoService';
 import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import {
   fetchMensalidadeGeradaById,
@@ -136,6 +136,7 @@ export default function ContasReceberScreen() {
   const [soDuplicados, setSoDuplicados] = useState(false);
   const [soRegistrando, setSoRegistrando] = useState(false);
   const [movendoNovembro, setMovendoNovembro] = useState(false);
+  const [alterandoLimite, setAlterandoLimite] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftVencDe, setDraftVencDe] = useState<string | null>(null);
   const [draftVencAte, setDraftVencAte] = useState<string | null>(null);
@@ -257,6 +258,41 @@ export default function ContasReceberScreen() {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setMovendoNovembro(false);
+    }
+  };
+
+  const atualizarLimiteOutubro = async () => {
+    const ok = await confirmDestructive(
+      'Data limite dos repetidos de outubro',
+      'Só muda a data limite de pagamento, para daqui a 6 meses, nos boletos Sicoob repetidos que continuam com vencimento em outubro. O vencimento não muda e não cria outro boleto.',
+    );
+    if (!ok) return;
+    setAlterandoLimite(true);
+    try {
+      const res = await atualizarLimiteDuplicadosOutubro();
+      if (res.erros.length) {
+        Toast.show({
+          type: 'error',
+          text1: `${res.alterados} alterado(s). ${res.erros.length} com erro.`,
+          text2: res.erros.slice(0, 2).join(' · '),
+          visibilityTime: 12000,
+        });
+      } else if (res.alterados === 0) {
+        Toast.show({
+          type: 'info',
+          text1: 'Nenhum repetido de outubro para alterar a data limite.',
+        });
+      } else {
+        Toast.show({
+          type: 'success',
+          text1: `${res.alterados} boleto(s) com data limite para daqui a 6 meses.`,
+          text2: 'O vencimento de outubro permanece.',
+        });
+      }
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setAlterandoLimite(false);
     }
   };
 
@@ -987,13 +1023,24 @@ export default function ContasReceberScreen() {
 
       <Pressable
         style={[styles.dupChip, movendoNovembro && styles.dupChipOn]}
-        disabled={movendoNovembro}
+        disabled={movendoNovembro || alterandoLimite}
         onPress={() => void moverRepetidosParaNovembro()}
       >
         <Text style={[styles.dupChipTxt, movendoNovembro && styles.dupChipTxtOn]}>
           {movendoNovembro
             ? 'Alterando vencimento no Sicoob…'
             : 'Mover repetidos Sicoob para novembro'}
+        </Text>
+      </Pressable>
+      <Pressable
+        style={[styles.dupChip, alterandoLimite && styles.dupChipOn]}
+        disabled={movendoNovembro || alterandoLimite}
+        onPress={() => void atualizarLimiteOutubro()}
+      >
+        <Text style={[styles.dupChipTxt, alterandoLimite && styles.dupChipTxtOn]}>
+          {alterandoLimite
+            ? 'Alterando data limite no Sicoob…'
+            : 'Data limite dos repetidos de outubro para daqui a 6 meses'}
         </Text>
       </Pressable>
 
