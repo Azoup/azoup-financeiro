@@ -26,6 +26,7 @@ import {
   podeRegistrarPagamentoMensalidadeGerada,
   registrarPagamentoMensalidadeGerada,
 } from '@/services/mensalidadeGeradaService';
+import { fetchClientesParaGerarMensalidades } from '@/services/clientsService';
 import {
   fetchNotaFiscalById,
   fetchNotaFiscalPorMensalidade,
@@ -39,6 +40,7 @@ import type {
   MensalidadeGeradaStatusVisual,
   PagamentoMensalidadeGerada,
 } from '@/types/mensalidadeGerada';
+import type { ClienteListItem } from '@/types/models';
 import { formatBRL } from '@/utils/currency';
 import { formatDateTimeBRFromISO } from '@/utils/date';
 import { reaisParaCentavos } from '@/utils/vendasParcelas';
@@ -158,6 +160,10 @@ export default function HistoricoMensalidadesGeradasScreen() {
   const debouncedSearch = useDebounce(search, 300);
   const [statusFilter, setStatusFilter] = useState<StatusFiltro>('todos');
   const [nfFiltro, setNfFiltro] = useState<NfFiltro>('todas');
+  const [soNaoGerados, setSoNaoGerados] = useState(true);
+  const [clientesPendentes, setClientesPendentes] = useState<ClienteListItem[]>([]);
+  const [loadingPendentes, setLoadingPendentes] = useState(false);
+  const [recargaPendentes, setRecargaPendentes] = useState(0);
   const [selecionadas, setSelecionadas] = useState<string[]>([]);
   const [nfLoteBusy, setNfLoteBusy] = useState(false);
   const [falhasTela, setFalhasTela] = useState<FalhaEmissao[]>([]);
@@ -210,6 +216,43 @@ export default function HistoricoMensalidadesGeradasScreen() {
     }, [load]),
   );
 
+  useEffect(() => {
+    if (!soNaoGerados || !user?.id) {
+      setClientesPendentes([]);
+      return;
+    }
+    let alive = true;
+    setLoadingPendentes(true);
+    (async () => {
+      try {
+        const list = await fetchClientesParaGerarMensalidades(user.id, {
+          search: debouncedSearch,
+          segmentoCodigo: 'todos',
+          incluirCancelados: false,
+          nfse: 'todos',
+          mesReajusteDe: null,
+          mesReajusteAte: null,
+          somenteProntosParaGerar: false,
+          incluirCongelados: false,
+          ocultarJaGeradasNoMes: true,
+        });
+        const filtrada =
+          empresaId === 'todos' ? list : list.filter((c) => c.emitente_nf_id === empresaId);
+        if (alive) setClientesPendentes(filtrada);
+      } catch (e) {
+        if (alive) {
+          setClientesPendentes([]);
+          showAppError((e as Error).message);
+        }
+      } finally {
+        if (alive) setLoadingPendentes(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [soNaoGerados, user?.id, debouncedSearch, empresaId, recargaPendentes]);
+
   const filteredRows = useMemo(() => {
     let list = allRows.filter((m) => {
       const boletoEmitente = boletosPorMensalidade[m.id]?.emitente_id;
@@ -253,15 +296,20 @@ export default function HistoricoMensalidadesGeradasScreen() {
 
   const historicoItems = useMemo(() => groupHistoricoRows(filteredRows), [filteredRows]);
 
-  const totalPaginas = Math.max(1, Math.ceil(filteredRows.length / MENSALIDADES_POR_PAGINA));
+  const totalLista = soNaoGerados ? clientesPendentes.length : filteredRows.length;
+  const totalPaginas = Math.max(1, Math.ceil(totalLista / MENSALIDADES_POR_PAGINA));
   const itemsPagina = useMemo(() => {
     const inicio = (pagina - 1) * MENSALIDADES_POR_PAGINA;
     return filteredRows.slice(inicio, inicio + MENSALIDADES_POR_PAGINA);
   }, [filteredRows, pagina]);
+  const clientesPagina = useMemo(() => {
+    const inicio = (pagina - 1) * MENSALIDADES_POR_PAGINA;
+    return clientesPendentes.slice(inicio, inicio + MENSALIDADES_POR_PAGINA);
+  }, [clientesPendentes, pagina]);
 
   useEffect(() => {
     setPagina(1);
-  }, [clienteFiltro, debouncedSearch, statusFilter, nfFiltro]);
+  }, [clienteFiltro, debouncedSearch, statusFilter, nfFiltro, soNaoGerados]);
 
   useEffect(() => {
     setPagina((atual) => Math.min(atual, totalPaginas));
@@ -270,7 +318,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
   useEffect(() => {
     let alive = true;
     const ids = itemsPagina.map((m) => m.id).filter(Boolean);
-    if (!user?.id || !ids.length) {
+    if (!user?.id || soNaoGerados || !ids.length) {
       setPagamentos({});
       setBoletosPorMensalidade({});
       return;
@@ -295,7 +343,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
     return () => {
       alive = false;
     };
-  }, [itemsPagina, user?.id]);
+  }, [itemsPagina, user?.id, soNaoGerados]);
 
   useEffect(() => {
     let alive = true;
@@ -458,6 +506,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
     setRefreshing(true);
     try {
       await load();
+      setRecargaPendentes((n) => n + 1);
     } catch (e) {
       showAppError((e as Error).message);
     } finally {
@@ -940,6 +989,33 @@ export default function HistoricoMensalidadesGeradasScreen() {
         </View>
 
         <View style={styles.filterRow}>
+          <Text style={styles.filterLabel}>Mês atual</Text>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+          <Pressable
+            onPress={() => setSoNaoGerados(true)}
+            style={[styles.chip, soNaoGerados && styles.chipActive]}
+          >
+            <Text style={[styles.chipTxt, soNaoGerados && styles.chipTxtActive]}>
+              Não gerados neste mês
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setSoNaoGerados(false)}
+            style={[styles.chip, !soNaoGerados && styles.chipActive]}
+          >
+            <Text style={[styles.chipTxt, !soNaoGerados && styles.chipTxtActive]}>Histórico</Text>
+          </Pressable>
+        </ScrollView>
+        {soNaoGerados ? (
+          <Text style={styles.nfHint}>
+            Clientes sem mensalidade gerada neste mês. Quem já foi gerado, como ontem, fica de fora.
+          </Text>
+        ) : null}
+
+        {soNaoGerados ? null : (
+          <>
+        <View style={styles.filterRow}>
           <Text style={styles.filterLabel}>Situação</Text>
           {temFiltroAtivo ? (
             <Pressable onPress={limparFiltros}>
@@ -1019,17 +1095,23 @@ export default function HistoricoMensalidadesGeradasScreen() {
             <View style={styles.moreBtn} />
           </View>
         ) : null}
+          </>
+        )}
+
         <Text style={styles.resultCount}>
-          {loading
+          {loading || (soNaoGerados && loadingPendentes)
             ? 'Carregando…'
-            : `${filteredRows.length} mensalidade(s)`}
+            : soNaoGerados
+              ? `${clientesPendentes.length} cliente(s) sem mensalidade neste mês`
+              : `${filteredRows.length} mensalidade(s)`}
         </Text>
       </View>
     </>
   );
 
+  const listaVazia = soNaoGerados ? clientesPendentes.length === 0 : filteredRows.length === 0;
   const listFooter =
-    !loading && filteredRows.length > 0 ? (
+    !(loading || (soNaoGerados && loadingPendentes)) && !listaVazia ? (
       <View style={styles.paginacao}>
         <Pressable
           style={[styles.paginaBtn, pagina === 1 && styles.paginaBtnDisabled]}
@@ -1210,13 +1292,36 @@ export default function HistoricoMensalidadesGeradasScreen() {
     return itens;
   };
 
+  const renderClientePendente = ({ item }: { item: ClienteListItem }) => (
+    <Pressable
+      style={styles.linha}
+      onPress={() =>
+        router.push(`/(app)/mensalidades/gerar?cliente=${encodeURIComponent(String(item.id))}`)
+      }
+    >
+      <View style={styles.linhaCli}>
+        <Text style={styles.cli} numberOfLines={1}>
+          {item.nome_cliente}
+        </Text>
+        <Text style={styles.metaTxt} numberOfLines={1}>
+          {item.nome_empresa || 'Sem mensalidade neste mês'}
+        </Text>
+      </View>
+      <Text style={styles.cli}>{formatBRL(Number(item.valor_mensalidade) || 0)}</Text>
+    </Pressable>
+  );
+
   return (
     <View style={styles.root}>
       <FlatList
         ref={listaRef}
-        data={itemsPagina}
+        data={soNaoGerados ? clientesPagina : itemsPagina}
         keyExtractor={(it) => it.id}
-        renderItem={renderLinha}
+        renderItem={(info) =>
+          soNaoGerados
+            ? renderClientePendente(info as { item: ClienteListItem })
+            : renderLinha(info as { item: MensalidadeGerada; index: number })
+        }
         ListHeaderComponent={listHeader}
         ListFooterComponent={listFooter}
         contentContainerStyle={styles.listContent}
@@ -1224,15 +1329,17 @@ export default function HistoricoMensalidadesGeradasScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.orange} />
         }
         ListEmptyComponent={
-          loading ? (
+          loading || (soNaoGerados && loadingPendentes) ? (
             <ActivityIndicator style={{ marginVertical: spacing.lg }} color={colors.orange} />
           ) : (
             <Text style={styles.empty}>
-              {allRows.length === 0
-                ? 'Nenhuma mensalidade ainda. Use "Gerar mensalidade" para registrar a primeira geração.'
-                : empresaId !== 'todos'
-                  ? 'Nenhuma mensalidade para a empresa selecionada no menu. Troque o filtro do menu para "Todas".'
-                  : 'Nenhum resultado para os filtros atuais.'}
+              {soNaoGerados
+                ? 'Todos os clientes já têm mensalidade neste mês.'
+                : allRows.length === 0
+                  ? 'Nenhuma mensalidade ainda. Use "Gerar mensalidade" para registrar a primeira geração.'
+                  : empresaId !== 'todos'
+                    ? 'Nenhuma mensalidade para a empresa selecionada no menu. Troque o filtro do menu para "Todas".'
+                    : 'Nenhum resultado para os filtros atuais.'}
             </Text>
           )
         }

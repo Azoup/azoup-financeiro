@@ -595,29 +595,40 @@ async function clienteIdsComMensalidadeNoMes(
   month: number,
 ): Promise<Set<string>> {
   const { de, ate } = isoRangeMesCalendario(year, month);
-  const mm = String(month).padStart(2, '0');
-  const partes = [
-    `and(data_vencimento.gte.${de},data_vencimento.lte.${ate})`,
-    `competencia.ilike.${mm}/${year}%`,
-    `competencia.ilike.${year}-${mm}%`,
-  ];
-  if (month < 10) partes.push(`competencia.ilike.${month}/${year}%`);
-
+  const proximo = month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 };
+  const inicioGeracao = new Date(year, month - 1, 1).toISOString();
+  const fimGeracao = new Date(proximo.year, proximo.month - 1, 1).toISOString();
   const ids = new Set<string>();
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase
-      .from('mensalidades')
-      .select('cliente_id')
-      .eq('user_id', userId)
-      .neq('status', 'cancelado')
-      .or(partes.join(','))
-      .range(from, from + 999);
-    if (error) throw new Error(error.message);
-    for (const row of data ?? []) {
-      const id = (row as { cliente_id: string }).cliente_id;
-      if (id) ids.add(id);
+
+  const consultas = [
+    () =>
+      supabase
+        .from('mensalidades')
+        .select('cliente_id')
+        .eq('user_id', userId)
+        .neq('status', 'cancelado')
+        .gte('data_vencimento', de)
+        .lte('data_vencimento', ate),
+    () =>
+      supabase
+        .from('mensalidades')
+        .select('cliente_id')
+        .eq('user_id', userId)
+        .neq('status', 'cancelado')
+        .gte('data_geracao', inicioGeracao)
+        .lt('data_geracao', fimGeracao),
+  ];
+
+  for (const consulta of consultas) {
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await consulta().range(from, from + 999);
+      if (error) throw new Error(error.message);
+      for (const row of data ?? []) {
+        const id = (row as { cliente_id: string }).cliente_id;
+        if (id) ids.add(String(id));
+      }
+      if ((data?.length ?? 0) < 1000) break;
     }
-    if ((data?.length ?? 0) < 1000) break;
   }
   return ids;
 }
