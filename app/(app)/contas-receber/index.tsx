@@ -13,7 +13,7 @@ import {
 } from '@/services/boletoParcelaService';
 import { reemitirBoletosC6 } from '@/services/c6BoletoService';
 import { pickEmitenteC6 } from '@/services/c6ConfigService';
-import { reemitirBoletosSicoob } from '@/services/sicoobBoletoService';
+import { reemitirBoletosSicoob, moverDuplicadosSicoobParaNovembro } from '@/services/sicoobBoletoService';
 import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import {
   fetchMensalidadeGeradaById,
@@ -135,6 +135,7 @@ export default function ContasReceberScreen() {
   const [situacaoFilter, setSituacaoFilter] = useState<SituacaoFiltro>('aberto');
   const [soDuplicados, setSoDuplicados] = useState(false);
   const [soRegistrando, setSoRegistrando] = useState(false);
+  const [movendoNovembro, setMovendoNovembro] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftVencDe, setDraftVencDe] = useState<string | null>(null);
   const [draftVencAte, setDraftVencAte] = useState<string | null>(null);
@@ -222,6 +223,42 @@ export default function ContasReceberScreen() {
       void carregar();
     }, [carregar]),
   );
+
+  const moverRepetidosParaNovembro = async () => {
+    const ok = await confirmDestructive(
+      'Mover repetidos do Sicoob para novembro',
+      'Só o boleto Sicoob mais novo de cada repetido muda o vencimento para o mesmo dia em novembro, aqui e no banco. O mais antigo fica em outubro. Boleto do C6 não muda.',
+    );
+    if (!ok) return;
+    setMovendoNovembro(true);
+    try {
+      const res = await moverDuplicadosSicoobParaNovembro();
+      if (res.erros.length) {
+        Toast.show({
+          type: 'error',
+          text1: `${res.alterados} alterado(s). ${res.erros.length} com erro.`,
+          text2: res.erros.slice(0, 2).join(' · '),
+          visibilityTime: 12000,
+        });
+      } else if (res.alterados === 0) {
+        Toast.show({
+          type: 'info',
+          text1: 'Nenhum boleto Sicoob repetido em outubro para mover.',
+        });
+      } else {
+        Toast.show({
+          type: 'success',
+          text1: `${res.alterados} boleto(s) Sicoob passaram para novembro.`,
+          text2: 'O vencimento foi alterado no sistema e no banco.',
+        });
+      }
+      await carregar();
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setMovendoNovembro(false);
+    }
+  };
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -947,6 +984,18 @@ export default function ContasReceberScreen() {
           </Text>
         </Pressable>
       ) : null}
+
+      <Pressable
+        style={[styles.dupChip, movendoNovembro && styles.dupChipOn]}
+        disabled={movendoNovembro}
+        onPress={() => void moverRepetidosParaNovembro()}
+      >
+        <Text style={[styles.dupChipTxt, movendoNovembro && styles.dupChipTxtOn]}>
+          {movendoNovembro
+            ? 'Alterando vencimento no Sicoob…'
+            : 'Mover repetidos Sicoob para novembro'}
+        </Text>
+      </Pressable>
 
       <View style={styles.searchRow}>
         <View style={styles.searchWrap}>

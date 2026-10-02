@@ -175,3 +175,43 @@ export async function sincronizarBoletosPendentes(): Promise<{
     resultados: body.resultados ?? [],
   };
 }
+
+export async function moverDuplicadosSicoobParaNovembro(): Promise<{
+  alterados: number;
+  erros: string[];
+}> {
+  const { data: session } = await supabase.auth.getSession();
+  const token = session.session?.access_token;
+  if (!token) throw new Error('Sessão expirada. Faça login novamente.');
+  const base = boletoApiBaseUrl();
+  if (!base) throw new Error('URL da API não configurada.');
+
+  let alterados = 0;
+  const erros: string[] = [];
+  for (let volta = 0; volta < 40; volta += 1) {
+    const res = await fetch(`${base}/api/boleto/mover-duplicados-novembro`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: '{}',
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      success?: boolean;
+      message?: string;
+      alterados?: number;
+      restantes?: number;
+      erros?: { cliente?: string; erro?: string }[];
+    };
+    if (!res.ok || body.success === false) {
+      throw new Error(body.message ?? `Não foi possível alterar os boletos (${res.status}).`);
+    }
+    alterados += body.alterados ?? 0;
+    for (const e of body.erros ?? []) {
+      erros.push(`${e.cliente ?? 'Cliente'}: ${e.erro ?? 'falha'}`);
+    }
+    if ((body.alterados ?? 0) === 0 || (body.restantes ?? 0) === 0) break;
+  }
+  return { alterados, erros };
+}

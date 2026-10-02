@@ -361,6 +361,50 @@ async function baixarBoletoSicoobApi({ config, certPath, senha, nossoNumero }) {
   return { success: true, status: res.status, raw: res.json ?? res.raw };
 }
 
+function nossoNumeroParaApi(valor) {
+  const bruto = String(valor ?? '').trim();
+  const parte = bruto.includes('-') ? bruto.split('-')[0] : bruto;
+  const n = Number(onlyDigits(parte));
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error('Nosso número inválido para alterar o boleto no Sicoob.');
+  }
+  return n;
+}
+
+/** Uma alteração por chamada. O Sicoob não aceita vencimento e limite no mesmo PATCH. */
+async function alterarBoletoSicoobApi({ config, certPath, senha, nossoNumero, objeto }) {
+  const nn = nossoNumeroParaApi(nossoNumero);
+  const token = await getSicoobAccessToken({ config, certPath, senha });
+  const agent = createMtlsAgent(certPath, senha);
+  const body = JSON.stringify({
+    numeroCliente: Number(config.numero_cliente),
+    codigoModalidade: Number(config.codigo_modalidade ?? 1),
+    ...objeto,
+  });
+  const res = await httpsRequest(`${apiBaseUrl(config.ambiente)}/boletos/${nn}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      client_id: config.client_id,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+    },
+    body,
+    agent,
+  });
+  if (res.status < 200 || res.status >= 300) {
+    const msg =
+      res.json?.mensagens?.map((m) => m.mensagem).join(' · ') ??
+      res.json?.message ??
+      res.json?.error_description ??
+      res.raw ??
+      `Sicoob rejeitou a alteração do boleto (${res.status}).`;
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+  return { success: true, status: res.status, raw: res.json ?? res.raw };
+}
+
 /** Boletos em aberto do pagador. dataInicio/dataFim são vencimento (yyyy-MM-dd). */
 async function listarBoletosPagadorSicoobApi({ config, certPath, senha, numeroCpfCnpj, dataInicio, dataFim }) {
   const doc = onlyDigits(numeroCpfCnpj);
@@ -409,6 +453,7 @@ module.exports = {
   apiBaseUrl,
   authUrl,
   baixarBoletoSicoobApi,
+  alterarBoletoSicoobApi,
   buildPagadorFromCliente,
   buildSicoobPayload,
   cleanupCert,
