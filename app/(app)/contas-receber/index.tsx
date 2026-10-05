@@ -13,7 +13,7 @@ import {
 } from '@/services/boletoParcelaService';
 import { reemitirBoletosC6 } from '@/services/c6BoletoService';
 import { pickEmitenteC6 } from '@/services/c6ConfigService';
-import { reemitirBoletosSicoob, moverDuplicadosSicoobParaNovembro, atualizarLimiteDuplicadosOutubro, sincronizarBoletosPendentes } from '@/services/sicoobBoletoService';
+import { reemitirBoletosSicoob, sincronizarBoletosPendentes } from '@/services/sicoobBoletoService';
 import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import {
   fetchMensalidadeGeradaById,
@@ -141,10 +141,7 @@ export default function ContasReceberScreen() {
   const [situacaoFilter, setSituacaoFilter] = useState<SituacaoFiltro>('aberto');
   const [segmentoFilter, setSegmentoFilter] = useState<string>('todos');
   const [segmentos, setSegmentos] = useState<SegmentoClienteRow[]>([]);
-  const [soDuplicados, setSoDuplicados] = useState(false);
   const [soRegistrando, setSoRegistrando] = useState(false);
-  const [movendoNovembro, setMovendoNovembro] = useState(false);
-  const [alterandoLimite, setAlterandoLimite] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftOrigem, setDraftOrigem] = useState<OrigemFiltro>('todos');
   const [draftSituacao, setDraftSituacao] = useState<SituacaoFiltro>('aberto');
@@ -192,7 +189,6 @@ export default function ContasReceberScreen() {
           pagamentoAte,
           segmentoCodigo: segmentoFilter === 'todos' ? null : segmentoFilter,
           emitenteId: empresaId === 'todos' ? null : empresaId,
-          soDuplicados,
           statusRegistro: soRegistrando ? 'pendente' : undefined,
         }),
         fetchPerfilCobranca(user.id).catch(() => null),
@@ -225,13 +221,12 @@ export default function ContasReceberScreen() {
     pagamentoAte,
     segmentoFilter,
     empresaId,
-    soDuplicados,
     soRegistrando,
   ]);
 
   useEffect(() => {
     setPagina(1);
-  }, [debouncedSearch, origemFilter, situacaoFilter, segmentoFilter, vencimentoDe, vencimentoAte, pagamentoDe, pagamentoAte, empresaId, soDuplicados, soRegistrando]);
+  }, [debouncedSearch, origemFilter, situacaoFilter, segmentoFilter, vencimentoDe, vencimentoAte, pagamentoDe, pagamentoAte, empresaId, soRegistrando]);
 
   useEffect(() => {
     void fetchSegmentosCliente().then(setSegmentos);
@@ -284,77 +279,6 @@ export default function ContasReceberScreen() {
     }, [user?.id, carregar]),
   );
 
-  const moverRepetidosParaNovembro = async () => {
-    const ok = await confirmDestructive(
-      'Mover repetidos do Sicoob para novembro',
-      'Só o boleto Sicoob mais novo de cada repetido muda o vencimento para o mesmo dia em novembro, aqui e no banco. O mais antigo fica em outubro. Boleto do C6 não muda.',
-    );
-    if (!ok) return;
-    setMovendoNovembro(true);
-    try {
-      const res = await moverDuplicadosSicoobParaNovembro();
-      if (res.erros.length) {
-        Toast.show({
-          type: 'error',
-          text1: `${res.alterados} alterado(s). ${res.erros.length} com erro.`,
-          text2: res.erros.slice(0, 2).join(' · '),
-          visibilityTime: 12000,
-        });
-      } else if (res.alterados === 0) {
-        Toast.show({
-          type: 'info',
-          text1: 'Nenhum boleto Sicoob repetido em outubro para mover.',
-        });
-      } else {
-        Toast.show({
-          type: 'success',
-          text1: `${res.alterados} boleto(s) Sicoob passaram para novembro.`,
-          text2: 'O vencimento foi alterado no sistema e no banco.',
-        });
-      }
-      await carregar();
-    } catch (e) {
-      Toast.show({ type: 'error', text1: (e as Error).message });
-    } finally {
-      setMovendoNovembro(false);
-    }
-  };
-
-  const atualizarLimiteOutubro = async () => {
-    const ok = await confirmDestructive(
-      'Corrigir data limite igual ao vencimento',
-      'Consulta o Sicoob e, quando a data limite ainda é o mesmo dia do vencimento, grava daqui a 6 meses. O vencimento não muda e não cria outro boleto.',
-    );
-    if (!ok) return;
-    setAlterandoLimite(true);
-    try {
-      const res = await atualizarLimiteDuplicadosOutubro();
-      if (res.erros.length) {
-        Toast.show({
-          type: 'error',
-          text1: `${res.alterados} alterado(s). ${res.erros.length} com erro.`,
-          text2: res.erros.slice(0, 2).join(' · '),
-          visibilityTime: 12000,
-        });
-      } else if (res.alterados === 0) {
-        Toast.show({
-          type: 'info',
-          text1: 'Nenhum boleto com a data limite igual ao vencimento.',
-        });
-      } else {
-        Toast.show({
-          type: 'success',
-          text1: `${res.alterados} boleto(s) com data limite para daqui a 6 meses.`,
-          text2: 'O vencimento de outubro permanece.',
-        });
-      }
-    } catch (e) {
-      Toast.show({ type: 'error', text1: (e as Error).message });
-    } finally {
-      setAlterandoLimite(false);
-    }
-  };
-
   const onRefresh = async () => {
     setRefreshing(true);
     try {
@@ -363,30 +287,6 @@ export default function ContasReceberScreen() {
       setRefreshing(false);
     }
   };
-
-  const duplicadosIds = useMemo(() => {
-    if (soDuplicados) {
-      return { ids: new Set(allRows.map((r) => r.id)), clientes: allRows.length };
-    }
-    const groups = new Map<string, string[]>();
-    for (const r of allRows) {
-      if (r.situacao_cobranca === 'cancelado') continue;
-      const quem = `${r.cliente_id ?? ''}|${r.nome_cliente ?? ''}`;
-      const valor = Number(r.valor_documento).toFixed(2);
-      const k = `${quem}|${String(r.data_vencimento).slice(0, 10)}|${valor}|${r.origem}`;
-      const lista = groups.get(k) ?? [];
-      lista.push(r.id);
-      groups.set(k, lista);
-    }
-    const ids = new Set<string>();
-    let clientes = 0;
-    for (const lista of groups.values()) {
-      if (lista.length < 2) continue;
-      clientes += 1;
-      for (const id of lista) ids.add(id);
-    }
-    return { ids, clientes };
-  }, [allRows, soDuplicados]);
 
   const filteredRows = useMemo(() => {
     const list = [...allRows];
@@ -426,7 +326,6 @@ export default function ContasReceberScreen() {
     Boolean(pagamentoDe) ||
     Boolean(pagamentoAte) ||
     segmentoFilter !== 'todos' ||
-    soDuplicados ||
     soRegistrando;
 
   const abrirFiltros = () => {
@@ -450,7 +349,6 @@ export default function ContasReceberScreen() {
     setSegmentoFilter('todos');
     setOrigemFilter('todos');
     setSituacaoFilter('aberto');
-    setSoDuplicados(false);
     setSoRegistrando(false);
     setDraftOrigem('todos');
     setDraftSituacao('aberto');
@@ -918,7 +816,6 @@ export default function ContasReceberScreen() {
                 Nosso nº {item.nosso_numero_banco}
               </Text>
             ) : null}
-            {duplicadosIds.ids.has(item.id) ? <Text style={styles.cliDup}>Boleto repetido</Text> : null}
             {temWhats ? (
               <Text style={styles.cliWa} numberOfLines={1}>
                 {formatWhatsAppDisplay(item.whatsapp!)}
@@ -1097,40 +994,6 @@ export default function ContasReceberScreen() {
           );
         })}
       </ScrollView>
-
-      {duplicadosIds.clientes > 0 || soDuplicados ? (
-        <Pressable
-          style={[styles.dupChip, soDuplicados && styles.dupChipOn]}
-          onPress={() => setSoDuplicados((v) => !v)}
-        >
-          <Text style={[styles.dupChipTxt, soDuplicados && styles.dupChipTxtOn]}>
-            {soDuplicados ? 'Mostrando só os boletos repetidos' : 'Ver só os repetidos'}
-          </Text>
-        </Pressable>
-      ) : null}
-
-      <Pressable
-        style={[styles.dupChip, movendoNovembro && styles.dupChipOn]}
-        disabled={movendoNovembro || alterandoLimite}
-        onPress={() => void moverRepetidosParaNovembro()}
-      >
-        <Text style={[styles.dupChipTxt, movendoNovembro && styles.dupChipTxtOn]}>
-          {movendoNovembro
-            ? 'Alterando vencimento no Sicoob…'
-            : 'Mover repetidos Sicoob para novembro'}
-        </Text>
-      </Pressable>
-      <Pressable
-        style={[styles.dupChip, alterandoLimite && styles.dupChipOn]}
-        disabled={movendoNovembro || alterandoLimite}
-        onPress={() => void atualizarLimiteOutubro()}
-      >
-        <Text style={[styles.dupChipTxt, alterandoLimite && styles.dupChipTxtOn]}>
-          {alterandoLimite
-            ? 'Consultando e alterando a data limite no Sicoob…'
-            : 'Corrigir data limite que está igual ao vencimento'}
-        </Text>
-      </Pressable>
 
       <View style={styles.datasFiltro}>
         <View style={styles.datasCol}>
@@ -1504,22 +1367,8 @@ const styles = StyleSheet.create({
   pagerBtns: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   pagerTxt: { fontSize: 13, fontWeight: '700', color: colors.petroleum },
   pagerTxtOff: { color: colors.gray400 },
-  dupChip: {
-    marginHorizontal: spacing.md,
-    marginBottom: spacing.sm,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: radius.md,
-    backgroundColor: '#fff4e5',
-    borderWidth: 1,
-    borderColor: '#f5d7a1',
-  },
-  dupChipOn: { backgroundColor: '#7a4e00', borderColor: '#7a4e00' },
-  dupChipTxt: { fontSize: 13, fontWeight: '700', color: '#7a4e00' },
-  dupChipTxtOn: { color: colors.white },
   resultCount: { flex: 1, fontSize: 12, color: colors.gray600 },
   cliNn: { fontSize: 11, color: colors.gray600, marginTop: 2 },
-  cliDup: { fontSize: 11, fontWeight: '700', color: '#9a3412', marginTop: 2 },
   clearLink: { fontSize: 12, fontWeight: '700', color: colors.orange },
   tableHead: {
     flexDirection: 'row',

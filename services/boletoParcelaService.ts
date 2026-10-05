@@ -940,7 +940,6 @@ export type ContasReceberConsulta = {
   /** Código do segmento do cliente. `todos` ou vazio não filtra. */
   segmentoCodigo?: string | null;
   emitenteId?: string | null;
-  soDuplicados?: boolean;
   /** `pendente` aparece na tela como Registrando. */
   statusRegistro?: 'pendente';
 };
@@ -1235,7 +1234,6 @@ async function somarRecebido(userId: string, opts: ContasReceberConsulta): Promi
   const optsPago: ContasReceberConsulta = {
     ...opts,
     situacao: 'pago',
-    soDuplicados: false,
     statusRegistro: undefined,
   };
   const lados: Array<'mensalidade' | 'venda'> =
@@ -1254,52 +1252,6 @@ async function somarRecebido(userId: string, opts: ContasReceberConsulta): Promi
   return Math.round(soma * 100) / 100;
 }
 
-async function buscarDuplicadosPagina(
-  userId: string,
-  opts: ContasReceberConsulta,
-  page: number,
-): Promise<ContasReceberPagina> {
-  const lados: Array<'mensalidade' | 'venda'> =
-    opts.origem === 'venda' || opts.origem === 'mensalidade' ? [opts.origem] : ['mensalidade', 'venda'];
-  const chaves = new Map<string, string[]>();
-  const tamanho = 200;
-  for (const lado of lados) {
-    for (let from = 0; ; from += tamanho) {
-      const { rows, total } = await consultarLado(userId, lado, opts, from, from + tamanho - 1);
-      for (const b of rows) {
-        const k = [
-          String(b.pagador_nome ?? '').trim().toUpperCase(),
-          String(b.data_vencimento).slice(0, 10),
-          Number(b.valor_documento).toFixed(2),
-          b.origem,
-          b.emitente_id ?? '',
-        ].join('|');
-        const lista = chaves.get(k) ?? [];
-        lista.push(b.id);
-        chaves.set(k, lista);
-      }
-      if (from + rows.length >= total || rows.length < tamanho) break;
-    }
-  }
-
-  const ids = [...chaves.values()].filter((lista) => lista.length > 1).flat();
-  const inicio = (page - 1) * PAGINA_CONTAS_RECEBER;
-  const fatia = ids.slice(inicio, inicio + PAGINA_CONTAS_RECEBER);
-  if (!fatia.length) {
-    return { rows: [], total: ids.length, page, pageSize: PAGINA_CONTAS_RECEBER, totalRecebido: 0 };
-  }
-  const { data, error } = await supabase
-    .from('boletos_parcela_venda')
-    .select('*, mensalidades(status, cliente_id, data_pagamento), parcelas_venda(status)')
-    .in('id', fatia);
-  if (error) throw new Error(error.message);
-  const porId = new Map(((data ?? []) as BoletoConsulta[]).map((b) => [b.id, b]));
-  const ordenados = fatia.map((id) => porId.get(id)).filter((b): b is BoletoConsulta => Boolean(b));
-  const rows = await hidratarContasReceber(userId, ordenados);
-  rows.sort((a, b) => String(a.nome_cliente).localeCompare(String(b.nome_cliente), 'pt-BR', { sensitivity: 'base' }));
-  return { rows, total: ids.length, page, pageSize: PAGINA_CONTAS_RECEBER, totalRecebido: 0 };
-}
-
 export async function fetchContasReceberPagina(
   userId: string,
   opts: ContasReceberConsulta = {},
@@ -1307,10 +1259,6 @@ export async function fetchContasReceberPagina(
   const page = Math.max(1, opts.page ?? 1);
   const pageSize = PAGINA_CONTAS_RECEBER;
   const totalRecebido = await somarRecebido(userId, opts);
-  if (opts.soDuplicados) {
-    const dup = await buscarDuplicadosPagina(userId, opts, page);
-    return { ...dup, totalRecebido };
-  }
 
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
