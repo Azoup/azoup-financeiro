@@ -3,6 +3,7 @@ const https = require('https');
 const os = require('os');
 const path = require('path');
 const { decrypt } = require('../../nfe/_lib/crypto');
+const { camposMultaJurosSicoob } = require('./boletoEncargos');
 
 function onlyDigits(value) {
   return String(value ?? '').replace(/\D/g, '');
@@ -193,8 +194,7 @@ function buildSicoobPayload({ boleto, config, cliente, notaFiscal, beneficiarioD
     dataVencimento: boleto.data_vencimento,
     // Sem dataLimitePagamento: o Sicoob registra o boleto com a data limite em branco.
     tipoDesconto: 0,
-    tipoMulta: 0,
-    tipoJurosMora: 0,
+    ...camposMultaJurosSicoob(boleto.data_vencimento),
     numeroParcela: 1,
     aceite: true,
     codigoNegativacao: 2,
@@ -415,6 +415,45 @@ async function alterarBoletoSicoobApi({ config, certPath, senha, nossoNumero, ob
   return { success: true, status: res.status, raw: res.json ?? res.raw };
 }
 
+/** Segunda via com PDF. A linha digitável nova só aparece depois que o Sicoob processa a alteração. */
+async function obterSegundaViaSicoobApi({ config, certPath, senha, nossoNumero }) {
+  const nn = nossoNumeroParaApi(nossoNumero);
+  const token = await getSicoobAccessToken({ config, certPath, senha });
+  const agent = createMtlsAgent(certPath, senha);
+  const params = new URLSearchParams({
+    numeroCliente: String(config.numero_cliente),
+    codigoModalidade: String(config.codigo_modalidade ?? 1),
+    nossoNumero: String(nn),
+    gerarPdf: 'true',
+  });
+  const res = await httpsRequest(`${apiBaseUrl(config.ambiente)}/boletos/segunda-via?${params.toString()}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      client_id: config.client_id,
+      Accept: 'application/json',
+    },
+    agent,
+  });
+  if (res.status < 200 || res.status >= 300) {
+    const msg =
+      res.json?.mensagens?.map((m) => m.mensagem).join(' · ') ??
+      res.json?.message ??
+      res.raw ??
+      `Segunda via Sicoob falhou (${res.status}).`;
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+  const row = res.json?.resultado ?? res.json;
+  return {
+    pdf_base64: row?.pdfBoleto ?? row?.pdf ?? null,
+    linha_digitavel: row?.linhaDigitavel ?? null,
+    codigo_barras: row?.codigoBarras ?? null,
+    data_vencimento: row?.dataVencimento ?? null,
+    data_limite: row?.dataLimitePagamento ?? null,
+    raw: row,
+  };
+}
+
 /** Boletos em aberto do pagador. dataInicio/dataFim são vencimento (yyyy-MM-dd). */
 async function listarBoletosPagadorSicoobApi({ config, certPath, senha, numeroCpfCnpj, dataInicio, dataFim }) {
   const doc = onlyDigits(numeroCpfCnpj);
@@ -464,6 +503,7 @@ module.exports = {
   authUrl,
   baixarBoletoSicoobApi,
   alterarBoletoSicoobApi,
+  obterSegundaViaSicoobApi,
   buildPagadorFromCliente,
   buildSicoobPayload,
   cleanupCert,

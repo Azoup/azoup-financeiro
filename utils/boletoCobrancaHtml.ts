@@ -1,4 +1,5 @@
 import type { BoletoParcelaVendaRow } from '@/types/contasReceber';
+import { calcularEncargosBoleto } from '@/utils/boletoEncargos';
 import { formatBRL } from '@/utils/currency';
 
 function esc(s: string): string {
@@ -24,11 +25,16 @@ export function buildBoletoCobrancaHtml(row: BoletoParcelaVendaRow): string {
     : 'Documento de cobrança para controle interno — não é boleto registrado em instituição financeira (sem compensação automática).';
   const venc = esc(row.data_vencimento.split('-').reverse().join('/'));
   const doc = esc(row.data_documento.split('-').reverse().join('/'));
+  const quitado = row.status_registro === 'pago' || row.status_registro === 'baixado';
+  const encargos = quitado ? null : calcularEncargosBoleto(row.valor_documento, row.data_vencimento);
   const desconto = brl(0);
   const outrosDesc = brl(0);
-  const mora = brl(0);
+  const mora = brl(encargos?.vencido ? encargos.multa + encargos.juros : 0);
   const outrosAcr = brl(0);
-  const valorCobrado = brl(row.valor_documento);
+  const valorCobrado = brl(encargos?.vencido ? encargos.total : row.valor_documento);
+  const detalheEncargos = encargos?.vencido
+    ? `Multa de 2%: ${brl(encargos.multa)}. Juros de 0,033% ao dia × ${encargos.dias} dia(s): ${brl(encargos.juros)}.`
+    : '';
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -75,7 +81,7 @@ export function buildBoletoCobrancaHtml(row: BoletoParcelaVendaRow): string {
     <div><div class="lbl">(-) Outras deduções</div>${outrosDesc}</div>
   </div>
   <div class="row2">
-    <div><div class="lbl">(+) Mora / Multa</div>${mora}</div>
+    <div><div class="lbl">(+) Mora / Multa</div>${mora}${detalheEncargos ? `<div class="muted">${detalheEncargos}</div>` : ''}</div>
     <div><div class="lbl">(+) Outros acréscimos</div>${outrosAcr}</div>
   </div>
   <div class="full"><div class="lbl">(=) Valor cobrado</div><div class="val">${valorCobrado}</div></div>
@@ -139,7 +145,7 @@ export function buildBoletoCobrancaHtml(row: BoletoParcelaVendaRow): string {
       <div><div class="lbl">(-) Outras deduções</div>${outrosDesc}</div>
     </div>
     <div class="row2">
-      <div><div class="lbl">(+) Mora / Multa</div>${mora}</div>
+      <div><div class="lbl">(+) Mora / Multa</div>${mora}${detalheEncargos ? `<div class="muted">${detalheEncargos}</div>` : ''}</div>
       <div><div class="lbl">(+) Outros acréscimos</div>${outrosAcr}</div>
     </div>
     <div class="full"><div class="lbl">(=) Valor cobrado</div><div class="val">${valorCobrado}</div></div>

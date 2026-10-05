@@ -1,5 +1,6 @@
 import type { ContaReceberListRow } from '@/types/contasReceber';
 import { buildBoletoCobrancaHtml } from '@/utils/boletoCobrancaHtml';
+import { calcularEncargosBoleto } from '@/utils/boletoEncargos';
 import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate } from '@/utils/date';
 import { resolveBoletoPdfUrl } from '@/utils/openBoletoDocumento';
@@ -66,6 +67,7 @@ export function buildMensagemCobrancaWhatsapp(
   opts?: { nomeBeneficiario?: string; incluirTelefone?: boolean; pdfUrl?: string | null },
 ): string {
   const venc = formatBRDate(parseISODate(row.data_vencimento)) || row.data_vencimento;
+  const encargos = calcularEncargosBoleto(row.valor_documento, row.data_vencimento);
   const beneficiario = opts?.nomeBeneficiario?.trim();
   const tel =
     opts?.incluirTelefone && row.whatsapp
@@ -77,7 +79,14 @@ export function buildMensagemCobrancaWhatsapp(
     beneficiario ? `Aqui é da *${beneficiario}*.` : null,
     'Segue o boleto para pagamento:',
     `• ${row.referencia_label}`,
-    `• Valor: *${formatBRL(row.valor_documento)}*`,
+    encargos.vencido
+      ? `• Valor original: ${formatBRL(row.valor_documento)}`
+      : `• Valor: *${formatBRL(row.valor_documento)}*`,
+    encargos.vencido ? `• Multa (2%): *${formatBRL(encargos.multa)}*` : null,
+    encargos.vencido
+      ? `• Juros (0,033% ao dia × ${encargos.dias} dia(s)): *${formatBRL(encargos.juros)}*`
+      : null,
+    encargos.vencido ? `• Valor para pagamento hoje: *${formatBRL(encargos.total)}*` : null,
     `• Vencimento: *${venc}*`,
     row.numero_documento ? `• Documento: ${row.numero_documento}` : null,
     row.linha_digitavel ? `\n*Linha digitável do boleto:*\n${row.linha_digitavel}` : null,

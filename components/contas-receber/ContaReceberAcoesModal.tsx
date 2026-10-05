@@ -4,13 +4,14 @@ import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate } from '@/utils/date';
 import { formatWhatsAppDisplay } from '@/utils/whatsappCobranca';
 import { Ionicons } from '@expo/vector-icons';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 type Props = {
   visible: boolean;
   item: ContaReceberListRow | null;
   onClose: () => void;
   onPagar: () => void;
+  onAlterarVencimento?: () => void;
   onCancelar?: () => void;
   onReativar?: () => void;
   onEmitirNf: () => void;
@@ -93,6 +94,7 @@ export function ContaReceberAcoesModal({
   item,
   onClose,
   onPagar,
+  onAlterarVencimento,
   onCancelar,
   onReativar,
   onEmitirNf,
@@ -136,6 +138,9 @@ export function ContaReceberAcoesModal({
     Boolean(onRegistrarSicoob) &&
     (item.tipo_emissao === 'sicoob' || item.tipo_emissao === 'informativo');
   const podeCancelar = aberto && Boolean(onCancelar);
+  const noBanco =
+    (item.tipo_emissao === 'sicoob' && Boolean(item.nosso_numero_banco)) ||
+    (item.tipo_emissao === 'c6' && Boolean(item.c6_boleto_id));
   const podeReativar = cancelado && Boolean(onReativar);
 
   return (
@@ -163,9 +168,23 @@ export function ContaReceberAcoesModal({
             </Pressable>
           </View>
 
+          <ScrollView style={styles.actionsScroll} keyboardShouldPersistTaps="handled">
           <View style={styles.actions}>
             {aberto ? (
               <AcaoRow icon="cash-outline" label="Marcar como pago" onPress={onPagar} accent={colors.orange} />
+            ) : null}
+
+            {aberto && onAlterarVencimento ? (
+              <AcaoRow
+                icon="calendar-outline"
+                label="Alterar vencimento"
+                sub={
+                  noBanco
+                    ? 'Muda a data no sistema e no banco'
+                    : 'Muda a data no sistema. Na hora de registrar, o banco recebe esta data'
+                }
+                onPress={onAlterarVencimento}
+              />
             ) : null}
 
             {podeCancelar ? (
@@ -279,6 +298,7 @@ export function ContaReceberAcoesModal({
               onPress={onVerOrigem}
             />
           </View>
+          </ScrollView>
         </Pressable>
       </Pressable>
     </Modal>
@@ -316,6 +336,7 @@ const styles = StyleSheet.create({
   sub: { fontSize: 13, color: colors.gray600, marginTop: 4 },
   status: { fontSize: 12, fontWeight: '700', color: colors.gray800, marginTop: 6 },
   statusAtraso: { color: colors.danger },
+  actionsScroll: { maxHeight: 420 },
   actions: { gap: spacing.xs },
   acaoRow: {
     flexDirection: 'row',

@@ -1,4 +1,5 @@
 import { DatePickerField } from '@/components/DatePickerField';
+import { AlterarVencimentoBoletoModal } from '@/components/contas-receber/AlterarVencimentoBoletoModal';
 import { ContaReceberAcoesModal } from '@/components/contas-receber/ContaReceberAcoesModal';
 import { ContaReceberPagarParcelaVendaModal } from '@/components/contas-receber/ContaReceberPagarParcelaVendaModal';
 import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmitirNfseModal';
@@ -11,6 +12,7 @@ import {
   fetchBoletoParcelaById,
   fetchContasReceberPagina,
 } from '@/services/boletoParcelaService';
+import { alterarVencimentoBoleto } from '@/services/cancelarBoletoBancoService';
 import { reemitirBoletosC6 } from '@/services/c6BoletoService';
 import { pickEmitenteC6 } from '@/services/c6ConfigService';
 import { reemitirBoletosSicoob, sincronizarBoletosPendentes } from '@/services/sicoobBoletoService';
@@ -157,6 +159,9 @@ export default function ContasReceberScreen() {
   const [reativarBusyId, setReativarBusyId] = useState<string | null>(null);
   const [nomeBeneficiario, setNomeBeneficiario] = useState<string | null>(null);
   const [acoesItem, setAcoesItem] = useState<ContaReceberListRow | null>(null);
+  const [vencimentoItem, setVencimentoItem] = useState<ContaReceberListRow | null>(null);
+  const [novaDataVenc, setNovaDataVenc] = useState<string | null>(null);
+  const [vencBusy, setVencBusy] = useState(false);
   const [payMensalidade, setPayMensalidade] = useState<MensalidadeGerada | null>(null);
   const [payVendaCtx, setPayVendaCtx] = useState<{
     vendaId: string;
@@ -431,6 +436,42 @@ export default function ContasReceberScreen() {
 
   const fecharAcoes = () => {
     setAcoesItem(null);
+  };
+
+  const abrirAlterarVencimento = () => {
+    if (!acoesItem) return;
+    setVencimentoItem(acoesItem);
+    setNovaDataVenc(acoesItem.data_vencimento.slice(0, 10));
+    setAcoesItem(null);
+  };
+
+  const salvarNovoVencimento = async () => {
+    if (!vencimentoItem || !novaDataVenc) return;
+    if (novaDataVenc === vencimentoItem.data_vencimento.slice(0, 10)) {
+      Toast.show({ type: 'info', text1: 'Esta já é a data de vencimento.' });
+      return;
+    }
+    setVencBusy(true);
+    try {
+      const result = await alterarVencimentoBoleto(vencimentoItem.id, novaDataVenc);
+      setVencimentoItem(null);
+      await refreshLista();
+      Toast.show({
+        type: 'success',
+        text1: 'Vencimento alterado',
+        text2: result.message,
+        visibilityTime: 8000,
+      });
+    } catch (e) {
+      Toast.show({
+        type: 'error',
+        text1: 'Não alterou o vencimento',
+        text2: (e as Error).message,
+        visibilityTime: 9000,
+      });
+    } finally {
+      setVencBusy(false);
+    }
   };
 
   const abrirPdf = async (boletoId: string) => {
@@ -1124,6 +1165,7 @@ export default function ContasReceberScreen() {
         item={acoesItem}
         onClose={fecharAcoes}
         onPagar={() => void iniciarPagamento()}
+        onAlterarVencimento={abrirAlterarVencimento}
         onCancelar={() => void cancelarBoleto()}
         onReativar={() => void reativarBoleto()}
         onEmitirNf={() => acoesItem && solicitarEmitirNf(acoesItem)}
@@ -1160,6 +1202,17 @@ export default function ContasReceberScreen() {
         whatsBusy={acoesItem != null && whatsBusyId === acoesItem.id}
         cancelBusy={acoesItem != null && cancelBusyId === acoesItem.id}
         reativarBusy={acoesItem != null && reativarBusyId === acoesItem.id}
+      />
+
+      <AlterarVencimentoBoletoModal
+        item={vencimentoItem}
+        dataIso={novaDataVenc}
+        onChangeData={setNovaDataVenc}
+        busy={vencBusy}
+        onClose={() => {
+          if (!vencBusy) setVencimentoItem(null);
+        }}
+        onConfirm={() => void salvarNovoVencimento()}
       />
 
       <MarcarPagamentoMensalidadeGeradaModal

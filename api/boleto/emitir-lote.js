@@ -4,6 +4,7 @@ const { emitirUmBoletoC6 } = require('./_lib/emitirBoletoC6');
 const { loadC6Credentials } = require('./_lib/c6Credentials');
 const { tentarEnviarEmailAposEmissao } = require('./_lib/enviarEmailBoleto');
 const { cancelarUmBoletoNoBanco } = require('./_lib/cancelarBoletoRegistrado');
+const { alterarVencimentoBoleto } = require('./_lib/alterarVencimentoBoleto');
 const {
   cleanupTemp,
   criarPixCobC6Api,
@@ -20,6 +21,7 @@ const {
  * - action=pix-cob | pix-cobv | pix-get | pix-patch | receivables | transactions
  * - action=enviar-email-boleto (reenvio pontual)
  * - action=cancelar-boletos (baixa/cancelamento no banco)
+ * - action=alterar-vencimento (data no sistema e no Sicoob/C6)
  * (evita nova serverless function no limite Hobby)
  */
 module.exports = async function handler(req, res) {
@@ -55,6 +57,16 @@ module.exports = async function handler(req, res) {
         erros,
         resultados,
       });
+    }
+
+    if (action === 'alterar-vencimento') {
+      const boletoId = body.boletoId;
+      const dataVencimento = body.dataVencimento;
+      if (!boletoId || !dataVencimento) {
+        return res.status(400).json({ success: false, message: 'Informe boletoId e dataVencimento.' });
+      }
+      const result = await alterarVencimentoBoleto(admin, user.id, boletoId, dataVencimento);
+      return res.status(200).json(result);
     }
 
     if (action === 'enviar-email-boleto') {

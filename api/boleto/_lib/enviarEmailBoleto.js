@@ -5,6 +5,7 @@
  * API key: só RESEND_API_KEY (nunca hardcoded).
  */
 
+const { calcularEncargosBoleto } = require('./boletoEncargos');
 const DEFAULT_FROM = 'Azoup <jessica@azoup.com.br>';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -91,13 +92,18 @@ async function baixarPdfBytes(admin, boleto) {
   return null;
 }
 
-function buildCorpo({ nomeCliente, referencia, valor, vencimento, numeroDocumento, linhaDigitavel, pix }) {
+function buildCorpo({ nomeCliente, referencia, valor, vencimento, numeroDocumento, linhaDigitavel, pix, encargos }) {
   const linhas = [
     `Olá, ${nomeCliente || 'cliente'}!`,
     '',
     'Segue o boleto para pagamento:',
     `• ${referencia || 'Cobrança'}`,
-    `• Valor: ${formatBRL(valor)}`,
+    encargos?.vencido ? `• Valor original: ${formatBRL(valor)}` : `• Valor: ${formatBRL(valor)}`,
+    encargos?.vencido ? `• Multa (2%): ${formatBRL(encargos.multa)}` : null,
+    encargos?.vencido
+      ? `• Juros (0,033% ao dia × ${encargos.dias} dia(s)): ${formatBRL(encargos.juros)}`
+      : null,
+    encargos?.vencido ? `• Valor para pagamento hoje: ${formatBRL(encargos.total)}` : null,
     `• Vencimento: ${vencimento || '—'}`,
     numeroDocumento ? `• Documento: ${numeroDocumento}` : null,
     linhaDigitavel ? `\nLinha digitável:\n${linhaDigitavel}` : null,
@@ -269,6 +275,10 @@ async function tentarEnviarEmailAposEmissao(admin, userId, emitResult) {
       safeTrim(boleto.venda_descricao_resumo)?.split('\n')[0] ||
       (boleto.origem === 'mensalidade' ? 'Mensalidade' : 'Cobrança');
     const subject = `Boleto — ${referencia}`.slice(0, 200);
+    const encargos =
+      boleto.status_registro === 'pago' || boleto.status_registro === 'baixado'
+        ? null
+        : calcularEncargosBoleto(boleto.valor_documento, boleto.data_vencimento);
     const text = buildCorpo({
       nomeCliente,
       referencia,
@@ -277,6 +287,7 @@ async function tentarEnviarEmailAposEmissao(admin, userId, emitResult) {
       numeroDocumento: safeTrim(boleto.numero_documento),
       linhaDigitavel: safeTrim(boleto.linha_digitavel) || safeTrim(emitResult.linha_digitavel),
       pix: safeTrim(boleto.pix_copia_cola) || safeTrim(emitResult.pix_copia_cola),
+      encargos: encargos?.vencido ? encargos : null,
     });
     const filename = `boleto_${safeTrim(boleto.numero_documento) || boletoId}.pdf`;
 

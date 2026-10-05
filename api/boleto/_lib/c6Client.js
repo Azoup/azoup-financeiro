@@ -2,6 +2,7 @@ const fs = require('fs');
 const https = require('https');
 const os = require('os');
 const path = require('path');
+const { camposMultaJurosC6 } = require('./boletoEncargos');
 
 function onlyDigits(value) {
   return String(value ?? '').replace(/\D/g, '');
@@ -281,6 +282,7 @@ function buildC6Payload({ boleto, config, cliente }) {
     amount: resolveC6AmountFromBoleto(boleto),
     due_date: String(boleto.data_vencimento).slice(0, 10),
     instructions,
+    ...camposMultaJurosC6(),
     billing_scheme: String(billing),
     our_number: String(ourNumber),
     payer: {
@@ -420,6 +422,34 @@ async function consultarBoletoC6Api({ config, certPath, keyPath, c6BoletoId }) {
     dataPagamento: extractC6DataPagamento(resultado),
     valorPago: extractC6ValorPago(resultado, null),
   };
+}
+
+/** Altera só o vencimento de um boleto já emitido. */
+async function alterarVencimentoBoletoC6Api({ config, certPath, keyPath, c6BoletoId, dueDate }) {
+  if (!c6BoletoId) throw new Error('Boleto sem ID C6 para alterar o vencimento.');
+  const token = await getC6AccessToken({ config, certPath, keyPath });
+  const agent = createMtlsAgent(certPath, keyPath);
+  const body = JSON.stringify({ due_date: String(dueDate).slice(0, 10) });
+
+  const res = await httpsRequest(`${apiBaseUrl(config.ambiente)}/v1/bank_slips/${c6BoletoId}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+      Accept: 'application/json',
+      'partner-software-name': 'SistemaJessica',
+      'partner-software-version': '1.0.0',
+    },
+    body,
+    agent,
+  });
+
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(extractC6ApiError(res) || `C6 rejeitou a alteração do vencimento (${res.status}).`);
+  }
+
+  return extractC6BoletoResponse(res.json);
 }
 
 /** Cancela/baixa boleto no C6 (PUT …/cancel). HTTP 204 = sucesso. */
@@ -695,6 +725,7 @@ module.exports = {
   buildC6Payload,
   C6_AMOUNT_MIN,
   C6_AMOUNT_MAX,
+  alterarVencimentoBoletoC6Api,
   cancelarBoletoC6Api,
   cleanupTemp,
   consultarBoletoC6Api,

@@ -2,18 +2,27 @@ import { supabase } from '@/lib/supabase';
 import { boletoApiBaseUrl } from '@/services/sicoobBoletoService';
 import type { ContaReceberListRow } from '@/types/contasReceber';
 import type { EmitirBoletoEmailResult } from '@/types/sicoob';
+import { calcularEncargosBoleto } from '@/utils/boletoEncargos';
 import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate } from '@/utils/date';
 import { safeTrim } from '@/utils/safeTrim';
 
 export function buildCorpoEmailBoleto(row: ContaReceberListRow): string {
   const venc = formatBRDate(parseISODate(row.data_vencimento)) || row.data_vencimento;
+  const encargos = calcularEncargosBoleto(row.valor_documento, row.data_vencimento);
   const linhas = [
     `Olá, ${safeTrim(row.nome_cliente) || 'cliente'}!`,
     '',
     'Segue o boleto para pagamento:',
     `• ${safeTrim(row.referencia_label) || 'Cobrança'}`,
-    `• Valor: ${formatBRL(row.valor_documento)}`,
+    encargos.vencido
+      ? `• Valor original: ${formatBRL(row.valor_documento)}`
+      : `• Valor: ${formatBRL(row.valor_documento)}`,
+    encargos.vencido ? `• Multa (2%): ${formatBRL(encargos.multa)}` : null,
+    encargos.vencido
+      ? `• Juros (0,033% ao dia × ${encargos.dias} dia(s)): ${formatBRL(encargos.juros)}`
+      : null,
+    encargos.vencido ? `• Valor para pagamento hoje: ${formatBRL(encargos.total)}` : null,
     `• Vencimento: ${venc}`,
     row.numero_documento ? `• Documento: ${safeTrim(row.numero_documento)}` : null,
     row.linha_digitavel ? `\nLinha digitável:\n${safeTrim(row.linha_digitavel)}` : null,
