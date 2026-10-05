@@ -560,12 +560,7 @@ export async function fetchClientesParaGerarMensalidades(
   }
 
   if (filters.mesReajusteDe && filters.mesReajusteAte) {
-    rows = rows.filter((r) => {
-      if (!r.data_reajuste) return false;
-      return (
-        r.data_reajuste >= filters.mesReajusteDe! && r.data_reajuste <= filters.mesReajusteAte!
-      );
-    });
+    rows = rows.filter((r) => dataReajusteNoMes(r.data_reajuste, filters.mesReajusteDe!, filters.mesReajusteAte!));
   }
 
   if (filters.somenteProntosParaGerar) {
@@ -633,27 +628,49 @@ async function clienteIdsComMensalidadeNoMes(
   return ids;
 }
 
+function dataReajusteNoMes(
+  dataReajuste: string | null | undefined,
+  de: string,
+  ate: string,
+): boolean {
+  if (!dataReajuste) return false;
+  const data = String(dataReajuste).slice(0, 10);
+  return data >= de && data <= ate;
+}
+
 export async function applyReajusteMensalidadePercentual(
   userId: string,
   clienteIds: string[],
   percent: number,
-): Promise<void> {
+  mes: { de: string; ate: string },
+): Promise<{ aplicados: number; ignoradosForaDoMes: number }> {
   if (!clienteIds.length) {
-    throw new Error('Selecione ao menos um cliente ou use “Todos na lista”.');
+    throw new Error('Nenhum cliente da lista de reajuste deste mês.');
+  }
+  if (!mes?.de || !mes?.ate) {
+    throw new Error('Ative o filtro do mês de reajuste antes de aplicar o percentual.');
   }
   if (!Number.isFinite(percent) || percent === 0) {
     throw new Error('Informe um percentual de reajuste diferente de zero (ex.: 5 para +5%).');
   }
   const factor = 1 + percent / 100;
+  let aplicados = 0;
+  let ignoradosForaDoMes = 0;
 
-  for (const clienteId of clienteIds) {
+  for (const clienteId of [...new Set(clienteIds)]) {
     const { data: cur, error: e0 } = await supabase
       .from('clientes')
-      .select('mensalidade')
+      .select('mensalidade, data_reajuste')
+      .eq('user_id', userId)
       .eq('id', clienteId)
       .maybeSingle();
     if (e0) throw new Error(e0.message);
-    const old = Number((cur as { mensalidade: number | null } | null)?.mensalidade);
+    const row = cur as { mensalidade: number | null; data_reajuste: string | null } | null;
+    if (!dataReajusteNoMes(row?.data_reajuste, mes.de, mes.ate)) {
+      ignoradosForaDoMes += 1;
+      continue;
+    }
+    const old = Number(row?.mensalidade);
     if (old == null || Number.isNaN(old) || old <= 0) continue;
     const novo = Math.round(old * factor * 100) / 100;
     const { error: e1 } = await supabase
@@ -662,9 +679,16 @@ export async function applyReajusteMensalidadePercentual(
         valor_mensalidade_anterior: old,
         mensalidade: novo,
       })
+      .eq('user_id', userId)
       .eq('id', clienteId);
     if (e1) throw new Error(e1.message);
+    aplicados += 1;
   }
+
+  if (aplicados === 0) {
+    throw new Error('Nenhum cliente desta lista de reajuste foi alterado.');
+  }
+  return { aplicados, ignoradosForaDoMes };
 }
 
 export { getClientePdfSignedUrl } from '@/services/clientePdfStorage';

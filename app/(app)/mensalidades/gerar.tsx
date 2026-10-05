@@ -355,16 +355,14 @@ export default function GerarMensalidadeScreen() {
   };
 
   const selecionarTodosLista = () => {
-    setSelected((prev) => {
-      const n = new Set(prev);
-      for (const r of rows) n.add(r.id);
-      return n;
-    });
-    setSelectedCache((prev) => {
-      const n = new Map(prev);
-      for (const r of rows) n.set(r.id, r);
-      return n;
-    });
+    setSelected(new Set(rows.map((r) => r.id)));
+    setSelectedCache(new Map(rows.map((r) => [r.id, r])));
+  };
+
+  const idsReajusteDaLista = () => {
+    const naLista = new Set(rows.map((r) => r.id));
+    if (selected.size === 0) return [...naLista];
+    return [...selected].filter((id) => naLista.has(id));
   };
 
   const limparSelecao = () => {
@@ -391,20 +389,39 @@ export default function GerarMensalidadeScreen() {
 
   const onAdicionarReajuste = async () => {
     if (!user?.id) return;
+    if (!filtrarPorMesReajuste || !mesReajusteRange) {
+      Toast.show({
+        type: 'error',
+        text1: 'Ative o filtro do mês de reajuste.',
+        text2: 'O percentual só altera quem aparece nessa lista.',
+      });
+      return;
+    }
     const pct = parseFloat(percentStr.replace(',', '.'));
-    const ids = targetIds;
+    const ids = idsReajusteDaLista();
     if (!ids.length) {
-      Toast.show({ type: 'error', text1: 'Selecione ao menos um cliente na lista.' });
+      Toast.show({
+        type: 'error',
+        text1: 'Nenhum cliente desta lista de reajuste está selecionado.',
+      });
       return;
     }
     if (!Number.isFinite(pct) || pct === 0) {
       Toast.show({ type: 'error', text1: 'Informe um percentual de reajuste válido (ex.: 5 para +5%).' });
       return;
     }
+    const fora = selected.size > 0 ? selecionadosForaDoFiltro : 0;
     setBusy(true);
     try {
-      await applyReajusteMensalidadePercentual(user.id, ids, pct);
-      Toast.show({ type: 'success', text1: 'Reajuste aplicado aos clientes escolhidos.' });
+      const resultado = await applyReajusteMensalidadePercentual(user.id, ids, pct, mesReajusteRange);
+      Toast.show({
+        type: 'success',
+        text1: `Reajuste aplicado a ${resultado.aplicados} cliente(s) da lista.`,
+        text2:
+          fora > 0
+            ? `${fora} selecionado(s) fora da lista não foram alterados.`
+            : undefined,
+      });
       setPercentStr('');
       await load();
     } catch (e) {
@@ -553,7 +570,7 @@ export default function GerarMensalidadeScreen() {
     setEnviarModalOpen(false);
     try {
       const pctRaw = percentStr.trim().replace(',', '.');
-      if (pctRaw) {
+      if (pctRaw && filtrarPorMesReajuste && mesReajusteRange) {
         const pct = parseFloat(pctRaw);
         if (!Number.isFinite(pct) || pct === 0) {
           Toast.show({ type: 'error', text1: 'Percentual de reajuste inválido.' });
@@ -561,9 +578,20 @@ export default function GerarMensalidadeScreen() {
           envioEmAndamento.current = false;
           return;
         }
-        await applyReajusteMensalidadePercentual(user.id, ids, pct);
-        setPercentStr('');
-        await load();
+        const naLista = new Set(rows.map((r) => r.id));
+        const idsReajuste = ids.filter((id) => naLista.has(id));
+        if (idsReajuste.length) {
+          await applyReajusteMensalidadePercentual(user.id, idsReajuste, pct, mesReajusteRange);
+          setPercentStr('');
+          await load();
+        }
+      } else if (pctRaw) {
+        Toast.show({
+          type: 'info',
+          text1: 'Percentual não aplicado',
+          text2: 'O reajuste só altera quem está na lista do mês filtrado.',
+          visibilityTime: 8000,
+        });
       }
       const { criados, ignorados, semVencimento, duplicados, avisoBoleto, avisoEmail, nf, falhas } =
         await criarMensalidadesGeradasLote({
@@ -738,7 +766,7 @@ export default function GerarMensalidadeScreen() {
         <Card style={styles.card} padded={false}>
           <Text style={styles.h}>Reajuste do mês</Text>
           <Text style={styles.hint}>
-            Mês (MM/AAAA) da data de reajuste no cadastro — ex.: 06/2026.
+            O percentual só altera quem está nesta lista do mês. Cliente de fora, mesmo selecionado antes, não muda.
           </Text>
           <View style={styles.switchRow}>
             <Text style={styles.label}>Filtrar por mês de reajuste</Text>
@@ -796,7 +824,7 @@ export default function GerarMensalidadeScreen() {
               size="compact"
               loading={busy}
               onPress={onAdicionarReajuste}
-              disabled={!rows.length}
+              disabled={!filtrarPorMesReajuste || !rows.length}
               style={styles.reajusteBtnFlex}
             />
           </View>
