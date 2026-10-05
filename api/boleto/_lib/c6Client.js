@@ -314,34 +314,53 @@ function extractC6BoletoResponse(json) {
   };
 }
 
+function fonteC6(resultado) {
+  if (!resultado || typeof resultado !== 'object') return {};
+  const nested = resultado.bank_slip ?? resultado.boleto ?? resultado.data ?? {};
+  return { ...(typeof nested === 'object' && nested ? nested : {}), ...resultado };
+}
+
 function isC6BoletoLiquidado(resultado) {
+  const fonte = fonteC6(resultado);
   const status = String(
-    resultado?.status ?? resultado?.situation ?? resultado?.state ?? '',
+    fonte.status ?? fonte.situation ?? fonte.state ?? fonte.payment_status ?? '',
   ).toLowerCase();
-  return (
+  if (status.includes('cancel')) return false;
+  if (
     status.includes('paid') ||
     status.includes('pago') ||
     status.includes('liquid') ||
     status.includes('settled') ||
+    status.includes('receb') ||
+    status.includes('credit') ||
     status === 'done'
-  );
+  ) {
+    return true;
+  }
+  const pago = Number(fonte.amount_paid ?? fonte.paid_amount ?? fonte.payment?.amount ?? 0);
+  if (Number.isFinite(pago) && pago > 0) return true;
+  if (fonte.payment_date || fonte.paid_at || fonte.settlement_date) return true;
+  const payments = fonte.payments ?? fonte.payment_history;
+  return Array.isArray(payments) && payments.length > 0;
 }
 
 function extractC6DataPagamento(resultado) {
+  const fonte = fonteC6(resultado);
   const raw =
-    resultado?.payment_date ??
-    resultado?.paid_at ??
-    resultado?.settlement_date ??
-    resultado?.data_pagamento ??
+    fonte.payment_date ??
+    fonte.paid_at ??
+    fonte.settlement_date ??
+    fonte.data_pagamento ??
     new Date().toISOString().slice(0, 10);
   return String(raw).slice(0, 10);
 }
 
 function extractC6ValorPago(resultado, fallback) {
-  const v = Number(
-    resultado?.amount_paid ?? resultado?.paid_amount ?? resultado?.amount ?? fallback,
-  );
-  return Number.isFinite(v) && v > 0 ? v : Number(fallback);
+  const fonte = fonteC6(resultado);
+  const pago = Number(fonte.amount_paid ?? fonte.paid_amount ?? fonte.payment?.amount);
+  if (Number.isFinite(pago) && pago > 0) return pago;
+  const face = Number(fonte.amount ?? fallback);
+  return Number.isFinite(face) && face > 0 ? face : null;
 }
 
 async function emitirBoletoC6Api({ config, certPath, keyPath, payload }) {
@@ -393,7 +412,8 @@ async function consultarBoletoC6Api({ config, certPath, keyPath, c6BoletoId }) {
     throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
   }
 
-  const resultado = extractC6BoletoResponse(res.json).raw ?? res.json;
+  let resultado = extractC6BoletoResponse(res.json).raw ?? res.json;
+  if (Array.isArray(resultado)) resultado = resultado[0] ?? {};
   return {
     liquidado: isC6BoletoLiquidado(resultado),
     resultado,

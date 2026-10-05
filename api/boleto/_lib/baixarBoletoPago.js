@@ -479,19 +479,23 @@ async function baixarPorWebhookPayloadC6(admin, payload) {
   });
 }
 
-async function listarBoletosParaConsulta(admin, userId, limit) {
+async function listarBoletosParaConsulta(admin, userId, limit, tipo) {
   const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-  const base = () =>
-    admin
+  const base = () => {
+    let query = admin
       .from('boletos_parcela_venda')
       .select('id')
       .eq('user_id', userId)
-      .in('tipo_emissao', ['sicoob', 'c6'])
       .eq('status_registro', 'registrado');
+    if (tipo) query = query.eq('tipo_emissao', tipo);
+    else query = query.in('tipo_emissao', ['sicoob', 'c6']);
+    return query;
+  };
 
   const { data: vencidos, error } = await base()
     .lte('data_vencimento', hoje)
     .order('ultima_consulta_sicoob', { ascending: true, nullsFirst: true })
+    .order('data_vencimento', { ascending: true })
     .limit(limit);
   if (error) throw new Error(error.message);
 
@@ -501,13 +505,17 @@ async function listarBoletosParaConsulta(admin, userId, limit) {
   const { data: futuros, error: erroFuturos } = await base()
     .gt('data_vencimento', hoje)
     .order('ultima_consulta_sicoob', { ascending: true, nullsFirst: true })
+    .order('data_vencimento', { ascending: true })
     .limit(limit - escolhidos.length);
   if (erroFuturos) throw new Error(erroFuturos.message);
   return [...escolhidos, ...(futuros ?? [])];
 }
 
 async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 8) {
-  const boletos = await listarBoletosParaConsulta(admin, userId, limit);
+  const c6 = await listarBoletosParaConsulta(admin, userId, limit, 'c6');
+  const restante = Math.max(0, limit - c6.length);
+  const sicoob = restante > 0 ? await listarBoletosParaConsulta(admin, userId, restante, 'sicoob') : [];
+  const boletos = [...c6, ...sicoob];
 
   const inicio = Date.now();
   const resultados = [];
@@ -517,6 +525,10 @@ async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 8) {
       const r = await consultarEBaixarBoleto(admin, userId, row.id, 'POLLING');
       resultados.push({ boletoId: row.id, ...r });
     } catch (e) {
+      await admin
+        .from('boletos_parcela_venda')
+        .update({ ultima_consulta_sicoob: new Date().toISOString() })
+        .eq('id', row.id);
       resultados.push({ boletoId: row.id, baixado: false, erro: e.message });
     }
   }
@@ -525,7 +537,7 @@ async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 8) {
   return {
     consultados: resultados.length,
     baixados,
-    temMais: boletos.length === limit,
+    temMais: c6.length === limit || sicoob.length === restante,
     resultados,
   };
 }

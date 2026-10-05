@@ -234,9 +234,18 @@ export default function ContasReceberScreen() {
       void (async () => {
         let pagos = 0;
         try {
-          for (let i = 0; i < 6 && ativo; i += 1) {
+          for (let i = 0; i < 12 && ativo; i += 1) {
             const r = await sincronizarBoletosPendentes();
             pagos += r.baixados;
+            const erros = (r.resultados ?? []).filter((item) => item.erro);
+            if (i === 0 && erros.length > 0 && erros.length === (r.resultados ?? []).length) {
+              Toast.show({
+                type: 'error',
+                text1: 'Não consegui consultar o pagamento no banco',
+                text2: String(erros[0]?.erro ?? ''),
+                visibilityTime: 9000,
+              });
+            }
             if (!r.temMais) break;
           }
         } catch {
