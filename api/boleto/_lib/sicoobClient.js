@@ -253,7 +253,10 @@ async function emitirBoletoSicoobApi({ config, certPath, senha, payload, ambient
 
 function isBoletoLiquidado(resultado) {
   const situacao = String(resultado?.situacaoBoleto ?? resultado?.situacao ?? '').toLowerCase();
-  return situacao.includes('liquid') || situacao.includes('pago') || situacao === 'baixado';
+  if (situacao.includes('baix')) return false;
+  if (situacao.includes('liquid') || situacao.includes('pago')) return true;
+  if (resultado?.dataLiquidacao || resultado?.dataPagamento) return true;
+  return false;
 }
 
 function extractDataPagamento(resultado) {

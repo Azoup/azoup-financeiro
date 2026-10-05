@@ -479,21 +479,40 @@ async function baixarPorWebhookPayloadC6(admin, payload) {
   });
 }
 
-async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 30) {
-  const { data: boletos, error } = await admin
-    .from('boletos_parcela_venda')
-    .select('id')
-    .eq('user_id', userId)
-    .in('tipo_emissao', ['sicoob', 'c6'])
-    .eq('status_registro', 'registrado')
-    .order('data_vencimento', { ascending: true })
+async function listarBoletosParaConsulta(admin, userId, limit) {
+  const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  const base = () =>
+    admin
+      .from('boletos_parcela_venda')
+      .select('id')
+      .eq('user_id', userId)
+      .in('tipo_emissao', ['sicoob', 'c6'])
+      .eq('status_registro', 'registrado');
+
+  const { data: vencidos, error } = await base()
+    .lte('data_vencimento', hoje)
+    .order('ultima_consulta_sicoob', { ascending: true, nullsFirst: true })
     .limit(limit);
   if (error) throw new Error(error.message);
 
+  const escolhidos = vencidos ?? [];
+  if (escolhidos.length >= limit) return escolhidos;
+
+  const { data: futuros, error: erroFuturos } = await base()
+    .gt('data_vencimento', hoje)
+    .order('ultima_consulta_sicoob', { ascending: true, nullsFirst: true })
+    .limit(limit - escolhidos.length);
+  if (erroFuturos) throw new Error(erroFuturos.message);
+  return [...escolhidos, ...(futuros ?? [])];
+}
+
+async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 8) {
+  const boletos = await listarBoletosParaConsulta(admin, userId, limit);
+
   const inicio = Date.now();
   const resultados = [];
-  for (const row of boletos ?? []) {
-    if (Date.now() - inicio > 20000) break;
+  for (const row of boletos) {
+    if (Date.now() - inicio > 45000) break;
     try {
       const r = await consultarEBaixarBoleto(admin, userId, row.id, 'POLLING');
       resultados.push({ boletoId: row.id, ...r });
@@ -503,7 +522,12 @@ async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 30) {
   }
 
   const baixados = resultados.filter((r) => r.baixado).length;
-  return { consultados: resultados.length, baixados, resultados };
+  return {
+    consultados: resultados.length,
+    baixados,
+    temMais: boletos.length === limit,
+    resultados,
+  };
 }
 
 async function sincronizarBoletosPendentesGlobal(admin, limitPorUsuario = 20) {

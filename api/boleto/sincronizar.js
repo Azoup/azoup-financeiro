@@ -9,7 +9,7 @@ module.exports = async function handler(req, res) {
   try {
     const user = await getUserFromBearer(req);
     const admin = getAdmin();
-    const result = await sincronizarBoletosPendentesUsuario(admin, user.id, 5);
+    const result = await sincronizarBoletosPendentesUsuario(admin, user.id, 8);
     return res.status(200).json({ success: true, ...result });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message ?? 'Erro interno.' });

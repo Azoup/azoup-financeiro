@@ -137,6 +137,7 @@ export async function reemitirBoletosSicoob(userId: string, boletoIds: string[])
 export async function sincronizarBoletosPendentes(): Promise<{
   consultados: number;
   baixados: number;
+  temMais: boolean;
   resultados: Array<Record<string, unknown>>;
 }> {
   const { data: session } = await supabase.auth.getSession();
@@ -161,6 +162,7 @@ export async function sincronizarBoletosPendentes(): Promise<{
     success?: boolean;
     consultados?: number;
     baixados?: number;
+    temMais?: boolean;
     resultados?: Array<Record<string, unknown>>;
     message?: string;
   };
@@ -172,6 +174,7 @@ export async function sincronizarBoletosPendentes(): Promise<{
   return {
     consultados: body.consultados ?? 0,
     baixados: body.baixados ?? 0,
+    temMais: Boolean(body.temMais),
     resultados: body.resultados ?? [],
   };
 }

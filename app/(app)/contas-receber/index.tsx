@@ -13,7 +13,7 @@ import {
 } from '@/services/boletoParcelaService';
 import { reemitirBoletosC6 } from '@/services/c6BoletoService';
 import { pickEmitenteC6 } from '@/services/c6ConfigService';
-import { reemitirBoletosSicoob, moverDuplicadosSicoobParaNovembro, atualizarLimiteDuplicadosOutubro } from '@/services/sicoobBoletoService';
+import { reemitirBoletosSicoob, moverDuplicadosSicoobParaNovembro, atualizarLimiteDuplicadosOutubro, sincronizarBoletosPendentes } from '@/services/sicoobBoletoService';
 import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import {
   fetchMensalidadeGeradaById,
@@ -127,6 +127,7 @@ export default function ContasReceberScreen() {
   const [pagina, setPagina] = useState(1);
   const [totalDocumentos, setTotalDocumentos] = useState(0);
   const pedidoLista = useRef(0);
+  const syncPagamentos = useRef(false);
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, 300);
   const [vencimentoDe, setVencimentoDe] = useState<string | null>(null);
@@ -223,6 +224,38 @@ export default function ContasReceberScreen() {
     useCallback(() => {
       void carregar();
     }, [carregar]),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.id || syncPagamentos.current) return undefined;
+      syncPagamentos.current = true;
+      let ativo = true;
+      void (async () => {
+        let pagos = 0;
+        try {
+          for (let i = 0; i < 6 && ativo; i += 1) {
+            const r = await sincronizarBoletosPendentes();
+            pagos += r.baixados;
+            if (!r.temMais) break;
+          }
+        } catch {
+          /* a lista segue; a consulta diária continua no servidor */
+        } finally {
+          syncPagamentos.current = false;
+        }
+        if (ativo && pagos > 0) {
+          Toast.show({
+            type: 'success',
+            text1: pagos === 1 ? '1 boleto pago foi atualizado.' : `${pagos} boletos pagos foram atualizados.`,
+          });
+          void carregar();
+        }
+      })();
+      return () => {
+        ativo = false;
+      };
+    }, [user?.id, carregar]),
   );
 
   const moverRepetidosParaNovembro = async () => {
