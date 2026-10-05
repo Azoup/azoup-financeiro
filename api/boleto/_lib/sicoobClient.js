@@ -174,6 +174,7 @@ function buildSicoobPayload({ boleto, config, cliente, notaFiscal, beneficiarioD
     instrucoes.unshift(clipInstrucao(`NFSe ${notaFiscal.numero}`));
   }
 
+  const emissaoPeloCliente = Number(config.identificacao_emissao_boleto ?? 1) === 2;
   const nossoNumero = Number(onlyDigits(boleto.nosso_numero).slice(-8) || '0');
   const seuNumero = (boleto.numero_documento ?? boleto.id.replace(/-/g, '')).slice(0, 15);
 
@@ -183,7 +184,7 @@ function buildSicoobPayload({ boleto, config, cliente, notaFiscal, beneficiarioD
     numeroContaCorrente: Number(config.numero_conta_corrente ?? 0),
     codigoEspecieDocumento: config.codigo_especie_documento || 'DM',
     dataEmissao: boleto.data_documento,
-    nossoNumero: nossoNumero > 0 ? nossoNumero : undefined,
+    nossoNumero: emissaoPeloCliente && nossoNumero > 0 ? nossoNumero : undefined,
     seuNumero,
     identificacaoBoletoEmpresa: seuNumero,
     identificacaoEmissaoBoleto: Number(config.identificacao_emissao_boleto ?? 1),
