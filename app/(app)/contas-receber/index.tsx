@@ -28,6 +28,7 @@ import {
   gerarNotaFiscalParaVenda,
 } from '@/services/notaFiscalService';
 import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
+import { fetchSegmentosCliente } from '@/services/segmentoClienteService';
 import {
   cancelarParcelaVenda,
   reativarParcelaVenda,
@@ -36,6 +37,7 @@ import {
   registrarPagamentoVenda,
 } from '@/services/vendasService';
 import type { MensalidadeGerada } from '@/types/mensalidadeGerada';
+import type { SegmentoClienteRow } from '@/types/models';
 import { centavosParaReais, reaisParaCentavos } from '@/utils/vendasParcelas';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { ContaReceberListRow, ContaReceberOrigem } from '@/types/contasReceber';
@@ -137,6 +139,8 @@ export default function ContasReceberScreen() {
   const [totalRecebido, setTotalRecebido] = useState(0);
   const [origemFilter, setOrigemFilter] = useState<OrigemFiltro>('todos');
   const [situacaoFilter, setSituacaoFilter] = useState<SituacaoFiltro>('aberto');
+  const [segmentoFilter, setSegmentoFilter] = useState<string>('todos');
+  const [segmentos, setSegmentos] = useState<SegmentoClienteRow[]>([]);
   const [soDuplicados, setSoDuplicados] = useState(false);
   const [soRegistrando, setSoRegistrando] = useState(false);
   const [movendoNovembro, setMovendoNovembro] = useState(false);
@@ -186,6 +190,7 @@ export default function ContasReceberScreen() {
           vencimentoAte,
           pagamentoDe,
           pagamentoAte,
+          segmentoCodigo: segmentoFilter === 'todos' ? null : segmentoFilter,
           emitenteId: empresaId === 'todos' ? null : empresaId,
           soDuplicados,
           statusRegistro: soRegistrando ? 'pendente' : undefined,
@@ -218,6 +223,7 @@ export default function ContasReceberScreen() {
     vencimentoAte,
     pagamentoDe,
     pagamentoAte,
+    segmentoFilter,
     empresaId,
     soDuplicados,
     soRegistrando,
@@ -225,7 +231,11 @@ export default function ContasReceberScreen() {
 
   useEffect(() => {
     setPagina(1);
-  }, [debouncedSearch, origemFilter, situacaoFilter, vencimentoDe, vencimentoAte, pagamentoDe, pagamentoAte, empresaId, soDuplicados, soRegistrando]);
+  }, [debouncedSearch, origemFilter, situacaoFilter, segmentoFilter, vencimentoDe, vencimentoAte, pagamentoDe, pagamentoAte, empresaId, soDuplicados, soRegistrando]);
+
+  useEffect(() => {
+    void fetchSegmentosCliente().then(setSegmentos);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -415,6 +425,7 @@ export default function ContasReceberScreen() {
     Boolean(vencimentoAte) ||
     Boolean(pagamentoDe) ||
     Boolean(pagamentoAte) ||
+    segmentoFilter !== 'todos' ||
     soDuplicados ||
     soRegistrando;
 
@@ -436,6 +447,7 @@ export default function ContasReceberScreen() {
     setVencimentoAte(null);
     setPagamentoDe(null);
     setPagamentoAte(null);
+    setSegmentoFilter('todos');
     setOrigemFilter('todos');
     setSituacaoFilter('aberto');
     setSoDuplicados(false);
@@ -947,6 +959,9 @@ export default function ContasReceberScreen() {
               {boletoRegistroLabel(item.status_registro ?? 'informativo', item.tipo_emissao)}
             </Text>
           </View>
+          <Text style={styles.colSeg} numberOfLines={2}>
+            {item.segmento_nome || '—'}
+          </Text>
           <Text style={styles.colVenc}>{venc}</Text>
           <Text style={styles.colPago}>{pagoEm}</Text>
           <Text style={styles.colValor}>{formatBRL(item.valor_documento)}</Text>
@@ -1059,6 +1074,28 @@ export default function ContasReceberScreen() {
         >
           <Text style={[styles.sitChipTxt, soRegistrando && styles.sitChipTxtOn]}>Registrando</Text>
         </Pressable>
+      </ScrollView>
+
+      <Text style={styles.segLabel}>Segmento</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.situacaoChips}>
+        <Pressable
+          style={[styles.sitChip, segmentoFilter === 'todos' && styles.sitChipOn]}
+          onPress={() => setSegmentoFilter('todos')}
+        >
+          <Text style={[styles.sitChipTxt, segmentoFilter === 'todos' && styles.sitChipTxtOn]}>Todos</Text>
+        </Pressable>
+        {segmentos.map((s) => {
+          const on = segmentoFilter === s.codigo;
+          return (
+            <Pressable
+              key={s.codigo}
+              style={[styles.sitChip, on && styles.sitChipOn]}
+              onPress={() => setSegmentoFilter(s.codigo)}
+            >
+              <Text style={[styles.sitChipTxt, on && styles.sitChipTxtOn]}>{s.nome}</Text>
+            </Pressable>
+          );
+        })}
       </ScrollView>
 
       {duplicadosIds.clientes > 0 || soDuplicados ? (
@@ -1180,6 +1217,7 @@ export default function ContasReceberScreen() {
       {filteredRows.length > 0 ? (
         <View style={styles.tableHead}>
           <Text style={[styles.th, styles.thCliente]}>Cliente</Text>
+          <Text style={[styles.th, styles.thSeg]}>Segmento</Text>
           <Text style={[styles.th, styles.thTipo]}>Tipo</Text>
           <Text style={[styles.th, styles.thVenc]}>Venc.</Text>
           <Text style={[styles.th, styles.thPago]}>Pago em</Text>
@@ -1501,6 +1539,14 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   thCliente: { flex: 2, minWidth: 0 },
+  thSeg: { width: 88 },
+  segLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.gray600,
+    paddingHorizontal: spacing.md,
+    marginBottom: 2,
+  },
   thTipo: { width: 72, textAlign: 'center' },
   thVenc: { width: 64, textAlign: 'center' },
   thPago: { width: 72, textAlign: 'center' },
@@ -1568,6 +1614,7 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   colCliente: { flex: 2, minWidth: 0 },
+  colSeg: { width: 88, fontSize: 11, color: colors.gray600 },
   cliNome: { fontSize: 12, fontWeight: '600', color: colors.petroleum, lineHeight: 16 },
   cliAtraso: { fontSize: 10, fontWeight: '700', color: colors.danger, marginTop: 1 },
   cliWa: { fontSize: 10, color: '#1da851', marginTop: 2 },

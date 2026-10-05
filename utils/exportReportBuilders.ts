@@ -367,6 +367,7 @@ export function buildGerarMensalidadeExport(
 export function buildContasReceberExport(rows: ContaReceberListRow[]): ExportReportPayload {
   const columns = [
     'Cliente',
+    'Segmento',
     'Origem',
     'Situação',
     'Referência',
@@ -377,6 +378,7 @@ export function buildContasReceberExport(rows: ContaReceberListRow[]): ExportRep
   ];
   const tableRows = rows.map((r) => [
     r.nome_cliente,
+    r.segmento_nome || r.segmento_codigo || '—',
     r.origem === 'mensalidade' ? 'Mensalidade' : 'Venda',
     labelSituacaoCobranca(r.situacao_cobranca),
     r.referencia_label,

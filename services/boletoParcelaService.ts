@@ -11,6 +11,7 @@ import { situacaoCobrancaDeStatus } from '@/utils/contaReceberCobranca';
 import { CLIENTE_EMBED_SELECT, mapClienteEnderecoFiscal, type ClienteDbRow } from '@/utils/clientesDbMapping';
 import { clienteDocFiscal } from '@/utils/cnpj';
 import { toISODate } from '@/utils/date';
+import { getSegmentoNomePorCodigo } from '@/services/segmentoClienteService';
 
 const SQL_MIGRATION_BOLETOS_HINT =
   'Execute no Supabase (SQL Editor) o arquivo supabase/migrations/034_contas_receber_boletos_setup.sql';
@@ -936,6 +937,8 @@ export type ContasReceberConsulta = {
   vencimentoAte?: string | null;
   pagamentoDe?: string | null;
   pagamentoAte?: string | null;
+  /** Código do segmento do cliente. `todos` ou vazio não filtra. */
+  segmentoCodigo?: string | null;
   emitenteId?: string | null;
   soDuplicados?: boolean;
   /** `pendente` aparece na tela como Registrando. */
@@ -1044,9 +1047,25 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
   }
 
   const clienteIds = [...new Set(clientePorBoleto.values())];
+  const segmentoPorCliente = new Map<string, { codigo: string; nome: string }>();
   const whatsappPorCliente = new Map<string, { valor: string; nome: string }>();
   const emailPorCliente = new Map<string, { valor: string; nome: string }>();
   if (clienteIds.length) {
+    const nomesSegmento = await getSegmentoNomePorCodigo();
+    const clientesSeg = await selectInChunks(clienteIds, async (slice) => {
+      const { data, error } = await supabase
+        .from('clientes')
+        .select('id, segmento_cliente_codigo')
+        .in('id', slice);
+      if (error) throw new Error(error.message);
+      return (data ?? []) as { id: string | number; segmento_cliente_codigo: string | null }[];
+    });
+    for (const c of clientesSeg) {
+      const codigo = (c.segmento_cliente_codigo ?? '').trim();
+      if (!codigo) continue;
+      segmentoPorCliente.set(String(c.id), { codigo, nome: nomesSegmento.get(codigo) || codigo });
+    }
+
     const contatos = await selectInChunks(clienteIds, async (slice) => {
       const { data, error: e5 } = await supabase
       .from('contatos_cliente')
@@ -1111,6 +1130,7 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
     }
 
     const clienteId = clientePorBoleto.get(boleto.id) ?? null;
+    const seg = clienteId ? segmentoPorCliente.get(String(clienteId)) : undefined;
     const wa = clienteId ? whatsappPorCliente.get(clienteId) : undefined;
     const em = clienteId ? emailPorCliente.get(clienteId) : undefined;
 
@@ -1138,6 +1158,8 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
       data_pagamento:
         (boleto.data_liquidacao_sicoob ? String(boleto.data_liquidacao_sicoob).slice(0, 10) : null) ||
         (boleto.mensalidade_id ? dataPagamentoMens.get(boleto.mensalidade_id) ?? null : null),
+      segmento_codigo: seg?.codigo ?? null,
+      segmento_nome: seg?.nome ?? null,
     };
   });
 }
@@ -1173,20 +1195,30 @@ async function consultarLado(
   to: number,
 ): Promise<{ rows: BoletoConsulta[]; total: number }> {
   const statuses = statusesDaSituacao(opts.situacao);
+  const segmento =
+    opts.segmentoCodigo && opts.segmentoCodigo !== 'todos' ? opts.segmentoCodigo.trim() : null;
   const select =
     lado === 'venda'
-      ? statuses
-        ? '*, parcelas_venda!inner(status)'
-        : '*, parcelas_venda(status)'
-      : statuses
-        ? '*, mensalidades!inner(status, cliente_id, data_pagamento)'
-        : '*, mensalidades(status, cliente_id, data_pagamento)';
+      ? `${statuses ? '*, parcelas_venda!inner(status)' : '*, parcelas_venda(status)'}${
+          segmento ? ', vendas!inner(clientes!inner(segmento_cliente_codigo))' : ''
+        }`
+      : `*, mensalidades${statuses || segmento ? '!inner' : ''}(status, cliente_id, data_pagamento${
+          segmento ? ', clientes!inner(segmento_cliente_codigo)' : ''
+        })`;
   let q = aplicarFiltrosBoleto(
     supabase.from('boletos_parcela_venda').select(select, { count: 'exact' }),
     userId,
     opts,
     lado,
   );
+  if (segmento) {
+    q = q.eq(
+      lado === 'venda'
+        ? 'vendas.clientes.segmento_cliente_codigo'
+        : 'mensalidades.clientes.segmento_cliente_codigo',
+      segmento,
+    );
+  }
   if (statuses) {
     q = q.in(lado === 'venda' ? 'parcelas_venda.status' : 'mensalidades.status', statuses);
   }
@@ -1285,12 +1317,14 @@ export async function fetchContasReceberPagina(
   const origem = opts.origem ?? 'todos';
   const situacao = opts.situacao ?? 'todos';
 
+  const segmentoAtivo = Boolean(opts.segmentoCodigo && opts.segmentoCodigo !== 'todos');
+
   if (origem !== 'todos') {
     const { rows, total } = await consultarLado(userId, origem, opts, from, to);
     return { rows: await hidratarContasReceber(userId, rows), total, page, pageSize, totalRecebido };
   }
 
-  if (situacao === 'todos') {
+  if (situacao === 'todos' && !segmentoAtivo) {
     const { data, error, count } = await aplicarFiltrosBoleto(
       supabase
         .from('boletos_parcela_venda')
