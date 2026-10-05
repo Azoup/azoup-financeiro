@@ -372,6 +372,7 @@ export function buildContasReceberExport(rows: ContaReceberListRow[]): ExportRep
     'Referência',
     'Valor',
     'Vencimento',
+    'Pagamento',
     'Nº documento',
   ];
   const tableRows = rows.map((r) => [
@@ -381,6 +382,7 @@ export function buildContasReceberExport(rows: ContaReceberListRow[]): ExportRep
     r.referencia_label,
     formatBRL(r.valor_documento),
     r.data_vencimento.split('-').reverse().join('/'),
+    r.data_pagamento ? r.data_pagamento.split('-').reverse().join('/') : '—',
     r.numero_documento,
   ]);
 

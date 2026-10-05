@@ -132,6 +132,9 @@ export default function ContasReceberScreen() {
   const debouncedSearch = useDebounce(search, 300);
   const [vencimentoDe, setVencimentoDe] = useState<string | null>(null);
   const [vencimentoAte, setVencimentoAte] = useState<string | null>(null);
+  const [pagamentoDe, setPagamentoDe] = useState<string | null>(null);
+  const [pagamentoAte, setPagamentoAte] = useState<string | null>(null);
+  const [totalRecebido, setTotalRecebido] = useState(0);
   const [origemFilter, setOrigemFilter] = useState<OrigemFiltro>('todos');
   const [situacaoFilter, setSituacaoFilter] = useState<SituacaoFiltro>('aberto');
   const [soDuplicados, setSoDuplicados] = useState(false);
@@ -139,8 +142,6 @@ export default function ContasReceberScreen() {
   const [movendoNovembro, setMovendoNovembro] = useState(false);
   const [alterandoLimite, setAlterandoLimite] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [draftVencDe, setDraftVencDe] = useState<string | null>(null);
-  const [draftVencAte, setDraftVencAte] = useState<string | null>(null);
   const [draftOrigem, setDraftOrigem] = useState<OrigemFiltro>('todos');
   const [draftSituacao, setDraftSituacao] = useState<SituacaoFiltro>('aberto');
   const [loading, setLoading] = useState(true);
@@ -183,6 +184,8 @@ export default function ContasReceberScreen() {
           situacao: situacaoFilter,
           vencimentoDe,
           vencimentoAte,
+          pagamentoDe,
+          pagamentoAte,
           emitenteId: empresaId === 'todos' ? null : empresaId,
           soDuplicados,
           statusRegistro: soRegistrando ? 'pendente' : undefined,
@@ -192,6 +195,7 @@ export default function ContasReceberScreen() {
       if (pedido !== pedidoLista.current) return;
       setAllRows(lista.rows);
       setTotalDocumentos(lista.total);
+      setTotalRecebido(lista.totalRecebido ?? 0);
       const ultima = Math.max(1, Math.ceil(lista.total / lista.pageSize) || 1);
       if (pagina > ultima) setPagina(ultima);
       setNomeBeneficiario(perfil?.razao_social?.trim() || null);
@@ -200,6 +204,7 @@ export default function ContasReceberScreen() {
       Toast.show({ type: 'error', text1: (e as Error).message });
       setAllRows([]);
       setTotalDocumentos(0);
+      setTotalRecebido(0);
     } finally {
       if (pedido === pedidoLista.current) setLoading(false);
     }
@@ -211,6 +216,8 @@ export default function ContasReceberScreen() {
     situacaoFilter,
     vencimentoDe,
     vencimentoAte,
+    pagamentoDe,
+    pagamentoAte,
     empresaId,
     soDuplicados,
     soRegistrando,
@@ -218,7 +225,7 @@ export default function ContasReceberScreen() {
 
   useEffect(() => {
     setPagina(1);
-  }, [debouncedSearch, origemFilter, situacaoFilter, vencimentoDe, vencimentoAte, empresaId, soDuplicados, soRegistrando]);
+  }, [debouncedSearch, origemFilter, situacaoFilter, vencimentoDe, vencimentoAte, pagamentoDe, pagamentoAte, empresaId, soDuplicados, soRegistrando]);
 
   useFocusEffect(
     useCallback(() => {
@@ -406,20 +413,18 @@ export default function ContasReceberScreen() {
     situacaoFilter !== 'aberto' ||
     Boolean(vencimentoDe) ||
     Boolean(vencimentoAte) ||
+    Boolean(pagamentoDe) ||
+    Boolean(pagamentoAte) ||
     soDuplicados ||
     soRegistrando;
 
   const abrirFiltros = () => {
-    setDraftVencDe(vencimentoDe);
-    setDraftVencAte(vencimentoAte);
     setDraftOrigem(origemFilter);
     setDraftSituacao(situacaoFilter);
     setFilterOpen(true);
   };
 
   const aplicarFiltros = () => {
-    setVencimentoDe(draftVencDe);
-    setVencimentoAte(draftVencAte);
     setOrigemFilter(draftOrigem);
     setSituacaoFilter(draftSituacao);
     setFilterOpen(false);
@@ -429,12 +434,12 @@ export default function ContasReceberScreen() {
     setSearch('');
     setVencimentoDe(null);
     setVencimentoAte(null);
+    setPagamentoDe(null);
+    setPagamentoAte(null);
     setOrigemFilter('todos');
     setSituacaoFilter('aberto');
     setSoDuplicados(false);
     setSoRegistrando(false);
-    setDraftVencDe(null);
-    setDraftVencAte(null);
     setDraftOrigem('todos');
     setDraftSituacao('aberto');
   };
@@ -874,6 +879,9 @@ export default function ContasReceberScreen() {
     const pdfBusy = pdfId === item.id;
     const stOrig = origemStyle(item.origem);
     const venc = formatBRDate(parseISODate(item.data_vencimento)) || item.data_vencimento;
+    const pagoEm = item.data_pagamento
+      ? formatBRDate(parseISODate(item.data_pagamento)) || item.data_pagamento
+      : '—';
     const isLast = index === filteredRows.length - 1;
     const atrasado =
       item.situacao_cobranca === 'aberto' && item.parcela_status === 'atrasado';
@@ -940,6 +948,7 @@ export default function ContasReceberScreen() {
             </Text>
           </View>
           <Text style={styles.colVenc}>{venc}</Text>
+          <Text style={styles.colPago}>{pagoEm}</Text>
           <Text style={styles.colValor}>{formatBRL(item.valor_documento)}</Text>
         </Pressable>
         <View style={styles.colAcoes}>
@@ -1086,6 +1095,43 @@ export default function ContasReceberScreen() {
         </Text>
       </Pressable>
 
+      <View style={styles.datasFiltro}>
+        <View style={styles.datasCol}>
+          <DatePickerField
+            compact
+            label="Vencimento de"
+            value={vencimentoDe ? new Date(`${vencimentoDe}T12:00:00`) : null}
+            onChange={(d) => setVencimentoDe(d ? toISODate(d) : null)}
+          />
+          <DatePickerField
+            compact
+            label="Pagamento de"
+            value={pagamentoDe ? new Date(`${pagamentoDe}T12:00:00`) : null}
+            onChange={(d) => setPagamentoDe(d ? toISODate(d) : null)}
+          />
+        </View>
+        <View style={styles.datasCol}>
+          <DatePickerField
+            compact
+            label="Vencimento até"
+            value={vencimentoAte ? new Date(`${vencimentoAte}T12:00:00`) : null}
+            onChange={(d) => setVencimentoAte(d ? toISODate(d) : null)}
+            minimumDate={vencimentoDe ? new Date(`${vencimentoDe}T12:00:00`) : undefined}
+          />
+          <DatePickerField
+            compact
+            label="Pagamento até"
+            value={pagamentoAte ? new Date(`${pagamentoAte}T12:00:00`) : null}
+            onChange={(d) => setPagamentoAte(d ? toISODate(d) : null)}
+            minimumDate={pagamentoDe ? new Date(`${pagamentoDe}T12:00:00`) : undefined}
+          />
+        </View>
+      </View>
+      <View style={styles.recebidoCard}>
+        <Text style={styles.recebidoLab}>Recebido no filtro</Text>
+        <Text style={styles.recebidoVal}>{formatBRL(totalRecebido)}</Text>
+      </View>
+
       <View style={styles.searchRow}>
         <View style={styles.searchWrap}>
           <Ionicons name="search" size={18} color={colors.gray400} />
@@ -1136,6 +1182,7 @@ export default function ContasReceberScreen() {
           <Text style={[styles.th, styles.thCliente]}>Cliente</Text>
           <Text style={[styles.th, styles.thTipo]}>Tipo</Text>
           <Text style={[styles.th, styles.thVenc]}>Venc.</Text>
+          <Text style={[styles.th, styles.thPago]}>Pago em</Text>
           <Text style={[styles.th, styles.thValor]}>Valor</Text>
           <View style={styles.thAcoes} />
         </View>
@@ -1297,20 +1344,6 @@ export default function ContasReceberScreen() {
                 })}
               </ScrollView>
 
-              <Text style={styles.fLab}>Vencimento</Text>
-              <Text style={styles.fHint}>Filtra pela data de vencimento do carnê (opcional).</Text>
-              <DatePickerField
-                label="Vencimento a partir de"
-                value={draftVencDe ? new Date(draftVencDe + 'T12:00:00') : null}
-                onChange={(d) => setDraftVencDe(d ? toISODate(d) : null)}
-              />
-              <DatePickerField
-                label="Vencimento até"
-                value={draftVencAte ? new Date(draftVencAte + 'T12:00:00') : null}
-                onChange={(d) => setDraftVencAte(d ? toISODate(d) : null)}
-                minimumDate={draftVencDe ? new Date(draftVencDe + 'T12:00:00') : undefined}
-              />
-
               <Pressable style={styles.btnAplicar} onPress={aplicarFiltros}>
                 <Text style={styles.btnAplicarTxt}>Aplicar</Text>
               </Pressable>
@@ -1470,6 +1503,7 @@ const styles = StyleSheet.create({
   thCliente: { flex: 2, minWidth: 0 },
   thTipo: { width: 72, textAlign: 'center' },
   thVenc: { width: 64, textAlign: 'center' },
+  thPago: { width: 72, textAlign: 'center' },
   thValor: { flex: 1, textAlign: 'right', paddingRight: spacing.xs },
   thIcon: { width: 22 },
   list: { paddingBottom: spacing.xl * 2 },
@@ -1546,7 +1580,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   tipoTxt: { fontSize: 9, fontWeight: '800' },
+  datasFiltro: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  datasCol: { flex: 1, minWidth: 0 },
+  recebidoCard: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    backgroundColor: '#e8f5e9',
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  recebidoLab: { fontSize: 13, fontWeight: '700', color: '#1b5e20' },
+  recebidoVal: { fontSize: 16, fontWeight: '800', color: '#1b5e20' },
   colVenc: { width: 64, fontSize: 11, color: colors.gray600, textAlign: 'center' },
+  colPago: { width: 72, fontSize: 11, color: colors.gray600, textAlign: 'center' },
   colValor: { flex: 1, fontSize: 12, fontWeight: '700', color: colors.gray800, textAlign: 'right' },
   thAcoes: { width: 148 },
   empty: {

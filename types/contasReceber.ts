@@ -109,4 +109,6 @@ export type ContaReceberListRow = BoletoParcelaVendaRow & {
   /** E-mail do cadastro do cliente (contatos, tipo email). */
   email: string | null;
   email_contato_nome: string | null;
+  /** Data em que o pagamento entrou, no banco ou na baixa manual. */
+  data_pagamento: string | null;
 };

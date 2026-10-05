@@ -284,8 +284,8 @@ async function buildSnapshotBenefPag(
     emitente && (emitente.logradouro.trim() || emitente.numero.trim())
       ? linhaEnderecoBenef(emitente)
       : perfil && (perfil.logradouro.trim() || perfil.numero.trim())
-        ? linhaEnderecoBenef(perfil)
-        : '—';
+      ? linhaEnderecoBenef(perfil)
+      : '—';
   const benefBairro = (emitente?.bairro ?? perfil?.bairro ?? '').trim() || '—';
   const benefCidade =
     emitente && (emitente.cidade.trim() || emitente.uf.trim())
@@ -296,13 +296,13 @@ async function buildSnapshotBenefPag(
           bairro: emitente.bairro,
         })
       : perfil && (perfil.cidade.trim() || perfil.uf.trim())
-        ? cidadeUfCepBenef({
-            cidade: perfil.cidade,
-            uf: perfil.uf,
-            cep: perfil.cep,
-            bairro: perfil.bairro,
-          })
-        : '—';
+      ? cidadeUfCepBenef({
+          cidade: perfil.cidade,
+          uf: perfil.uf,
+          cep: perfil.cep,
+          bairro: perfil.bairro,
+        })
+      : '—';
 
   const pagNome = (cli.nome_empresa || cli.nome_cliente || '').trim();
 
@@ -706,7 +706,7 @@ export async function gerarBoletosParaMensalidades(
             registrarFalhaBoleto(r.boletoId ?? null, r.message);
           }
         }
-      } catch (e) {
+    } catch (e) {
         const msg =
           (e as Error).message ??
           'Registro C6 pendente. Use “Registrar no C6” na mensalidade.';
@@ -814,12 +814,12 @@ export async function sincronizarCarnesMensalidadesFaltantes(
   const comCarne = new Set<string>();
   for (let i = 0; i < todas.length; i += 80) {
     const ids = todas.slice(i, i + 80).map((m) => m.id);
-    const { data: boletos, error: e1 } = await supabase
-      .from('boletos_parcela_venda')
-      .select('mensalidade_id')
-      .eq('user_id', userId)
+  const { data: boletos, error: e1 } = await supabase
+    .from('boletos_parcela_venda')
+    .select('mensalidade_id')
+    .eq('user_id', userId)
       .in('mensalidade_id', ids);
-    if (e1) throw wrapBoletoDbError(e1);
+  if (e1) throw wrapBoletoDbError(e1);
     for (const b of boletos ?? []) {
       const id = (b as { mensalidade_id: string | null }).mensalidade_id;
       if (id) comCarne.add(id);
@@ -934,6 +934,8 @@ export type ContasReceberConsulta = {
   situacao?: 'todos' | 'aberto' | 'pago' | 'cancelado';
   vencimentoDe?: string | null;
   vencimentoAte?: string | null;
+  pagamentoDe?: string | null;
+  pagamentoAte?: string | null;
   emitenteId?: string | null;
   soDuplicados?: boolean;
   /** `pendente` aparece na tela como Registrando. */
@@ -945,6 +947,8 @@ export type ContasReceberPagina = {
   total: number;
   page: number;
   pageSize: number;
+  /** Soma dos títulos pagos que entram no filtro, em todas as páginas. */
+  totalRecebido: number;
 };
 
 function statusesDaSituacao(situacao: ContasReceberConsulta['situacao']): string[] | null {
@@ -961,7 +965,10 @@ function textoBusca(valor: string | undefined): string {
 }
 
 type BoletoConsulta = BoletoParcelaVendaRow & {
-  mensalidades?: { status?: string; cliente_id?: string } | { status?: string; cliente_id?: string }[] | null;
+  mensalidades?:
+    | { status?: string; cliente_id?: string; data_pagamento?: string | null }
+    | { status?: string; cliente_id?: string; data_pagamento?: string | null }[]
+    | null;
   parcelas_venda?: { status?: string } | { status?: string }[] | null;
 };
 
@@ -975,6 +982,7 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
 
   const stParcela = new Map<string, string>();
   const stMens = new Map<string, string>();
+  const dataPagamentoMens = new Map<string, string>();
   const clientePorMensalidade = new Map<string, string>();
   const clientePorVenda = new Map<string, string>();
 
@@ -987,6 +995,9 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
     const parc = umRelacionado(b.parcelas_venda);
     if (b.mensalidade_id && men?.status) stMens.set(b.mensalidade_id, men.status);
     else if (b.mensalidade_id) mensalidadeSemStatus.push(b.mensalidade_id);
+    if (b.mensalidade_id && men?.data_pagamento) {
+      dataPagamentoMens.set(b.mensalidade_id, String(men.data_pagamento).slice(0, 10));
+    }
     if (men?.cliente_id && b.mensalidade_id) clientePorMensalidade.set(b.mensalidade_id, men.cliente_id);
     if (b.parcela_id && parc?.status) stParcela.set(b.parcela_id, parc.status);
     else if (b.parcela_id) parcelaSemStatus.push(b.parcela_id);
@@ -1003,14 +1014,15 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
   const mens = await selectInChunks(mensalidadeSemStatus, async (slice) => {
     const { data, error } = await supabase
       .from('mensalidades')
-      .select('id, status, cliente_id')
+      .select('id, status, cliente_id, data_pagamento')
       .in('id', slice);
     if (error) throw new Error(error.message);
-    return (data ?? []) as { id: string; status: string; cliente_id: string }[];
+    return (data ?? []) as { id: string; status: string; cliente_id: string; data_pagamento: string | null }[];
   });
   for (const m of mens) {
     stMens.set(m.id, m.status);
     clientePorMensalidade.set(m.id, m.cliente_id);
+    if (m.data_pagamento) dataPagamentoMens.set(m.id, String(m.data_pagamento).slice(0, 10));
   }
 
   const vendas = await selectInChunks(vendaSemCliente, async (slice) => {
@@ -1037,12 +1049,12 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
   if (clienteIds.length) {
     const contatos = await selectInChunks(clienteIds, async (slice) => {
       const { data, error: e5 } = await supabase
-        .from('contatos_cliente')
+      .from('contatos_cliente')
         .select('cliente_id, valor_contato, nome_contato, tipo_contato')
         .in('cliente_id', slice)
         .in('tipo_contato', ['whatsapp', 'email'])
-        .order('created_at', { ascending: true });
-      if (e5) throw new Error(e5.message);
+      .order('created_at', { ascending: true });
+    if (e5) throw new Error(e5.message);
       return (data ?? []) as {
         cliente_id: string;
         valor_contato: string;
@@ -1123,6 +1135,9 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
       whatsapp_contato_nome: wa?.nome ?? null,
       email: em?.valor ?? null,
       email_contato_nome: em?.nome ?? null,
+      data_pagamento:
+        (boleto.data_liquidacao_sicoob ? String(boleto.data_liquidacao_sicoob).slice(0, 10) : null) ||
+        (boleto.mensalidade_id ? dataPagamentoMens.get(boleto.mensalidade_id) ?? null : null),
     };
   });
 }
@@ -1141,6 +1156,8 @@ function aplicarFiltrosBoleto(
   if (opts.statusRegistro) query = query.eq('status_registro', opts.statusRegistro);
   if (opts.vencimentoDe) query = query.gte('data_vencimento', opts.vencimentoDe);
   if (opts.vencimentoAte) query = query.lte('data_vencimento', opts.vencimentoAte);
+  if (opts.pagamentoDe) query = query.gte('data_liquidacao_sicoob', opts.pagamentoDe);
+  if (opts.pagamentoAte) query = query.lte('data_liquidacao_sicoob', opts.pagamentoAte);
   const busca = textoBusca(opts.search);
   if (busca) {
     query = query.or(`pagador_nome.ilike.%${busca}%,numero_documento.ilike.%${busca}%`);
@@ -1162,8 +1179,8 @@ async function consultarLado(
         ? '*, parcelas_venda!inner(status)'
         : '*, parcelas_venda(status)'
       : statuses
-        ? '*, mensalidades!inner(status, cliente_id)'
-        : '*, mensalidades(status, cliente_id)';
+        ? '*, mensalidades!inner(status, cliente_id, data_pagamento)'
+        : '*, mensalidades(status, cliente_id, data_pagamento)';
   let q = aplicarFiltrosBoleto(
     supabase.from('boletos_parcela_venda').select(select, { count: 'exact' }),
     userId,
@@ -1180,6 +1197,29 @@ async function consultarLado(
     .range(from, to);
   if (error) throw new Error(error.message);
   return { rows: (data ?? []) as BoletoConsulta[], total: count ?? 0 };
+}
+
+async function somarRecebido(userId: string, opts: ContasReceberConsulta): Promise<number> {
+  const optsPago: ContasReceberConsulta = {
+    ...opts,
+    situacao: 'pago',
+    soDuplicados: false,
+    statusRegistro: undefined,
+  };
+  const lados: Array<'mensalidade' | 'venda'> =
+    optsPago.origem === 'venda' || optsPago.origem === 'mensalidade'
+      ? [optsPago.origem]
+      : ['mensalidade', 'venda'];
+  let soma = 0;
+  const tamanho = 500;
+  for (const lado of lados) {
+    for (let from = 0; ; from += tamanho) {
+      const { rows, total } = await consultarLado(userId, lado, optsPago, from, from + tamanho - 1);
+      for (const row of rows) soma += Number(row.valor_documento) || 0;
+      if (from + rows.length >= total || rows.length < tamanho) break;
+    }
+  }
+  return Math.round(soma * 100) / 100;
 }
 
 async function buscarDuplicadosPagina(
@@ -1214,18 +1254,18 @@ async function buscarDuplicadosPagina(
   const inicio = (page - 1) * PAGINA_CONTAS_RECEBER;
   const fatia = ids.slice(inicio, inicio + PAGINA_CONTAS_RECEBER);
   if (!fatia.length) {
-    return { rows: [], total: ids.length, page, pageSize: PAGINA_CONTAS_RECEBER };
+    return { rows: [], total: ids.length, page, pageSize: PAGINA_CONTAS_RECEBER, totalRecebido: 0 };
   }
   const { data, error } = await supabase
     .from('boletos_parcela_venda')
-    .select('*, mensalidades(status, cliente_id), parcelas_venda(status)')
+    .select('*, mensalidades(status, cliente_id, data_pagamento), parcelas_venda(status)')
     .in('id', fatia);
   if (error) throw new Error(error.message);
   const porId = new Map(((data ?? []) as BoletoConsulta[]).map((b) => [b.id, b]));
   const ordenados = fatia.map((id) => porId.get(id)).filter((b): b is BoletoConsulta => Boolean(b));
   const rows = await hidratarContasReceber(userId, ordenados);
   rows.sort((a, b) => String(a.nome_cliente).localeCompare(String(b.nome_cliente), 'pt-BR', { sensitivity: 'base' }));
-  return { rows, total: ids.length, page, pageSize: PAGINA_CONTAS_RECEBER };
+  return { rows, total: ids.length, page, pageSize: PAGINA_CONTAS_RECEBER, totalRecebido: 0 };
 }
 
 export async function fetchContasReceberPagina(
@@ -1234,7 +1274,11 @@ export async function fetchContasReceberPagina(
 ): Promise<ContasReceberPagina> {
   const page = Math.max(1, opts.page ?? 1);
   const pageSize = PAGINA_CONTAS_RECEBER;
-  if (opts.soDuplicados) return buscarDuplicadosPagina(userId, opts, page);
+  const totalRecebido = await somarRecebido(userId, opts);
+  if (opts.soDuplicados) {
+    const dup = await buscarDuplicadosPagina(userId, opts, page);
+    return { ...dup, totalRecebido };
+  }
 
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
@@ -1243,14 +1287,14 @@ export async function fetchContasReceberPagina(
 
   if (origem !== 'todos') {
     const { rows, total } = await consultarLado(userId, origem, opts, from, to);
-    return { rows: await hidratarContasReceber(userId, rows), total, page, pageSize };
+    return { rows: await hidratarContasReceber(userId, rows), total, page, pageSize, totalRecebido };
   }
 
   if (situacao === 'todos') {
     const { data, error, count } = await aplicarFiltrosBoleto(
       supabase
         .from('boletos_parcela_venda')
-        .select('*, mensalidades(status, cliente_id), parcelas_venda(status)', { count: 'exact' }),
+        .select('*, mensalidades(status, cliente_id, data_pagamento), parcelas_venda(status)', { count: 'exact' }),
       userId,
       opts,
     )
@@ -1264,6 +1308,7 @@ export async function fetchContasReceberPagina(
       total: count ?? 0,
       page,
       pageSize,
+      totalRecebido,
     };
   }
 
@@ -1289,7 +1334,7 @@ export async function fetchContasReceberPagina(
     const parteV = await consultarLado(userId, 'venda', opts, vFrom, vFrom + pageSize - 1);
     brutos = parteV.rows;
   }
-  return { rows: await hidratarContasReceber(userId, brutos), total, page, pageSize };
+  return { rows: await hidratarContasReceber(userId, brutos), total, page, pageSize, totalRecebido };
 }
 
 export async function fetchContasReceberLista(userId: string): Promise<ContaReceberListRow[]> {
