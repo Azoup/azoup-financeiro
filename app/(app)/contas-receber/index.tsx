@@ -401,7 +401,7 @@ export default function ContasReceberScreen() {
     if (!user?.id) return;
     Alert.alert(
       'NFS-e emitida',
-      'Deseja compartilhar a DANFSe por e-mail com o cliente?',
+      'Deseja enviar a NFS-e por e-mail ao cliente?',
       [
         {
           text: 'Depois',
@@ -409,7 +409,7 @@ export default function ContasReceberScreen() {
           onPress: () => router.push('/(app)/notas-fiscais'),
         },
         {
-          text: 'Compartilhar',
+          text: 'Enviar',
           onPress: () => {
             void (async () => {
               try {

@@ -2,6 +2,7 @@ const { getAdmin, getUserFromBearer } = require('./_lib/supabaseAdmin');
 const { salvarArtefatosNfseAbrasf, formatEndereco } = require('./_lib/nfseDanfseArtifacts');
 const { itemListaServico } = require('./_lib/nfseAbrasfAmericana');
 const { resolveEmitenteContexto, onlyDigits } = require('./_lib/nfseEmitenteResolve');
+const { reenviarEmailDanfe } = require('./_lib/enviarEmailDanfe');
 
 function joinEndereco(row) {
   if (!row) return '—';
@@ -26,6 +27,12 @@ module.exports = async function handler(req, res) {
     }
 
     const admin = getAdmin();
+    const action = String(req.body?.action || '').trim();
+    if (action === 'enviar-email') {
+      const email = await reenviarEmailDanfe(admin, user.id, notaFiscalId);
+      return res.status(200).json({ success: true, email });
+    }
+
     const { data: nota, error } = await admin
       .from('nota_fiscal')
       .select('*')

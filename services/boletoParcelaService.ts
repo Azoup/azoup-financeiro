@@ -495,12 +495,15 @@ export async function gerarBoletosParaMensalidades(
     emitenteId?: string | null;
     banco?: 'sicoob' | 'c6' | null;
     usarEmitenteDoCliente?: boolean;
+    /** false = só o carnê em A receber, sem chamar Sicoob/C6. */
+    registrarNoBanco?: boolean;
   },
 ): Promise<{ avisoSicoob?: string; avisoBoleto?: string; avisoEmail?: string; falhasBoleto?: { mensalidadeId: string | null; erro: string }[] }> {
   if (!mensalidades.length) return {};
 
   const usarDoCliente = opts?.usarEmitenteDoCliente !== false;
   const forcarEmitente = !usarDoCliente && Boolean(opts?.emitenteId);
+  const registrarNoBanco = opts?.registrarNoBanco !== false;
 
   // Uma mensalidade = no máximo um carnê (índice único no banco; evita reprocessar).
   const vistos = new Set<string>();
@@ -611,8 +614,8 @@ export async function gerarBoletosParaMensalidades(
       numero_documento: numeroDocumentoMensalidade(m.id, comp),
       instrucoes: montarInstrucoesMensalidade(perfil, comp).slice(0, 4000),
       emitente_id: emitente?.id ?? null,
-      tipo_emissao: banco,
-      status_registro: 'pendente',
+      tipo_emissao: registrarNoBanco ? banco : 'informativo',
+      status_registro: registrarNoBanco ? 'pendente' : 'informativo',
     });
     meta.push({ banco, emitenteId: emitente?.id ?? null });
   }
@@ -631,7 +634,7 @@ export async function gerarBoletosParaMensalidades(
   }
 
   const insertedRows = (inserted ?? []) as { id: string; mensalidade_id: string | null }[];
-  if (!insertedRows.length) return { falhasBoleto: falhasDia };
+  if (!insertedRows.length || !registrarNoBanco) return { falhasBoleto: falhasDia };
 
   const metaPorMensalidade = new Map<string, { banco: 'sicoob' | 'c6'; emitenteId: string | null }>();
   mensalidadesLivres.forEach((m, i) => {

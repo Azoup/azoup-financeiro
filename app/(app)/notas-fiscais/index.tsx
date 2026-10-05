@@ -366,7 +366,7 @@ export default function NotasFiscaisIndexScreen() {
     itens.push(
       {
         key: 'email',
-        label: 'Compartilhar por e-mail',
+        label: shareBusyId === item.id ? 'Enviando…' : 'Enviar por e-mail',
         icon: 'mail-outline',
         disabled: !podeDanfe,
         busy: shareBusyId === item.id,

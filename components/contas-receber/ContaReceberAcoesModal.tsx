@@ -225,10 +225,10 @@ export function ContaReceberAcoesModal({
             {temNota && onEmailNota ? (
               <AcaoRow
                 icon="mail-open-outline"
-                label={emailNotaBusy ? 'Abrindo e-mail…' : 'Compartilhar NFS-e por e-mail'}
-                sub={temEmail ? item.email! : 'Sem e-mail no cadastro — preencha no envio'}
+                label={emailNotaBusy ? 'Enviando…' : 'Enviar NFS-e por e-mail'}
+                sub={temEmail ? item.email! : 'Sem e-mail no cadastro'}
                 onPress={onEmailNota}
-                disabled={emailNotaBusy}
+                disabled={emailNotaBusy || !temEmail}
                 busy={emailNotaBusy}
                 accent={temEmail ? colors.orange : undefined}
               />

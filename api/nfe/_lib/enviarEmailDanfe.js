@@ -52,8 +52,7 @@ async function tentarEnviarEmailDanfe(admin, { nota, cliente, danfeStoragePath, 
     const to = await fetchEmailCliente(admin, clienteId);
     if (!to) return { skipped: true, reason: 'sem_email_cadastro' };
 
-    const nome =
-      safeTrim(cliente?.nome_fantasia) || safeTrim(cliente?.nome) || 'cliente';
+    const nome = safeTrim(cliente?.nome) || safeTrim(cliente?.nome_fantasia) || 'cliente';
     const serie = safeTrim(nota?.serie) || '1';
     const numero = safeTrim(nota?.numero) || 's_numero';
     const linhas = [
@@ -66,11 +65,12 @@ async function tentarEnviarEmailDanfe(admin, { nota, cliente, danfeStoragePath, 
       nota?.codigo_verificacao
         ? `• Código de verificação: ${safeTrim(nota.codigo_verificacao)}`
         : null,
-      danfeUrl ? `• DANFE: ${safeTrim(danfeUrl)}` : null,
       '',
       'A DANFE segue em anexo.',
       '',
       'Qualquer dúvida, estamos à disposição.',
+      'WhatsApp: (19) 98111-1724',
+      '',
       'Atenciosamente.',
     ].filter((l) => l != null);
 
@@ -105,4 +105,34 @@ async function tentarEnviarEmailDanfe(admin, { nota, cliente, danfeStoragePath, 
   }
 }
 
-module.exports = { tentarEnviarEmailDanfe };
+/** Reenvio manual, o mesmo caminho do boleto: Resend, sem abrir o Outlook. */
+async function reenviarEmailDanfe(admin, userId, notaFiscalId) {
+  const { data: nota, error } = await admin
+    .from('nota_fiscal')
+    .select('*')
+    .eq('id', notaFiscalId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!nota) throw new Error('Nota não encontrada.');
+  if (nota.status !== 'autorizada') {
+    throw new Error('Só é possível enviar por e-mail uma nota autorizada.');
+  }
+
+  const { data: cliente } = await admin
+    .from('clientes')
+    .select('id, nome, nome_fantasia')
+    .eq('id', nota.cliente_id)
+    .maybeSingle();
+
+  const xml = typeof nota.xml_autorizado === 'string' ? nota.xml_autorizado : '';
+  return tentarEnviarEmailDanfe(admin, {
+    nota,
+    cliente,
+    danfeStoragePath: nota.danfe_storage_path,
+    xml,
+    danfeUrl: nota.danfe_url,
+  });
+}
+
+module.exports = { tentarEnviarEmailDanfe, reenviarEmailDanfe };

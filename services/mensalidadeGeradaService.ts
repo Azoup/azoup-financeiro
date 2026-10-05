@@ -318,6 +318,8 @@ export async function criarMensalidadesGeradasLote(params: {
   competencia?: string | null;
   /** Gera NF-e (SEFAZ) para clientes com emite_nf após criar mensalidades. */
   gerarNotaFiscal?: boolean;
+  /** false = só a mensalidade em A receber, sem boleto no banco e sem NFS-e. */
+  gerarBoleto?: boolean;
   /** CNPJ/emitente cobrador (boleto Sicoob ou C6) e NFS-e quando solicitada. */
   emitenteId?: string | null;
   /** Banco do boleto escolhido na geração (sobrescreve o padrão do emitente). */
@@ -710,7 +712,12 @@ export async function criarMensalidadesGeradasLote(params: {
           data_vencimento: m.data_vencimento,
           competencia: m.competencia,
         })),
-        { emitenteId: params.emitenteId, banco: params.banco, usarEmitenteDoCliente: params.usarEmitenteDoCliente },
+        {
+          emitenteId: params.emitenteId,
+          banco: params.banco,
+          usarEmitenteDoCliente: params.usarEmitenteDoCliente,
+          registrarNoBanco: params.gerarBoleto !== false,
+        },
       );
       avisoBoleto = boletoRes.avisoBoleto ?? boletoRes.avisoSicoob;
       avisoEmail = boletoRes.avisoEmail;
@@ -734,7 +741,7 @@ export async function criarMensalidadesGeradasLote(params: {
   }
 
   let nfResult;
-  if (params.gerarNotaFiscal && criadosRows.length) {
+  if (params.gerarNotaFiscal && params.gerarBoleto !== false && criadosRows.length) {
     try {
       nfResult = await gerarNotasFiscaisParaMensalidades(
         params.userId,

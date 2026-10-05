@@ -673,11 +673,18 @@ export async function applyReajusteMensalidadePercentual(
     const old = Number(row?.mensalidade);
     if (old == null || Number.isNaN(old) || old <= 0) continue;
     const novo = Math.round(old * factor * 100) / 100;
+    const hoje = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
     const { error: e1 } = await supabase
       .from('clientes')
       .update({
         valor_mensalidade_anterior: old,
         mensalidade: novo,
+        ultimo_reajuste: hoje,
       })
       .eq('user_id', userId)
       .eq('id', clienteId);
@@ -689,6 +696,51 @@ export async function applyReajusteMensalidadePercentual(
     throw new Error('Nenhum cliente desta lista de reajuste foi alterado.');
   }
   return { aplicados, ignoradosForaDoMes };
+}
+
+export type ClienteReajusteConsulta = {
+  id: string;
+  nome_cliente: string;
+  nome_empresa: string;
+  valor_atual: number;
+  valor_anterior: number;
+  data_reajuste: string | null;
+  aplicado_em: string | null;
+  emitente_nf_id: string | null;
+};
+
+/** Clientes cujo valor de mensalidade já foi reajustado. */
+export async function fetchClientesComReajuste(userId: string): Promise<ClienteReajusteConsulta[]> {
+  const { data, error } = await supabase
+    .from('clientes')
+    .select(
+      'id, nome, nome_fantasia, mensalidade, valor_mensalidade_anterior, data_reajuste, ultimo_reajuste, emitente_nf_id',
+    )
+    .eq('user_id', userId)
+    .not('valor_mensalidade_anterior', 'is', null)
+    .order('ultimo_reajuste', { ascending: false, nullsFirst: false });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as {
+    id: string;
+    nome: string | null;
+    nome_fantasia: string | null;
+    mensalidade: number | null;
+    valor_mensalidade_anterior: number | null;
+    data_reajuste: string | null;
+    ultimo_reajuste: string | null;
+    emitente_nf_id: string | null;
+  }[])
+    .filter((r) => r.valor_mensalidade_anterior != null)
+    .map((r) => ({
+      id: String(r.id),
+      nome_cliente: String(r.nome_fantasia || r.nome || 'Cliente').trim(),
+      nome_empresa: String(r.nome || '').trim(),
+      valor_atual: Number(r.mensalidade) || 0,
+      valor_anterior: Number(r.valor_mensalidade_anterior) || 0,
+      data_reajuste: r.data_reajuste ? String(r.data_reajuste).slice(0, 10) : null,
+      aplicado_em: r.ultimo_reajuste ? String(r.ultimo_reajuste).slice(0, 10) : null,
+      emitente_nf_id: r.emitente_nf_id,
+    }));
 }
 
 export { getClientePdfSignedUrl } from '@/services/clientePdfStorage';

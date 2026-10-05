@@ -478,6 +478,8 @@ export default function GerarMensalidadeScreen() {
       banco?: 'sicoob' | 'c6';
       discriminacao?: string;
       usarEmitenteDoCliente?: boolean;
+      /** true = mensalidade em A receber, sem registro no banco e sem NFS-e. */
+      somenteAReceber?: boolean;
     },
   ) => {
     if (!user?.id) return;
@@ -510,9 +512,11 @@ export default function GerarMensalidadeScreen() {
     const discriminacao = opts?.discriminacao;
     const banco = opts?.banco;
     const usarEmitenteDoCliente = opts?.usarEmitenteDoCliente !== false;
+    const somenteAReceber = opts?.somenteAReceber === true;
+    const emitirNota = gerarNotaFiscal && !somenteAReceber;
 
     const clientesSelecionados = clientesSelecionadosResolvidos(ids);
-    if (gerarNotaFiscal) {
+    if (emitirNota) {
       const semNf = clientesSelecionados.filter((r) => !r.emite_nf);
       if (semNf.length === clientesSelecionados.length) {
         Toast.show({
@@ -600,7 +604,8 @@ export default function GerarMensalidadeScreen() {
         valoresPorCliente: valoresTemporarios,
         dataVencimentoOverride: null,
         competencia: competencia.trim() || null,
-        gerarNotaFiscal,
+        gerarNotaFiscal: emitirNota,
+        gerarBoleto: !somenteAReceber,
         emitenteId: emitenteId || null,
         banco: banco || null,
         usarEmitenteDoCliente,
@@ -613,7 +618,7 @@ export default function GerarMensalidadeScreen() {
       if (duplicados > 0) {
         extras.push(`${duplicados} já tinham cobrança neste vencimento (não duplicado)`);
       }
-      if (gerarNotaFiscal && nf) {
+      if (emitirNota && nf) {
         extras.push(`${nf.emitidas} NFS-e autorizada(s)`);
         if (nf.emails_enviados > 0) {
           extras.push(
@@ -641,9 +646,11 @@ export default function GerarMensalidadeScreen() {
           visibilityTime: 8000,
         });
       }
-      await sincronizarCarnesMensalidadesFaltantes(user.id).catch(() => undefined);
+      if (!somenteAReceber) {
+        await sincronizarCarnesMensalidadesFaltantes(user.id).catch(() => undefined);
+      }
 
-      const nfFalhou = gerarNotaFiscal && nf && nf.emitidas === 0;
+      const nfFalhou = emitirNota && nf && nf.emitidas === 0;
       const nfDetalhe =
         nf?.erros?.[0] ??
         (nf && nf.ignoradas > 0
@@ -662,9 +669,11 @@ export default function GerarMensalidadeScreen() {
             ? (nf?.erros?.slice(0, 2).join(' · ') ||
                 nfDetalhe ||
                 'Nenhuma NFS-e foi autorizada. Verifique certificado e configurações.')
-            : gerarNotaFiscal
+            : emitirNota
               ? 'Veja as notas em Notas fiscais.'
-              : 'Confira em A receber.',
+              : somenteAReceber
+                ? 'Entrou em A receber, sem boleto e sem nota.'
+                : 'Confira em A receber.',
         visibilityTime: falhas.length || nfFalhou ? 12000 : 5000,
       });
       setEnviarModalOpen(false);
@@ -673,7 +682,7 @@ export default function GerarMensalidadeScreen() {
         requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: true }));
       } else {
         setFalhasTela([]);
-        router.replace(gerarNotaFiscal ? '/(app)/notas-fiscais' : '/(app)/contas-receber');
+        router.replace(emitirNota ? '/(app)/notas-fiscais' : '/(app)/contas-receber');
       }
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
@@ -698,10 +707,10 @@ export default function GerarMensalidadeScreen() {
     setProximaGeracaoStr(formatMesAnoBR(sug.year, sug.month));
   };
 
-  const onAbrirEnviar = () => {
+  const prontoParaGerar = () => {
     if (!targetIds.length) {
       Toast.show({ type: 'error', text1: 'Não há clientes na lista para gerar mensalidade.' });
-      return;
+      return false;
     }
     if (!parseMesAnoBR(proximaGeracaoStr)) {
       Toast.show({
@@ -709,8 +718,13 @@ export default function GerarMensalidadeScreen() {
         text1: 'Informe a próxima geração (MM/AAAA)',
         text2: 'Ex.: 07/2027 — quando o cliente volta a aparecer nesta tela.',
       });
-      return;
+      return false;
     }
+    return true;
+  };
+
+  const onAbrirEnviar = () => {
+    if (!prontoParaGerar()) return;
     setEnviarModalOpen(true);
   };
 
@@ -1224,8 +1238,20 @@ export default function GerarMensalidadeScreen() {
           Percentual preenchido será reaplicado antes de gerar.
         </Text>
         <PrimaryButton title="Enviar" size="compact" loading={busy} onPress={onAbrirEnviar} style={styles.enviar} />
+        <PrimaryButton
+          title="Gerar só a receber"
+          variant="secondary"
+          size="compact"
+          loading={busy}
+          disabled={busy}
+          onPress={() => {
+            if (!prontoParaGerar()) return;
+            void executarEnvio(false, { somenteAReceber: true });
+          }}
+          style={styles.enviar}
+        />
         <Text style={styles.footerHint}>
-          Escolha o CNPJ (Sicoob ou C6) e gere mensalidade + boleto, com ou sem NFS-e.
+          Enviar gera mensalidade + boleto, com ou sem NFS-e. Gerar só a receber grava a cobrança em A receber, sem boleto e sem nota.
         </Text>
       </ScrollView>
       <EnviarMensalidadeModal

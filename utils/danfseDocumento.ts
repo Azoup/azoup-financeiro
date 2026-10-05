@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { nfeApiBaseUrl } from '@/services/nfeConfigService';
 import type { NotaFiscalListRow } from '@/types/notaFiscal';
+import type { EmitirBoletoEmailResult } from '@/types/sicoob';
 import { formatBRL } from '@/utils/currency';
 import { buildDanfseHtmlFromNota } from '@/utils/danfseHtml';
 import { fetchEmailCliente } from '@/services/clienteContatoService';
@@ -117,32 +118,102 @@ export async function compartilharDanfsePorEmail(item: NotaFiscalListRow): Promi
   }
 }
 
-export async function compartilharDanfseComFeedback(item: NotaFiscalListRow): Promise<void> {
-  const { email, resultado } = await compartilharDanfsePorEmail(item);
-  const Toast = (await import('react-native-toast-message')).default;
-  if (resultado === 'eml') {
-    Toast.show({
-      type: 'success',
-      text1: 'E-mail com DANFSe em anexo baixado.',
-      text2: email
-        ? `Abra o arquivo .eml no Outlook (para ${email}) e clique em Enviar.`
-        : 'Abra o arquivo .eml no Outlook, confira o destinatário e envie.',
-    });
-    return;
+/** Envia a DANFE direto via Resend, o mesmo caminho do boleto. Não abre Outlook/.eml. */
+export async function enviarDanfePorEmailDireto(notaFiscalId: string): Promise<EmitirBoletoEmailResult> {
+  const id = safeTrim(notaFiscalId);
+  if (!id) throw new Error('Nota não identificada.');
+
+  const { data: session } = await supabase.auth.getSession();
+  const token = session.session?.access_token;
+  if (!token) throw new Error('Sessão expirada. Faça login novamente.');
+
+  const base = nfeApiBaseUrl();
+  if (!base) {
+    throw new Error('URL da API não configurada (use a mesma origem web ou EXPO_PUBLIC_NFE_API_URL).');
   }
-  if (!email) {
-    Toast.show({
+
+  const res = await fetch(`${base}/api/nfe/artefatos`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ action: 'enviar-email', notaFiscalId: id }),
+  });
+
+  const body = (await res.json().catch(() => ({}))) as {
+    success?: boolean;
+    message?: string;
+    email?: EmitirBoletoEmailResult;
+  };
+
+  if (!res.ok || body.success === false) {
+    throw new Error(body.message ?? `Falha ao enviar e-mail (${res.status}).`);
+  }
+
+  return body.email ?? { skipped: true, reason: 'sem_resposta' };
+}
+
+function mensagemEmailNota(email: EmitirBoletoEmailResult): {
+  type: 'success' | 'info' | 'error';
+  text1: string;
+  text2?: string;
+} {
+  if (email.enviado && email.to) {
+    return {
+      type: 'success',
+      text1: 'NFS-e enviada por e-mail.',
+      text2: `Destinatário: ${email.to}`,
+    };
+  }
+  if (email.skipped) {
+    const reason = email.reason ?? '';
+    if (reason === 'sem_email_cadastro') {
+      return {
+        type: 'info',
+        text1: 'Cliente sem e-mail no cadastro.',
+        text2: 'Cadastre um contato tipo e-mail no cliente e tente de novo.',
+      };
+    }
+    if (reason === 'sem_pdf') {
+      return {
+        type: 'info',
+        text1: 'DANFE ainda indisponível.',
+        text2: 'Abra a nota para gerar a DANFE e envie de novo.',
+      };
+    }
+    if (reason === 'email_nao_configurado') {
+      return {
+        type: 'error',
+        text1: 'Envio automático não configurado.',
+        text2: 'Configure RESEND_API_KEY na Vercel e verifique o domínio no Resend.',
+      };
+    }
+    return {
       type: 'info',
-      text1: 'E-mail do cliente não cadastrado.',
-      text2: 'Preencha o destinatário no app de e-mail ou cadastre em Contatos do cliente.',
-    });
-  } else if (resultado === 'email') {
-    Toast.show({
-      type: 'success',
-      text1: 'E-mail aberto.',
-      text2: `Destinatário sugerido: ${email}`,
-    });
-  } else {
-    Toast.show({ type: 'success', text1: 'Compartilhamento iniciado com anexo.' });
+      text1: 'E-mail não enviado.',
+      text2: reason || 'Não foi possível enviar agora.',
+    };
   }
+  return {
+    type: 'error',
+    text1: 'E-mail não enviado.',
+    text2: email.error || 'Falha no Resend.',
+  };
+}
+
+export async function compartilharDanfseComFeedback(item: NotaFiscalListRow): Promise<void> {
+  const Toast = (await import('react-native-toast-message')).default;
+  if (item.status !== 'autorizada') {
+    throw new Error('Só é possível enviar por e-mail uma nota autorizada.');
+  }
+  await fetchDanfseHtml(item);
+  const result = await enviarDanfePorEmailDireto(item.id);
+  const msg = mensagemEmailNota(result);
+  Toast.show({
+    type: msg.type,
+    text1: msg.text1,
+    text2: msg.text2,
+    visibilityTime: 8000,
+  });
 }

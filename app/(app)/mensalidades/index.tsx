@@ -26,7 +26,7 @@ import {
   podeRegistrarPagamentoMensalidadeGerada,
   registrarPagamentoMensalidadeGerada,
 } from '@/services/mensalidadeGeradaService';
-import { fetchClientesParaGerarMensalidades } from '@/services/clientsService';
+import { fetchClientesComReajuste, fetchClientesParaGerarMensalidades, type ClienteReajusteConsulta } from '@/services/clientsService';
 import {
   fetchNotaFiscalById,
   fetchNotaFiscalPorMensalidade,
@@ -42,7 +42,7 @@ import type {
 } from '@/types/mensalidadeGerada';
 import type { ClienteListItem } from '@/types/models';
 import { formatBRL } from '@/utils/currency';
-import { formatDateTimeBRFromISO } from '@/utils/date';
+import { formatBRDate, formatDateTimeBRFromISO, parseISODate } from '@/utils/date';
 import { reaisParaCentavos } from '@/utils/vendasParcelas';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -161,6 +161,10 @@ export default function HistoricoMensalidadesGeradasScreen() {
   const [statusFilter, setStatusFilter] = useState<StatusFiltro>('todos');
   const [nfFiltro, setNfFiltro] = useState<NfFiltro>('todas');
   const [soNaoGerados, setSoNaoGerados] = useState(true);
+  const [verReajustes, setVerReajustes] = useState(false);
+  const [clientesReajuste, setClientesReajuste] = useState<ClienteReajusteConsulta[]>([]);
+  const [loadingReajustes, setLoadingReajustes] = useState(false);
+  const [recargaReajustes, setRecargaReajustes] = useState(0);
   const [clientesPendentes, setClientesPendentes] = useState<ClienteListItem[]>([]);
   const [loadingPendentes, setLoadingPendentes] = useState(false);
   const [recargaPendentes, setRecargaPendentes] = useState(0);
@@ -276,6 +280,37 @@ export default function HistoricoMensalidadesGeradasScreen() {
     };
   }, [soNaoGerados, user?.id, debouncedSearch, empresaId, recargaPendentes]);
 
+  useEffect(() => {
+    if (!verReajustes || !user?.id) return;
+    let alive = true;
+    setLoadingReajustes(true);
+    (async () => {
+      try {
+        const list = await fetchClientesComReajuste(user.id);
+        const term = debouncedSearch.trim().toLowerCase();
+        const filtrada = list.filter((c) => {
+          if (empresaId !== 'todos' && c.emitente_nf_id !== empresaId) return false;
+          if (!term) return true;
+          return (
+            c.nome_cliente.toLowerCase().includes(term) ||
+            c.nome_empresa.toLowerCase().includes(term)
+          );
+        });
+        if (alive) setClientesReajuste(filtrada);
+      } catch (e) {
+        if (alive) {
+          setClientesReajuste([]);
+          showAppError((e as Error).message);
+        }
+      } finally {
+        if (alive) setLoadingReajustes(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [verReajustes, user?.id, debouncedSearch, empresaId, recargaReajustes]);
+
   const filteredRows = useMemo(() => {
     let list = allRows.filter((m) => {
       const boletoEmitente = boletosPorMensalidade[m.id]?.emitente_id;
@@ -319,7 +354,11 @@ export default function HistoricoMensalidadesGeradasScreen() {
 
   const historicoItems = useMemo(() => groupHistoricoRows(filteredRows), [filteredRows]);
 
-  const totalLista = soNaoGerados ? clientesPendentes.length : filteredRows.length;
+  const totalLista = verReajustes
+    ? clientesReajuste.length
+    : soNaoGerados
+      ? clientesPendentes.length
+      : filteredRows.length;
   const totalPaginas = Math.max(1, Math.ceil(totalLista / MENSALIDADES_POR_PAGINA));
   const itemsPagina = useMemo(() => {
     const inicio = (pagina - 1) * MENSALIDADES_POR_PAGINA;
@@ -329,10 +368,14 @@ export default function HistoricoMensalidadesGeradasScreen() {
     const inicio = (pagina - 1) * MENSALIDADES_POR_PAGINA;
     return clientesPendentes.slice(inicio, inicio + MENSALIDADES_POR_PAGINA);
   }, [clientesPendentes, pagina]);
+  const reajustesPagina = useMemo(() => {
+    const inicio = (pagina - 1) * MENSALIDADES_POR_PAGINA;
+    return clientesReajuste.slice(inicio, inicio + MENSALIDADES_POR_PAGINA);
+  }, [clientesReajuste, pagina]);
 
   useEffect(() => {
     setPagina(1);
-  }, [clienteFiltro, debouncedSearch, statusFilter, nfFiltro, soNaoGerados]);
+  }, [clienteFiltro, debouncedSearch, statusFilter, nfFiltro, soNaoGerados, verReajustes]);
 
   useEffect(() => {
     setPagina((atual) => Math.min(atual, totalPaginas));
@@ -341,7 +384,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
   useEffect(() => {
     let alive = true;
     const ids = itemsPagina.map((m) => m.id).filter(Boolean);
-    if (!user?.id || soNaoGerados || !ids.length) {
+    if (!user?.id || soNaoGerados || verReajustes || !ids.length) {
       setPagamentos({});
       setBoletosPorMensalidade({});
       return;
@@ -366,7 +409,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
     return () => {
       alive = false;
     };
-  }, [itemsPagina, user?.id, soNaoGerados]);
+  }, [itemsPagina, user?.id, soNaoGerados, verReajustes]);
 
   useEffect(() => {
     let alive = true;
@@ -530,6 +573,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
     try {
       await load();
       setRecargaPendentes((n) => n + 1);
+      setRecargaReajustes((n) => n + 1);
     } catch (e) {
       showAppError((e as Error).message);
     } finally {
@@ -571,7 +615,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
         if (res.notaId && user?.id) {
           Alert.alert(
             'NFS-e emitida',
-            'Deseja compartilhar a DANFSe por e-mail com o cliente?',
+            'Deseja enviar a NFS-e por e-mail ao cliente?',
             [
               {
                 text: 'Depois',
@@ -579,7 +623,7 @@ export default function HistoricoMensalidadesGeradasScreen() {
                 onPress: () => router.push('/(app)/notas-fiscais'),
               },
               {
-                text: 'Compartilhar',
+                text: 'Enviar',
                 onPress: () => {
                   void (async () => {
                     try {
@@ -1016,25 +1060,44 @@ export default function HistoricoMensalidadesGeradasScreen() {
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
           <Pressable
-            onPress={() => setSoNaoGerados(true)}
-            style={[styles.chip, soNaoGerados && styles.chipActive]}
+            onPress={() => {
+              setVerReajustes(false);
+              setSoNaoGerados(true);
+            }}
+            style={[styles.chip, soNaoGerados && !verReajustes && styles.chipActive]}
           >
-            <Text style={[styles.chipTxt, soNaoGerados && styles.chipTxtActive]}>
+            <Text style={[styles.chipTxt, soNaoGerados && !verReajustes && styles.chipTxtActive]}>
               Não gerados neste mês
             </Text>
           </Pressable>
           <Pressable
-            onPress={() => setSoNaoGerados(false)}
-            style={[styles.chip, !soNaoGerados && styles.chipActive]}
+            onPress={() => {
+              setVerReajustes(false);
+              setSoNaoGerados(false);
+            }}
+            style={[styles.chip, !soNaoGerados && !verReajustes && styles.chipActive]}
           >
-            <Text style={[styles.chipTxt, !soNaoGerados && styles.chipTxtActive]}>Histórico</Text>
+            <Text style={[styles.chipTxt, !soNaoGerados && !verReajustes && styles.chipTxtActive]}>
+              Histórico
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setVerReajustes(true)}
+            style={[styles.chip, verReajustes && styles.chipActive]}
+          >
+            <Text style={[styles.chipTxt, verReajustes && styles.chipTxtActive]}>Reajustes</Text>
           </Pressable>
         </ScrollView>
-        {soNaoGerados ? (
+        {verReajustes ? (
+          <Text style={styles.nfHint}>
+            Clientes que já tiveram a mensalidade reajustada. A data é o dia em que o reajuste foi aplicado.
+          </Text>
+        ) : soNaoGerados ? (
           <Text style={styles.nfHint}>
             Clientes sem mensalidade gerada neste mês. Quem já foi gerado, como ontem, fica de fora.
           </Text>
         ) : null}
+        {verReajustes ? null : (
         <PrimaryButton
           title={gerandoFaltantes ? 'Gerando boletos que faltaram…' : 'Gerar boletos que faltaram'}
           onPress={() => void gerarBoletosQueFaltaram()}
@@ -1042,8 +1105,9 @@ export default function HistoricoMensalidadesGeradasScreen() {
           loading={gerandoFaltantes}
           style={styles.btnGerar}
         />
+        )}
 
-        {soNaoGerados ? null : (
+        {soNaoGerados || verReajustes ? null : (
           <>
         <View style={styles.filterRow}>
           <Text style={styles.filterLabel}>Situação</Text>
@@ -1129,9 +1193,11 @@ export default function HistoricoMensalidadesGeradasScreen() {
         )}
 
         <Text style={styles.resultCount}>
-          {loading || (soNaoGerados && loadingPendentes)
+          {loading || (soNaoGerados && loadingPendentes) || (verReajustes && loadingReajustes)
             ? 'Carregando…'
-            : soNaoGerados
+            : verReajustes
+              ? `${clientesReajuste.length} cliente(s) com reajuste`
+              : soNaoGerados
               ? `${clientesPendentes.length} cliente(s) sem mensalidade neste mês`
               : `${filteredRows.length} mensalidade(s)`}
         </Text>
@@ -1139,9 +1205,13 @@ export default function HistoricoMensalidadesGeradasScreen() {
     </>
   );
 
-  const listaVazia = soNaoGerados ? clientesPendentes.length === 0 : filteredRows.length === 0;
+  const listaVazia = verReajustes
+    ? clientesReajuste.length === 0
+    : soNaoGerados
+      ? clientesPendentes.length === 0
+      : filteredRows.length === 0;
   const listFooter =
-    !(loading || (soNaoGerados && loadingPendentes)) && !listaVazia ? (
+    !(loading || (soNaoGerados && loadingPendentes) || (verReajustes && loadingReajustes)) && !listaVazia ? (
       <View style={styles.paginacao}>
         <Pressable
           style={[styles.paginaBtn, pagina === 1 && styles.paginaBtnDisabled]}
@@ -1322,6 +1392,37 @@ export default function HistoricoMensalidadesGeradasScreen() {
     return itens;
   };
 
+  const renderClienteReajuste = ({ item }: { item: ClienteReajusteConsulta }) => {
+    const aplicado = item.aplicado_em
+      ? formatBRDate(parseISODate(item.aplicado_em)) || item.aplicado_em
+      : null;
+    const previsto = item.data_reajuste
+      ? formatBRDate(parseISODate(item.data_reajuste)) || item.data_reajuste
+      : null;
+    return (
+      <Pressable
+        style={styles.linha}
+        onPress={() => router.push(`/(app)/clients/${encodeURIComponent(item.id)}`)}
+      >
+        <View style={styles.linhaCli}>
+          <Text style={styles.cli} numberOfLines={1}>
+            {item.nome_cliente}
+          </Text>
+          <Text style={styles.metaTxt} numberOfLines={1}>
+            {item.nome_empresa && item.nome_empresa !== item.nome_cliente ? item.nome_empresa : 'Mensalidade reajustada'}
+          </Text>
+          <Text style={styles.metaTxt}>
+            {aplicado ? `Aplicado em ${aplicado}` : 'Data da aplicação não registrada'}
+            {previsto ? ` · Data de reajuste ${previsto}` : ''}
+          </Text>
+        </View>
+        <View>
+          <Text style={styles.metaTxt}>Antes {formatBRL(item.valor_anterior)}</Text>
+          <Text style={styles.cli}>{formatBRL(item.valor_atual)}</Text>
+        </View>
+      </Pressable>
+    );
+  };
   const renderClientePendente = ({ item }: { item: ClienteListItem }) => (
     <Pressable
       style={styles.linha}
@@ -1345,10 +1446,12 @@ export default function HistoricoMensalidadesGeradasScreen() {
     <View style={styles.root}>
       <FlatList
         ref={listaRef}
-        data={soNaoGerados ? clientesPagina : itemsPagina}
+        data={verReajustes ? reajustesPagina : soNaoGerados ? clientesPagina : itemsPagina}
         keyExtractor={(it) => it.id}
         renderItem={(info) =>
-          soNaoGerados
+          verReajustes
+            ? renderClienteReajuste(info as { item: ClienteReajusteConsulta })
+            : soNaoGerados
             ? renderClientePendente(info as { item: ClienteListItem })
             : renderLinha(info as { item: MensalidadeGerada; index: number })
         }
@@ -1359,11 +1462,13 @@ export default function HistoricoMensalidadesGeradasScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.orange} />
         }
         ListEmptyComponent={
-          loading || (soNaoGerados && loadingPendentes) ? (
+          loading || (soNaoGerados && loadingPendentes) || (verReajustes && loadingReajustes) ? (
             <ActivityIndicator style={{ marginVertical: spacing.lg }} color={colors.orange} />
           ) : (
             <Text style={styles.empty}>
-              {soNaoGerados
+              {verReajustes
+                ? 'Nenhum cliente com reajuste aplicado ainda.'
+                : soNaoGerados
                 ? 'Todos os clientes já têm mensalidade neste mês.'
                 : allRows.length === 0
                   ? 'Nenhuma mensalidade ainda. Use "Gerar mensalidade" para registrar a primeira geração.'
