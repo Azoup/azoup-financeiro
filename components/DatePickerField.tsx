@@ -65,11 +65,11 @@ export function DatePickerField({ label, value, onChange, minimumDate, compact }
     const min = minimumDate ? toISODate(minimumDate) : undefined;
     const hiddenInputStyle: React.CSSProperties = {
       position: 'absolute',
-      width: 1,
-      height: 1,
+      left: 0,
+      top: 0,
+      width: '100%',
+      height: '100%',
       opacity: 0,
-      overflow: 'hidden',
-      clip: 'rect(0,0,0,0)',
       border: 0,
       padding: 0,
       margin: 0,
@@ -195,6 +195,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     backgroundColor: colors.white,
     position: 'relative',
+    overflow: 'hidden',
   },
   fieldCompact: {
     borderRadius: radius.sm,

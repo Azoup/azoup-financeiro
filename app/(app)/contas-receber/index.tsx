@@ -177,10 +177,11 @@ export default function ContasReceberScreen() {
   const [nfConfirmCompetencia, setNfConfirmCompetencia] = useState<string | null>(null);
   const [nfConfirmDisc, setNfConfirmDisc] = useState<string | undefined>(undefined);
 
-  const carregar = useCallback(async () => {
+  const carregar = useCallback(async (opts?: { silencioso?: boolean }) => {
     if (!user?.id) return;
-    const pedido = ++pedidoLista.current;
-    setLoading(true);
+    const silencioso = opts?.silencioso === true;
+    const pedido = silencioso ? pedidoLista.current : ++pedidoLista.current;
+    if (!silencioso) setLoading(true);
     try {
       const [lista, perfil] = await Promise.all([
         fetchContasReceberPagina(user.id, {
@@ -206,13 +207,13 @@ export default function ContasReceberScreen() {
       if (pagina > ultima) setPagina(ultima);
       setNomeBeneficiario(perfil?.razao_social?.trim() || null);
     } catch (e) {
-      if (pedido !== pedidoLista.current) return;
+      if (pedido !== pedidoLista.current || silencioso) return;
       Toast.show({ type: 'error', text1: (e as Error).message });
       setAllRows([]);
       setTotalDocumentos(0);
       setTotalRecebido(0);
     } finally {
-      if (pedido === pedidoLista.current) setLoading(false);
+      if (!silencioso && pedido === pedidoLista.current) setLoading(false);
     }
   }, [
     user?.id,
@@ -251,7 +252,7 @@ export default function ContasReceberScreen() {
       void (async () => {
         let pagos = 0;
         try {
-          for (let i = 0; i < 12 && ativo; i += 1) {
+          for (let i = 0; i < 20 && ativo; i += 1) {
             const r = await sincronizarBoletosPendentes();
             pagos += r.baixados;
             const erros = (r.resultados ?? []).filter((item) => item.erro);
@@ -263,6 +264,7 @@ export default function ContasReceberScreen() {
                 visibilityTime: 9000,
               });
             }
+            if (r.baixados > 0 && ativo) void carregar({ silencioso: true });
             if (!r.temMais) break;
           }
         } catch {
@@ -275,7 +277,7 @@ export default function ContasReceberScreen() {
             type: 'success',
             text1: pagos === 1 ? '1 boleto pago foi atualizado.' : `${pagos} boletos pagos foram atualizados.`,
           });
-          void carregar();
+          void carregar({ silencioso: true });
         }
       })();
       return () => {
@@ -1037,35 +1039,45 @@ export default function ContasReceberScreen() {
       </ScrollView>
 
       <View style={styles.datasFiltro}>
-        <View style={styles.datasCol}>
-          <DatePickerField
-            compact
-            label="Vencimento de"
-            value={vencimentoDe ? new Date(`${vencimentoDe}T12:00:00`) : null}
-            onChange={(d) => setVencimentoDe(d ? toISODate(d) : null)}
-          />
-          <DatePickerField
-            compact
-            label="Pagamento de"
-            value={pagamentoDe ? new Date(`${pagamentoDe}T12:00:00`) : null}
-            onChange={(d) => setPagamentoDe(d ? toISODate(d) : null)}
-          />
+        <Text style={styles.dataGrupo}>Vencimento</Text>
+        <View style={styles.dataLinha}>
+          <View style={styles.datasCol}>
+            <DatePickerField
+              compact
+              label="De"
+              value={vencimentoDe ? new Date(`${vencimentoDe}T12:00:00`) : null}
+              onChange={(d) => setVencimentoDe(d ? toISODate(d) : null)}
+            />
+          </View>
+          <View style={styles.datasCol}>
+            <DatePickerField
+              compact
+              label="Até"
+              value={vencimentoAte ? new Date(`${vencimentoAte}T12:00:00`) : null}
+              onChange={(d) => setVencimentoAte(d ? toISODate(d) : null)}
+              minimumDate={vencimentoDe ? new Date(`${vencimentoDe}T12:00:00`) : undefined}
+            />
+          </View>
         </View>
-        <View style={styles.datasCol}>
-          <DatePickerField
-            compact
-            label="Vencimento até"
-            value={vencimentoAte ? new Date(`${vencimentoAte}T12:00:00`) : null}
-            onChange={(d) => setVencimentoAte(d ? toISODate(d) : null)}
-            minimumDate={vencimentoDe ? new Date(`${vencimentoDe}T12:00:00`) : undefined}
-          />
-          <DatePickerField
-            compact
-            label="Pagamento até"
-            value={pagamentoAte ? new Date(`${pagamentoAte}T12:00:00`) : null}
-            onChange={(d) => setPagamentoAte(d ? toISODate(d) : null)}
-            minimumDate={pagamentoDe ? new Date(`${pagamentoDe}T12:00:00`) : undefined}
-          />
+        <Text style={styles.dataGrupo}>Pagamento</Text>
+        <View style={styles.dataLinha}>
+          <View style={styles.datasCol}>
+            <DatePickerField
+              compact
+              label="De"
+              value={pagamentoDe ? new Date(`${pagamentoDe}T12:00:00`) : null}
+              onChange={(d) => setPagamentoDe(d ? toISODate(d) : null)}
+            />
+          </View>
+          <View style={styles.datasCol}>
+            <DatePickerField
+              compact
+              label="Até"
+              value={pagamentoAte ? new Date(`${pagamentoAte}T12:00:00`) : null}
+              onChange={(d) => setPagamentoAte(d ? toISODate(d) : null)}
+              minimumDate={pagamentoDe ? new Date(`${pagamentoDe}T12:00:00`) : undefined}
+            />
+          </View>
         </View>
       </View>
       <View style={styles.recebidoCard}>
@@ -1530,10 +1542,19 @@ const styles = StyleSheet.create({
   },
   tipoTxt: { fontSize: 9, fontWeight: '800' },
   datasFiltro: {
-    flexDirection: 'row',
-    gap: spacing.sm,
     paddingHorizontal: spacing.md,
     marginBottom: spacing.xs,
+    gap: 2,
+  },
+  dataGrupo: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.petroleum,
+    marginTop: spacing.xs,
+  },
+  dataLinha: {
+    flexDirection: 'row',
+    gap: spacing.sm,
   },
   datasCol: { flex: 1, minWidth: 0 },
   recebidoCard: {

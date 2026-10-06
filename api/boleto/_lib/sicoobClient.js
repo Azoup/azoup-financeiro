@@ -252,21 +252,32 @@ async function emitirBoletoSicoobApi({ config, certPath, senha, payload, ambient
   return extractBoletoResponse(res.json);
 }
 
+function historicoLiquidacao(resultado) {
+  const hist = Array.isArray(resultado?.listaHistorico) ? resultado.listaHistorico : [];
+  return (
+    hist.find((h) => {
+      const texto = `${h?.descricaoHistorico ?? ''} ${h?.tipoHistorico ?? ''}`.toLowerCase();
+      return texto.includes('liquid') || texto.includes('pagamento');
+    }) ?? null
+  );
+}
+
 function isBoletoLiquidado(resultado) {
-  const situacao = String(resultado?.situacaoBoleto ?? resultado?.situacao ?? '').toLowerCase();
-  if (situacao.includes('baix')) return false;
-  if (situacao.includes('liquid') || situacao.includes('pago')) return true;
-  if (resultado?.dataLiquidacao || resultado?.dataPagamento) return true;
+  if (!resultado || typeof resultado !== 'object') return false;
+  const situacao = String(resultado.situacaoBoleto ?? resultado.situacao ?? '').toLowerCase();
+  const codigo = String(resultado.codigoSituacao ?? '').trim();
+  // Cobrança V3: 3 = liquidado. 2 = baixado (cancelamento), e isso não é pagamento.
+  if (codigo === '3' || situacao === '3') return true;
+  const valorPago = Number(resultado.valorPago ?? resultado.valorLiquidacao ?? 0);
+  const temValor = Number.isFinite(valorPago) && valorPago > 0;
+  const temData = Boolean(resultado.dataLiquidacao || resultado.dataPagamento);
+  const textoPago = situacao.includes('liquid') || situacao.includes('pago');
+  if (textoPago || temData || temValor || historicoLiquidacao(resultado)) return true;
   return false;
 }
 
 function extractDataPagamento(resultado) {
-  const hist = Array.isArray(resultado?.listaHistorico) ? resultado.listaHistorico : [];
-  const liq = hist.find((h) =>
-    String(h?.descricaoHistorico ?? h?.tipoHistorico ?? '')
-      .toLowerCase()
-      .includes('liquid'),
-  );
+  const liq = historicoLiquidacao(resultado);
   const raw =
     resultado?.dataPagamento ??
     resultado?.dataLiquidacao ??

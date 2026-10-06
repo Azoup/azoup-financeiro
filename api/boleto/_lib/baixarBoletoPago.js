@@ -380,11 +380,14 @@ async function consultarEBaixarBoleto(admin, userId, boletoId, origem = 'POLLING
 async function baixarPorWebhookPayload(admin, payload) {
   const nossoNumero = String(payload?.nossoNumero ?? payload?.nosso_numero ?? '').trim();
   const numeroCliente = Number(payload?.numeroCliente ?? payload?.numero_cliente ?? 0);
-  const situacao = payload?.situacaoBoleto ?? payload?.situacao ?? '';
   if (!nossoNumero || !numeroCliente) {
     throw new Error('Webhook sem nossoNumero ou numeroCliente.');
   }
-  if (!isBoletoLiquidado({ situacaoBoleto: situacao })) {
+  const fonteWebhook =
+    payload?.resultado && typeof payload.resultado === 'object'
+      ? { ...payload, ...payload.resultado }
+      : payload;
+  if (!isBoletoLiquidado(fonteWebhook)) {
     return { baixado: false, motivo: 'situacao_nao_liquidada' };
   }
 
@@ -511,11 +514,24 @@ async function listarBoletosParaConsulta(admin, userId, limit, tipo) {
   return [...escolhidos, ...(futuros ?? [])];
 }
 
+function montarLoteConsulta(sicoob, c6, limit) {
+  const lote = [];
+  let i = 0;
+  let j = 0;
+  while (lote.length < limit && (i < sicoob.length || j < c6.length)) {
+    if (i < sicoob.length) lote.push(sicoob[i++]);
+    if (lote.length >= limit) break;
+    if (j < c6.length) lote.push(c6[j++]);
+  }
+  return lote;
+}
+
 async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 8) {
-  const c6 = await listarBoletosParaConsulta(admin, userId, limit, 'c6');
-  const restante = Math.max(0, limit - c6.length);
-  const sicoob = restante > 0 ? await listarBoletosParaConsulta(admin, userId, restante, 'sicoob') : [];
-  const boletos = [...c6, ...sicoob];
+  const [filaSicoob, filaC6] = await Promise.all([
+    listarBoletosParaConsulta(admin, userId, limit, 'sicoob'),
+    listarBoletosParaConsulta(admin, userId, limit, 'c6'),
+  ]);
+  const boletos = montarLoteConsulta(filaSicoob, filaC6, limit);
 
   const inicio = Date.now();
   const resultados = [];
@@ -537,7 +553,10 @@ async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 8) {
   return {
     consultados: resultados.length,
     baixados,
-    temMais: c6.length === limit || sicoob.length === restante,
+    temMais:
+      resultados.length < boletos.length ||
+      filaSicoob.length === limit ||
+      filaC6.length === limit,
     resultados,
   };
 }
