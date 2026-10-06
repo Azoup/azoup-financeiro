@@ -509,6 +509,101 @@ async function listarBoletosPagadorSicoobApi({ config, certPath, senha, numeroCp
   return resultado ? [resultado] : [];
 }
 
+function erroRespostaSicoob(res, fallback) {
+  const msg =
+    res.json?.mensagens?.map((m) => m.mensagem).join(' · ') ??
+    res.json?.message ??
+    (typeof res.raw === 'string' && res.raw.trim() ? res.raw.trim().slice(0, 400) : null) ??
+    fallback;
+  const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  err.status = res.status;
+  return err;
+}
+
+/** tipoMovimento 5 = liquidação. O período máximo do Sicoob é de 2 dias. */
+async function solicitarMovimentacaoSicoobApi({ config, certPath, senha, tipoMovimento, dataInicial, dataFinal }) {
+  const token = await getSicoobAccessToken({ config, certPath, senha });
+  const agent = createMtlsAgent(certPath, senha);
+  const body = JSON.stringify({
+    numeroCliente: Number(config.numero_cliente),
+    tipoMovimento: Number(tipoMovimento),
+    dataInicial,
+    dataFinal,
+  });
+  const res = await httpsRequest(`${apiBaseUrl(config.ambiente)}/boletos/movimentacoes`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      client_id: config.client_id,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+    },
+    body,
+    agent,
+  });
+  if (res.status < 200 || res.status >= 300) {
+    throw erroRespostaSicoob(res, `Solicitação de liquidação falhou (${res.status}).`);
+  }
+  const codigo = Number(res.json?.resultado?.codigoSolicitacao);
+  if (!Number.isFinite(codigo) || codigo <= 0) {
+    throw new Error('Sicoob não devolveu o código da solicitação de liquidação.');
+  }
+  return codigo;
+}
+
+async function consultarSolicitacaoMovimentacaoSicoobApi({ config, certPath, senha, codigoSolicitacao }) {
+  const token = await getSicoobAccessToken({ config, certPath, senha });
+  const agent = createMtlsAgent(certPath, senha);
+  const params = new URLSearchParams({
+    numeroCliente: String(config.numero_cliente),
+    codigoSolicitacao: String(codigoSolicitacao),
+  });
+  const res = await httpsRequest(`${apiBaseUrl(config.ambiente)}/boletos/movimentacoes?${params.toString()}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      client_id: config.client_id,
+      Accept: 'application/json',
+    },
+    agent,
+  });
+  if (res.status === 204) return { pronto: false, idArquivos: [] };
+  if (res.status < 200 || res.status >= 300) {
+    throw erroRespostaSicoob(res, `Consulta da liquidação falhou (${res.status}).`);
+  }
+  const ids = res.json?.resultado?.idArquivos;
+  return { pronto: true, idArquivos: Array.isArray(ids) ? ids.map((id) => Number(id)).filter((id) => id > 0) : [] };
+}
+
+async function baixarArquivoMovimentacaoSicoobApi({ config, certPath, senha, codigoSolicitacao, idArquivo }) {
+  const token = await getSicoobAccessToken({ config, certPath, senha });
+  const agent = createMtlsAgent(certPath, senha);
+  const params = new URLSearchParams({
+    numeroCliente: String(config.numero_cliente),
+    codigoSolicitacao: String(codigoSolicitacao),
+    idArquivo: String(idArquivo),
+  });
+  const res = await httpsRequest(
+    `${apiBaseUrl(config.ambiente)}/boletos/movimentacoes/download?${params.toString()}`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        client_id: config.client_id,
+        Accept: 'application/json',
+      },
+      agent,
+    },
+  );
+  if (res.status < 200 || res.status >= 300) {
+    throw erroRespostaSicoob(res, `Download da liquidação falhou (${res.status}).`);
+  }
+  const arquivo = res.json?.resultado?.arquivo;
+  if (!arquivo) throw new Error('Sicoob não devolveu o arquivo de liquidação.');
+  return String(arquivo);
+}
+
 module.exports = {
   apiBaseUrl,
   authUrl,
@@ -519,6 +614,9 @@ module.exports = {
   buildSicoobPayload,
   cleanupCert,
   consultarBoletoSicoobApi,
+  solicitarMovimentacaoSicoobApi,
+  consultarSolicitacaoMovimentacaoSicoobApi,
+  baixarArquivoMovimentacaoSicoobApi,
   downloadCertToTemp,
   emitirBoletoSicoobApi,
   extractDataPagamento,

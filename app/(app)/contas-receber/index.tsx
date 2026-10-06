@@ -263,9 +263,20 @@ export default function ContasReceberScreen() {
         let pagos = 0;
         try {
           for (let i = 0; i < 20 && ativo; i += 1) {
-            const r = await sincronizarBoletosPendentes();
+            const r = await sincronizarBoletosPendentes(i);
             pagos += r.baixados;
-            const erros = (r.resultados ?? []).filter((item) => item.erro);
+            if (i === 0) {
+              const movErro = (r.resultados ?? []).find((item) => item.origem === 'movimentacao' && item.erro);
+              if (movErro) {
+                Toast.show({
+                  type: 'error',
+                  text1: 'Não consegui ler os pagamentos do Sicoob',
+                  text2: String(movErro.erro ?? ''),
+                  visibilityTime: 9000,
+                });
+              }
+            }
+            const erros = (r.resultados ?? []).filter((item) => item.erro && item.origem !== 'movimentacao');
             if (i === 0 && erros.length > 0 && erros.length === (r.resultados ?? []).length) {
               Toast.show({
                 type: 'error',

@@ -1,9 +1,13 @@
+const zlib = require('zlib');
 const {
   consultarBoletoSicoobApi,
   cleanupCert,
   isBoletoLiquidado,
   extractDataPagamento,
   extractValorPago,
+  solicitarMovimentacaoSicoobApi,
+  consultarSolicitacaoMovimentacaoSicoobApi,
+  baixarArquivoMovimentacaoSicoobApi,
 } = require('./sicoobClient');
 const { loadSicoobCredentials } = require('./sicoobCredentials');
 const {
@@ -408,7 +412,21 @@ async function baixarPorWebhookPayload(admin, payload) {
     )
     .limit(1);
 
-  const boleto = boletos?.[0];
+  let boleto = boletos?.[0];
+  if (!boleto) {
+    const chave = chaveNossoNumero(nossoNumero);
+    const { data: candidatos } = await admin
+      .from('boletos_parcela_venda')
+      .select('*')
+      .eq('tipo_emissao', 'sicoob')
+      .in(
+        'user_id',
+        configRows.map((c) => c.user_id),
+      )
+      .in('status_registro', ['registrado', 'erro'])
+      .limit(1000);
+    boleto = (candidatos ?? []).find((row) => chave && chaveNossoNumero(row.nosso_numero_banco) === chave);
+  }
   if (!boleto) {
     return { baixado: false, motivo: 'boleto_nao_encontrado' };
   }
@@ -482,6 +500,169 @@ async function baixarPorWebhookPayloadC6(admin, payload) {
   });
 }
 
+function esperar(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function hojeIsoBrasil() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+}
+
+function somarDiasIso(iso, dias) {
+  const [y, m, d] = String(iso).split('-').map((n) => Number(n));
+  const data = new Date(Date.UTC(y, m - 1, d));
+  data.setUTCDate(data.getUTCDate() + dias);
+  return data.toISOString().slice(0, 10);
+}
+
+function janelaLiquidacao(indice) {
+  const fim = somarDiasIso(hojeIsoBrasil(), -indice * 2);
+  const inicio = somarDiasIso(fim, -1);
+  return { dataInicial: inicio, dataFinal: fim };
+}
+
+function chaveNossoNumero(valor) {
+  const bruto = String(valor ?? '').trim();
+  const parte = bruto.includes('-') ? bruto.split('-')[0] : bruto;
+  return parte.replace(/\D/g, '').replace(/^0+/, '');
+}
+
+function unzipPrimeiroJson(base64) {
+  const buf = Buffer.from(String(base64).replace(/\s/g, ''), 'base64');
+  const textoDireto = buf.toString('utf8').trim();
+  if (textoDireto.startsWith('[') || textoDireto.startsWith('{')) return textoDireto;
+  if (buf.length < 30 || buf.readUInt32LE(0) !== 0x04034b50) {
+    throw new Error('Arquivo de liquidação do Sicoob em formato inesperado.');
+  }
+  const flags = buf.readUInt16LE(6);
+  const method = buf.readUInt16LE(8);
+  const nameLen = buf.readUInt16LE(26);
+  const extraLen = buf.readUInt16LE(28);
+  let compSize = buf.readUInt32LE(18);
+  const dataStart = 30 + nameLen + extraLen;
+  if (flags & 0x8 || !compSize) {
+    const proximo = buf.indexOf(Buffer.from([0x50, 0x4b]), dataStart + 1);
+    compSize = (proximo > dataStart ? proximo : buf.length) - dataStart;
+  }
+  const compressed = buf.subarray(dataStart, dataStart + compSize);
+  const content = method === 0 ? compressed : method === 8 ? zlib.inflateRawSync(compressed) : null;
+  if (!content) throw new Error('Não foi possível ler o arquivo de liquidação do Sicoob.');
+  return content.toString('utf8');
+}
+
+function titulosDaLiquidacao(base64) {
+  const texto = unzipPrimeiroJson(base64);
+  const json = JSON.parse(texto);
+  const lista = Array.isArray(json) ? json : Array.isArray(json?.resultado) ? json.resultado : [];
+  return lista.filter((item) => {
+    const sigla = String(item?.siglaMovimento ?? '').toUpperCase();
+    const tipo = Number(item?.codigoTipoMovimento ?? 0);
+    if (sigla.startsWith('BAIX') || tipo === 6) return false;
+    return sigla.startsWith('LIQU') || tipo === 5 || Boolean(item?.dataLiquidacao);
+  });
+}
+
+async function listarSicoobRegistrados(admin, userId) {
+  const rows = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await admin
+      .from('boletos_parcela_venda')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('tipo_emissao', 'sicoob')
+      .eq('status_registro', 'registrado')
+      .order('id', { ascending: true })
+      .range(from, from + 999);
+    if (error) throw new Error(error.message);
+    rows.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  return rows;
+}
+
+async function baixarLiquidacoesSicoob(admin, userId, rodada, janelas, deadline) {
+  const creds = await loadSicoobCredentials(admin, userId);
+  if (!creds) return { baixados: 0, resultados: [] };
+
+  const resultados = [];
+  let baixados = 0;
+  try {
+    const boletos = await listarSicoobRegistrados(admin, userId);
+    const porNumero = new Map();
+    for (const boleto of boletos) {
+      const chave = chaveNossoNumero(boleto.nosso_numero_banco);
+      if (chave && !porNumero.has(chave)) porNumero.set(chave, boleto);
+    }
+
+    for (let i = 0; i < janelas; i += 1) {
+      if (Date.now() > deadline) break;
+      const janela = janelaLiquidacao(rodada + i);
+      try {
+        const codigo = await solicitarMovimentacaoSicoobApi({
+          config: creds.config,
+          certPath: creds.certPath,
+          senha: creds.senha,
+          tipoMovimento: 5,
+          dataInicial: janela.dataInicial,
+          dataFinal: janela.dataFinal,
+        });
+        let arquivos = [];
+        for (let tentativa = 0; tentativa < 4; tentativa += 1) {
+          if (tentativa > 0) await esperar(1000);
+          const consulta = await consultarSolicitacaoMovimentacaoSicoobApi({
+            config: creds.config,
+            certPath: creds.certPath,
+            senha: creds.senha,
+            codigoSolicitacao: codigo,
+          });
+          if (consulta.pronto) {
+            arquivos = consulta.idArquivos;
+            break;
+          }
+        }
+        for (const idArquivo of arquivos) {
+          if (Date.now() > deadline) break;
+          const base64 = await baixarArquivoMovimentacaoSicoobApi({
+            config: creds.config,
+            certPath: creds.certPath,
+            senha: creds.senha,
+            codigoSolicitacao: codigo,
+            idArquivo,
+          });
+          for (const titulo of titulosDaLiquidacao(base64)) {
+            const boleto = porNumero.get(chaveNossoNumero(titulo.numeroTitulo));
+            if (!boleto) continue;
+            const dataPagamento = String(titulo.dataLiquidacao || titulo.dataMovimentoLiquidacao || hojeIsoBrasil()).slice(0, 10);
+            const valorPago = Number(titulo.valorLiquido ?? titulo.valorTitulo ?? boleto.valor_documento);
+            const baixa = await aplicarBaixaBoleto(admin, userId, boleto, {
+              dataPagamento,
+              valorPago: Number.isFinite(valorPago) && valorPago > 0 ? valorPago : boleto.valor_documento,
+              origem: 'LIQUIDACAO_SICOOB',
+              payload: titulo,
+            });
+            porNumero.delete(chaveNossoNumero(titulo.numeroTitulo));
+            resultados.push({ boletoId: boleto.id, origem: 'movimentacao', ...baixa });
+            if (baixa.baixado) baixados += 1;
+          }
+        }
+      } catch (e) {
+        resultados.push({
+          boletoId: null,
+          origem: 'movimentacao',
+          baixado: false,
+          erro: e.message,
+          periodo: `${janela.dataInicial} a ${janela.dataFinal}`,
+        });
+        break;
+      }
+    }
+  } finally {
+    cleanupCert(creds.certPath);
+  }
+
+  return { baixados, resultados };
+}
+
 async function listarBoletosParaConsulta(admin, userId, limit, tipo) {
   const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
   const base = () => {
@@ -526,17 +707,28 @@ function montarLoteConsulta(sicoob, c6, limit) {
   return lote;
 }
 
-async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 8) {
+async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 8, opts = {}) {
+  const rodada = Number(opts.rodada) || 0;
+  const janelas = Math.max(1, Number(opts.janelas) || 1);
+  const inicio = Date.now();
+  const deadline = inicio + 45000;
+  const resultados = [];
+
+  try {
+    const liquidacoes = await baixarLiquidacoesSicoob(admin, userId, rodada, janelas, deadline);
+    resultados.push(...liquidacoes.resultados);
+  } catch (e) {
+    resultados.push({ boletoId: null, origem: 'movimentacao', baixado: false, erro: e.message });
+  }
+
   const [filaSicoob, filaC6] = await Promise.all([
     listarBoletosParaConsulta(admin, userId, limit, 'sicoob'),
     listarBoletosParaConsulta(admin, userId, limit, 'c6'),
   ]);
   const boletos = montarLoteConsulta(filaSicoob, filaC6, limit);
 
-  const inicio = Date.now();
-  const resultados = [];
   for (const row of boletos) {
-    if (Date.now() - inicio > 45000) break;
+    if (Date.now() > deadline) break;
     try {
       const r = await consultarEBaixarBoleto(admin, userId, row.id, 'POLLING');
       resultados.push({ boletoId: row.id, ...r });
@@ -550,11 +742,13 @@ async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 8) {
   }
 
   const baixados = resultados.filter((r) => r.baixado).length;
+  const consultadosBoleto = resultados.filter((r) => r.boletoId && r.origem !== 'movimentacao').length;
   return {
-    consultados: resultados.length,
+    consultados: consultadosBoleto,
     baixados,
     temMais:
-      resultados.length < boletos.length ||
+      rodada + janelas < 15 ||
+      consultadosBoleto < boletos.length ||
       filaSicoob.length === limit ||
       filaC6.length === limit,
     resultados,
@@ -574,7 +768,10 @@ async function sincronizarBoletosPendentesGlobal(admin, limitPorUsuario = 20) {
 
   for (const userId of userIds) {
     try {
-      const r = await sincronizarBoletosPendentesUsuario(admin, userId, limitPorUsuario);
+      const r = await sincronizarBoletosPendentesUsuario(admin, userId, limitPorUsuario, {
+        rodada: 0,
+        janelas: 15,
+      });
       consultados += r.consultados;
       baixados += r.baixados;
     } catch (e) {

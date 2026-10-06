@@ -134,7 +134,7 @@ export async function reemitirBoletosSicoob(userId: string, boletoIds: string[])
   return emitirBoletosSicoobLote(userId, boletoIds, { exigirRegistro: true });
 }
 
-export async function sincronizarBoletosPendentes(): Promise<{
+export async function sincronizarBoletosPendentes(rodada = 0): Promise<{
   consultados: number;
   baixados: number;
   temMais: boolean;
@@ -155,7 +155,7 @@ export async function sincronizarBoletosPendentes(): Promise<{
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({}),
+    body: JSON.stringify({ rodada }),
   });
 
   const body = (await res.json().catch(() => ({}))) as {

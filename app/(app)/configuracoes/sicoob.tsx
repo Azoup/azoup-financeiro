@@ -194,8 +194,8 @@ export default function SicoobConfigScreen() {
 
       <Text style={styles.sectionTitle}>Baixa automática</Text>
       <Text style={styles.lead}>
-        O sistema consulta boletos pagos a cada 30 min (cron) e ao abrir A receber. Configure também o webhook no
-        portal Sicoob apontando para a URL abaixo.
+        Ao abrir A receber, o sistema lê as liquidações do Sicoob dos últimos 30 dias e marca os boletos pagos.
+        A consulta diária repete isso. Para avisar na hora do pagamento, cadastre o webhook no portal Sicoob com a URL abaixo.
       </Text>
       <View style={styles.webhookBox}>
         <Text style={styles.webhookLabel}>URL do webhook</Text>
