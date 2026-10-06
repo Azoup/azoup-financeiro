@@ -942,6 +942,8 @@ export type ContasReceberConsulta = {
   pagamentoAte?: string | null;
   /** Código do segmento do cliente. `todos` ou vazio não filtra. */
   segmentoCodigo?: string | null;
+  /** Banco do boleto. `todos` inclui também os ainda sem registro. */
+  banco?: 'todos' | 'sicoob' | 'c6';
   emitenteId?: string | null;
   /** `pendente` aparece na tela como Registrando. */
   statusRegistro?: 'pendente';
@@ -1177,6 +1179,7 @@ function aplicarFiltrosBoleto(
   if (lado) query = query.eq('origem', lado);
   else if (opts.origem && opts.origem !== 'todos') query = query.eq('origem', opts.origem);
   if (opts.emitenteId) query = query.eq('emitente_id', opts.emitenteId);
+  if (opts.banco === 'sicoob' || opts.banco === 'c6') query = query.eq('tipo_emissao', opts.banco);
   if (opts.statusRegistro) query = query.eq('status_registro', opts.statusRegistro);
   if (opts.vencimentoDe) query = query.gte('data_vencimento', opts.vencimentoDe);
   if (opts.vencimentoAte) query = query.lte('data_vencimento', opts.vencimentoAte);

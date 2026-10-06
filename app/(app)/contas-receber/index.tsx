@@ -76,6 +76,13 @@ import Toast from 'react-native-toast-message';
 
 type OrigemFiltro = 'todos' | ContaReceberOrigem;
 type SituacaoFiltro = 'todos' | ContaReceberSituacao;
+type BancoFiltro = 'todos' | 'sicoob' | 'c6';
+
+const BANCO_OPTS: { id: BancoFiltro; label: string }[] = [
+  { id: 'todos', label: 'Todos' },
+  { id: 'sicoob', label: 'Sicoob' },
+  { id: 'c6', label: 'C6' },
+];
 
 const ORIGEM_OPTS: { id: OrigemFiltro; label: string }[] = [
   { id: 'todos', label: 'Todos' },
@@ -142,6 +149,7 @@ export default function ContasReceberScreen() {
   const [origemFilter, setOrigemFilter] = useState<OrigemFiltro>('todos');
   const [situacaoFilter, setSituacaoFilter] = useState<SituacaoFiltro>('aberto');
   const [segmentoFilter, setSegmentoFilter] = useState<string>('todos');
+  const [bancoFilter, setBancoFilter] = useState<BancoFiltro>('todos');
   const [segmentos, setSegmentos] = useState<SegmentoClienteRow[]>([]);
   const [soRegistrando, setSoRegistrando] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -194,6 +202,7 @@ export default function ContasReceberScreen() {
           pagamentoDe,
           pagamentoAte,
           segmentoCodigo: segmentoFilter === 'todos' ? null : segmentoFilter,
+          banco: bancoFilter,
           emitenteId: empresaId === 'todos' ? null : empresaId,
           statusRegistro: soRegistrando ? 'pendente' : undefined,
         }),
@@ -226,13 +235,14 @@ export default function ContasReceberScreen() {
     pagamentoDe,
     pagamentoAte,
     segmentoFilter,
+    bancoFilter,
     empresaId,
     soRegistrando,
   ]);
 
   useEffect(() => {
     setPagina(1);
-  }, [debouncedSearch, origemFilter, situacaoFilter, segmentoFilter, vencimentoDe, vencimentoAte, pagamentoDe, pagamentoAte, empresaId, soRegistrando]);
+  }, [debouncedSearch, origemFilter, situacaoFilter, segmentoFilter, bancoFilter, vencimentoDe, vencimentoAte, pagamentoDe, pagamentoAte, empresaId, soRegistrando]);
 
   useEffect(() => {
     void fetchSegmentosCliente().then(setSegmentos);
@@ -333,6 +343,7 @@ export default function ContasReceberScreen() {
     Boolean(pagamentoDe) ||
     Boolean(pagamentoAte) ||
     segmentoFilter !== 'todos' ||
+    bancoFilter !== 'todos' ||
     soRegistrando;
 
   const abrirFiltros = () => {
@@ -354,6 +365,7 @@ export default function ContasReceberScreen() {
     setPagamentoDe(null);
     setPagamentoAte(null);
     setSegmentoFilter('todos');
+    setBancoFilter('todos');
     setOrigemFilter('todos');
     setSituacaoFilter('aberto');
     setSoRegistrando(false);
@@ -1014,6 +1026,22 @@ export default function ContasReceberScreen() {
         >
           <Text style={[styles.sitChipTxt, soRegistrando && styles.sitChipTxtOn]}>Registrando</Text>
         </Pressable>
+      </ScrollView>
+
+      <Text style={styles.segLabel}>Banco</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.situacaoChips}>
+        {BANCO_OPTS.map((o) => {
+          const on = bancoFilter === o.id;
+          return (
+            <Pressable
+              key={o.id}
+              style={[styles.sitChip, on && styles.sitChipOn]}
+              onPress={() => setBancoFilter(o.id)}
+            >
+              <Text style={[styles.sitChipTxt, on && styles.sitChipTxtOn]}>{o.label}</Text>
+            </Pressable>
+          );
+        })}
       </ScrollView>
 
       <Text style={styles.segLabel}>Segmento</Text>
