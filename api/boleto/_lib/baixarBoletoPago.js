@@ -28,6 +28,38 @@ function centavosParaReais(c) {
   return c / 100;
 }
 
+function numeroBanco(valor) {
+  const n = Number(valor);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Valor que o pagador quitou. Desconto e abatimento entram; a tarifa do banco não. */
+function valorPagoPeloCliente(titulo, fallback) {
+  const face = numeroBanco(titulo?.valorTitulo) || numeroBanco(fallback);
+  const desconto = numeroBanco(titulo?.valorDesconto);
+  const abatimento = numeroBanco(titulo?.valorAbatimento);
+  const acrescimo =
+    numeroBanco(titulo?.valorMora) + numeroBanco(titulo?.valorMoraAtual) + numeroBanco(titulo?.valorMultaAtual);
+  const tarifa = numeroBanco(titulo?.valorTarifaMovimento);
+  const liquido = numeroBanco(titulo?.valorLiquido);
+  const atualizado = numeroBanco(titulo?.valorTituloAtualizado);
+  if (desconto > 0 || abatimento > 0) {
+    const pago = centavosParaReais(
+      reaisParaCentavos(face) - reaisParaCentavos(desconto) - reaisParaCentavos(abatimento) + reaisParaCentavos(acrescimo),
+    );
+    if (pago > 0) return pago;
+  }
+  const creditado =
+    liquido > 0 ? (tarifa > 0 ? centavosParaReais(reaisParaCentavos(liquido) + reaisParaCentavos(tarifa)) : liquido) : 0;
+  const opcoes = [atualizado, creditado].filter((v) => v > 0);
+  // Diferença pequena é tarifa do banco. Desconto dado ao cliente fica acima disso.
+  const candidato = opcoes
+    .filter((v) => reaisParaCentavos(face) - reaisParaCentavos(v) >= 500)
+    .sort((a, b) => b - a)[0];
+  if (candidato) return candidato;
+  return face > 0 ? face : numeroBanco(fallback);
+}
+
 function nextParcelaStatus(valor, valorPago) {
   const vc = reaisParaCentavos(valor);
   const pc = reaisParaCentavos(valorPago);
@@ -88,11 +120,118 @@ async function tituloCanceladoNoSistema(admin, boleto) {
   return false;
 }
 
+async function aplicarDescontoRecebido(admin, userId, boleto, valorRecebido, dataPagamento, origem) {
+  const novoCent = reaisParaCentavos(valorRecebido);
+  if (novoCent <= 0) return { aplicado: false };
+  const valor = centavosParaReais(novoCent);
+  const data = String(dataPagamento || '').slice(0, 10) || null;
+  const forma = formaPagamentoBanco(origem);
+  const texto = `Baixa automática ${forma} com desconto do banco (${origem}).`;
+
+  if (boleto.mensalidade_id) {
+    const { data: mens } = await admin
+      .from('mensalidades')
+      .select('id, valor, valor_pago, status, data_pagamento')
+      .eq('id', boleto.mensalidade_id)
+      .maybeSingle();
+    if (!mens) return { aplicado: false };
+    const faceCent = reaisParaCentavos(mens.valor);
+    const pagoCent = reaisParaCentavos(mens.valor_pago);
+    if (novoCent >= faceCent) return { aplicado: false };
+    if (faceCent === novoCent && pagoCent === novoCent) return { aplicado: false };
+
+    await admin
+      .from('mensalidades')
+      .update({
+        valor,
+        valor_pago: valor,
+        status: 'pago',
+        data_pagamento: data || mens.data_pagamento || null,
+        forma_pagamento: forma,
+        observacao_pagamento: texto,
+      })
+      .eq('id', mens.id);
+
+    const { data: pags } = await admin
+      .from('pagamentos_mensalidades')
+      .select('id, valor_pago')
+      .eq('mensalidade_id', mens.id);
+    const lista = pags ?? [];
+    const alvo = lista.find(
+      (p) => reaisParaCentavos(p.valor_pago) === faceCent || reaisParaCentavos(p.valor_pago) === pagoCent,
+    );
+    if (alvo) {
+      await admin.from('pagamentos_mensalidades').update({ valor_pago: valor }).eq('id', alvo.id);
+    } else if (!lista.length) {
+      await admin.from('pagamentos_mensalidades').insert({
+        mensalidade_id: mens.id,
+        valor_pago: valor,
+        data_pagamento: data,
+        forma_pagamento: forma,
+        observacao: texto,
+        usuario_id: userId,
+      });
+    }
+
+    await admin
+      .from('boletos_parcela_venda')
+      .update({
+        status_registro: 'pago',
+        valor_documento: valor,
+        data_liquidacao_sicoob: data,
+        ultima_consulta_sicoob: new Date().toISOString(),
+      })
+      .eq('id', boleto.id);
+    return { aplicado: true, tipo: 'mensalidade', valor };
+  }
+
+  if (boleto.parcela_id) {
+    const { data: parcela } = await admin
+      .from('parcelas_venda')
+      .select('id, valor, valor_pago, status, venda_id')
+      .eq('id', boleto.parcela_id)
+      .maybeSingle();
+    if (!parcela) return { aplicado: false };
+    const faceCent = reaisParaCentavos(parcela.valor);
+    const pagoCent = reaisParaCentavos(parcela.valor_pago);
+    if (novoCent >= faceCent) return { aplicado: false };
+    if (faceCent === novoCent && pagoCent === novoCent) return { aplicado: false };
+
+    await admin.from('parcelas_venda').update({ valor, valor_pago: valor, status: 'pago' }).eq('id', parcela.id);
+    if (parcela.venda_id) await atualizarStatusVenda(admin, parcela.venda_id, userId);
+    await admin
+      .from('boletos_parcela_venda')
+      .update({
+        status_registro: 'pago',
+        valor_documento: valor,
+        data_liquidacao_sicoob: data,
+        ultima_consulta_sicoob: new Date().toISOString(),
+      })
+      .eq('id', boleto.id);
+    return { aplicado: true, tipo: 'venda', valor };
+  }
+
+  return { aplicado: false };
+}
+
 async function registrarBaixaMensalidade(admin, userId, boleto, { dataPagamento, valorPago, origem, payload }) {
   const { data: mens, error } = await admin.from('mensalidades').select('*').eq('id', boleto.mensalidade_id).eq('user_id', userId).single();
   if (error || !mens) throw new Error('Mensalidade não encontrada para baixa automática.');
 
   const forma = formaPagamentoBanco(origem);
+  if (reaisParaCentavos(valorPago) > 0 && reaisParaCentavos(valorPago) < reaisParaCentavos(mens.valor)) {
+    const desconto = await aplicarDescontoRecebido(admin, userId, boleto, valorPago, dataPagamento, origem);
+    if (desconto.aplicado) {
+      await admin.from('historico_boleto_sicoob').insert({
+        boleto_id: boleto.id,
+        acao: 'BAIXA_AUTOMATICA',
+        usuario_id: userId,
+        detalhes: `Mensalidade quitada em ${desconto.valor} com desconto do banco (${origem}).`,
+        payload_resposta: payload ?? null,
+      });
+      return { baixado: true, tipo: 'mensalidade', mensalidadeId: mens.id };
+    }
+  }
   const valorCent = reaisParaCentavos(mens.valor);
   const pagoCent = reaisParaCentavos(mens.valor_pago);
   if (mens.status === 'cancelado') {
@@ -158,6 +297,20 @@ async function registrarBaixaVenda(admin, userId, boleto, { dataPagamento, valor
     .eq('venda_id', boleto.venda_id)
     .single();
   if (pErr || !parcela) throw new Error('Parcela não encontrada para baixa automática.');
+
+  if (reaisParaCentavos(valorPago) > 0 && reaisParaCentavos(valorPago) < reaisParaCentavos(parcela.valor)) {
+    const desconto = await aplicarDescontoRecebido(admin, userId, boleto, valorPago, dataPagamento, origem);
+    if (desconto.aplicado) {
+      await admin.from('historico_boleto_sicoob').insert({
+        boleto_id: boleto.id,
+        acao: 'BAIXA_AUTOMATICA',
+        usuario_id: userId,
+        detalhes: `Parcela quitada em ${desconto.valor} com desconto do banco (${origem}).`,
+        payload_resposta: payload ?? null,
+      });
+      return { baixado: true, tipo: 'venda', parcelaId: parcela.id };
+    }
+  }
 
   const valorCent = reaisParaCentavos(parcela.valor);
   const pagoCent = reaisParaCentavos(parcela.valor_pago);
@@ -229,6 +382,17 @@ async function registrarBaixaVenda(admin, userId, boleto, { dataPagamento, valor
 
 async function aplicarBaixaBoleto(admin, userId, boleto, dadosPagamento) {
   if (boleto.status_registro === 'pago' || boleto.status_registro === 'baixado') {
+    if (boleto.status_registro === 'pago') {
+      const desconto = await aplicarDescontoRecebido(
+        admin,
+        userId,
+        boleto,
+        dadosPagamento.valorPago,
+        dadosPagamento.dataPagamento,
+        dadosPagamento.origem ?? 'SICOOB',
+      );
+      if (desconto.aplicado) return { baixado: true, motivo: 'desconto_banco', valor: desconto.valor };
+    }
     return { baixado: false, motivo: 'boleto_ja_baixado' };
   }
 
@@ -238,6 +402,15 @@ async function aplicarBaixaBoleto(admin, userId, boleto, dadosPagamento) {
 
   const quitado = await jaQuitadoNoSistema(admin, boleto);
   if (quitado) {
+    const desconto = await aplicarDescontoRecebido(
+      admin,
+      userId,
+      boleto,
+      dadosPagamento.valorPago,
+      dadosPagamento.dataPagamento,
+      dadosPagamento.origem ?? 'SICOOB',
+    );
+    if (desconto.aplicado) return { baixado: true, motivo: 'desconto_banco', valor: desconto.valor };
     await admin.from('boletos_parcela_venda').update({
       status_registro: 'pago',
       data_liquidacao_sicoob: dadosPagamento.dataPagamento,
@@ -650,7 +823,7 @@ function titulosDaLiquidacao(base64) {
   });
 }
 
-async function listarSicoobRegistrados(admin, userId) {
+async function listarSicoobPorStatus(admin, userId, status) {
   const rows = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await admin
@@ -658,7 +831,7 @@ async function listarSicoobRegistrados(admin, userId) {
       .select('*')
       .eq('user_id', userId)
       .eq('tipo_emissao', 'sicoob')
-      .eq('status_registro', 'registrado')
+      .eq('status_registro', status)
       .order('id', { ascending: true })
       .range(from, from + 999);
     if (error) throw new Error(error.message);
@@ -675,11 +848,14 @@ async function baixarLiquidacoesSicoob(admin, userId, rodada, janelas, deadline)
   const resultados = [];
   let baixados = 0;
   try {
-    const boletos = await listarSicoobRegistrados(admin, userId);
+    const [abertos, pagos] = await Promise.all([
+      listarSicoobPorStatus(admin, userId, 'registrado'),
+      listarSicoobPorStatus(admin, userId, 'pago'),
+    ]);
     const porNumero = new Map();
-    for (const boleto of boletos) {
+    for (const boleto of [...pagos, ...abertos]) {
       const chave = chaveNossoNumero(boleto.nosso_numero_banco);
-      if (chave && !porNumero.has(chave)) porNumero.set(chave, boleto);
+      if (chave) porNumero.set(chave, boleto);
     }
 
     for (let i = 0; i < janelas; i += 1) {
@@ -721,10 +897,10 @@ async function baixarLiquidacoesSicoob(admin, userId, rodada, janelas, deadline)
             const boleto = porNumero.get(chaveNossoNumero(titulo.numeroTitulo));
             if (!boleto) continue;
             const dataPagamento = String(titulo.dataLiquidacao || titulo.dataMovimentoLiquidacao || hojeIsoBrasil()).slice(0, 10);
-            const valorPago = Number(titulo.valorLiquido ?? titulo.valorTitulo ?? boleto.valor_documento);
+            const valorPago = valorPagoPeloCliente(titulo, boleto.valor_documento);
             const baixa = await aplicarBaixaBoleto(admin, userId, boleto, {
               dataPagamento,
-              valorPago: Number.isFinite(valorPago) && valorPago > 0 ? valorPago : boleto.valor_documento,
+              valorPago: valorPago > 0 ? valorPago : boleto.valor_documento,
               origem: 'LIQUIDACAO_SICOOB',
               payload: titulo,
             });
