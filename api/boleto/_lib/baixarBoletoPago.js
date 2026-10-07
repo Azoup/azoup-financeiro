@@ -100,6 +100,7 @@ async function registrarBaixaMensalidade(admin, userId, boleto, { dataPagamento,
   }
   if (pagoCent >= valorCent) {
     await admin.from('boletos_parcela_venda').update({ status_registro: 'pago', data_liquidacao_sicoob: dataPagamento }).eq('id', boleto.id);
+    await marcarTituloPagoSeAberto(admin, boleto, dataPagamento);
     return { baixado: false, motivo: 'mensalidade_ja_quitada' };
   }
 
@@ -162,6 +163,7 @@ async function registrarBaixaVenda(admin, userId, boleto, { dataPagamento, valor
   const pagoCent = reaisParaCentavos(parcela.valor_pago);
   if (pagoCent >= valorCent) {
     await admin.from('boletos_parcela_venda').update({ status_registro: 'pago', data_liquidacao_sicoob: dataPagamento }).eq('id', boleto.id);
+    await marcarTituloPagoSeAberto(admin, boleto, dataPagamento);
     return { baixado: false, motivo: 'parcela_ja_quitada' };
   }
 
@@ -236,7 +238,11 @@ async function aplicarBaixaBoleto(admin, userId, boleto, dadosPagamento) {
 
   const quitado = await jaQuitadoNoSistema(admin, boleto);
   if (quitado) {
-    await admin.from('boletos_parcela_venda').update({ status_registro: 'pago' }).eq('id', boleto.id);
+    await admin.from('boletos_parcela_venda').update({
+      status_registro: 'pago',
+      data_liquidacao_sicoob: dadosPagamento.dataPagamento,
+    }).eq('id', boleto.id);
+    await marcarTituloPagoSeAberto(admin, boleto, dadosPagamento.dataPagamento);
     return { baixado: false, motivo: 'titulo_ja_quitado' };
   }
 
@@ -500,6 +506,88 @@ async function baixarPorWebhookPayloadC6(admin, payload) {
   });
 }
 
+async function marcarTituloPagoSeAberto(admin, boleto, dataPagamento) {
+  const data = String(dataPagamento || '').slice(0, 10) || null;
+  const abertos = ['pendente', 'parcial', 'atrasado'];
+  if (boleto.mensalidade_id) {
+    const { data: mens } = await admin
+      .from('mensalidades')
+      .select('id, valor, status, data_pagamento')
+      .eq('id', boleto.mensalidade_id)
+      .maybeSingle();
+    if (!mens || !abertos.includes(mens.status)) return;
+    await admin
+      .from('mensalidades')
+      .update({
+        status: 'pago',
+        valor_pago: mens.valor,
+        data_pagamento: mens.data_pagamento || data,
+      })
+      .eq('id', mens.id);
+    return;
+  }
+  if (boleto.parcela_id) {
+    const { data: parcela } = await admin
+      .from('parcelas_venda')
+      .select('id, valor, status')
+      .eq('id', boleto.parcela_id)
+      .maybeSingle();
+    if (!parcela || !abertos.includes(parcela.status)) return;
+    await admin.from('parcelas_venda').update({ status: 'pago', valor_pago: parcela.valor }).eq('id', parcela.id);
+  }
+}
+
+/** Boleto já pago no banco, mas a mensalidade/parcela ficou em aberto. */
+async function reconciliarTitulosPagosPeloBanco(admin, userId) {
+  const { data, error } = await admin
+    .from('boletos_parcela_venda')
+    .select('mensalidade_id, parcela_id, data_liquidacao_sicoob')
+    .eq('user_id', userId)
+    .eq('status_registro', 'pago')
+    .limit(1000);
+  if (error || !data?.length) return;
+
+  const abertos = ['pendente', 'parcial', 'atrasado'];
+  const dataPorMens = new Map();
+  const dataPorParcela = new Map();
+  for (const boleto of data) {
+    if (boleto.mensalidade_id && !dataPorMens.has(boleto.mensalidade_id)) {
+      dataPorMens.set(boleto.mensalidade_id, boleto.data_liquidacao_sicoob);
+    }
+    if (boleto.parcela_id && !dataPorParcela.has(boleto.parcela_id)) {
+      dataPorParcela.set(boleto.parcela_id, boleto.data_liquidacao_sicoob);
+    }
+  }
+
+  const mensIds = [...dataPorMens.keys()];
+  if (mensIds.length) {
+    const { data: mens } = await admin
+      .from('mensalidades')
+      .select('id, valor, status, data_pagamento')
+      .in('id', mensIds)
+      .in('status', abertos);
+    for (const m of mens ?? []) {
+      const data = String(dataPorMens.get(m.id) || m.data_pagamento || '').slice(0, 10) || null;
+      await admin
+        .from('mensalidades')
+        .update({ status: 'pago', valor_pago: m.valor, data_pagamento: data })
+        .eq('id', m.id);
+    }
+  }
+
+  const parcelaIds = [...dataPorParcela.keys()];
+  if (parcelaIds.length) {
+    const { data: parcelas } = await admin
+      .from('parcelas_venda')
+      .select('id, valor, status')
+      .in('id', parcelaIds)
+      .in('status', abertos);
+    for (const p of parcelas ?? []) {
+      await admin.from('parcelas_venda').update({ status: 'pago', valor_pago: p.valor }).eq('id', p.id);
+    }
+  }
+}
+
 function esperar(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -713,6 +801,14 @@ async function sincronizarBoletosPendentesUsuario(admin, userId, limit = 8, opts
   const inicio = Date.now();
   const deadline = inicio + 45000;
   const resultados = [];
+
+  if (rodada === 0) {
+    try {
+      await reconciliarTitulosPagosPeloBanco(admin, userId);
+    } catch (e) {
+      resultados.push({ boletoId: null, origem: 'reconciliar', baixado: false, erro: e.message });
+    }
+  }
 
   try {
     const liquidacoes = await baixarLiquidacoesSicoob(admin, userId, rodada, janelas, deadline);

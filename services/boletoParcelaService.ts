@@ -1150,8 +1150,13 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
       ...boleto,
       nota_fiscal_id,
       origem: isMen ? 'mensalidade' : 'venda',
-      parcela_status: status,
-      situacao_cobranca: situacaoCobrancaDeStatus(status),
+      parcela_status: boleto.status_registro === 'pago' ? 'pago' : status,
+      situacao_cobranca:
+        boleto.status_registro === 'pago'
+          ? 'pago'
+          : boleto.status_registro === 'baixado'
+            ? 'cancelado'
+            : situacaoCobrancaDeStatus(status),
       nome_cliente: String(boleto.pagador_nome || '—'),
       referencia_label,
       cliente_id: clienteId == null ? null : String(clienteId),
@@ -1224,8 +1229,14 @@ async function consultarLado(
       segmento,
     );
   }
-  if (statuses) {
+  if (opts.situacao === 'pago') {
+    const rel = lado === 'venda' ? 'parcelas_venda.status' : 'mensalidades.status';
+    q = q.or(`status_registro.eq.pago,${rel}.in.(${STATUS_PAGO.join(',')})`);
+  } else if (statuses) {
     q = q.in(lado === 'venda' ? 'parcelas_venda.status' : 'mensalidades.status', statuses);
+    if (opts.situacao === 'aberto') {
+      q = q.or('status_registro.is.null,status_registro.neq.pago');
+    }
   }
   const { data, error, count } = await q
     .order('pagador_nome', { ascending: true })
