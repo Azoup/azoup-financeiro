@@ -29,7 +29,11 @@ function centavosParaReais(c) {
 }
 
 function numeroBanco(valor) {
-  const n = Number(valor);
+  if (typeof valor === 'number') return Number.isFinite(valor) ? valor : 0;
+  const texto = String(valor ?? '').trim();
+  if (!texto) return 0;
+  const normal = texto.includes(',') ? texto.replace(/\./g, '').replace(',', '.') : texto;
+  const n = Number(normal);
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -39,16 +43,21 @@ function valorPagoPeloCliente(titulo, fallback) {
   const desconto = numeroBanco(titulo?.valorDesconto);
   const abatimento = numeroBanco(titulo?.valorAbatimento);
   const acrescimo =
-    numeroBanco(titulo?.valorMora) + numeroBanco(titulo?.valorMoraAtual) + numeroBanco(titulo?.valorMultaAtual);
+    numeroBanco(titulo?.valorMora) +
+    numeroBanco(titulo?.valorMoraAtual) +
+    numeroBanco(titulo?.valorMultaAtual) +
+    numeroBanco(titulo?.valorOutrosAcrescimos ?? titulo?.valorOutroAcrescimo);
   const tarifa = numeroBanco(titulo?.valorTarifaMovimento);
   const liquido = numeroBanco(titulo?.valorLiquido);
   const atualizado = numeroBanco(titulo?.valorTituloAtualizado);
+  const cobrado = numeroBanco(titulo?.valorCobrado);
   if (desconto > 0 || abatimento > 0) {
     const pago = centavosParaReais(
       reaisParaCentavos(face) - reaisParaCentavos(desconto) - reaisParaCentavos(abatimento) + reaisParaCentavos(acrescimo),
     );
     if (pago > 0) return pago;
   }
+  if (cobrado > 0 && reaisParaCentavos(face) - reaisParaCentavos(cobrado) >= 500) return cobrado;
   const creditado =
     liquido > 0 ? (tarifa > 0 ? centavosParaReais(reaisParaCentavos(liquido) + reaisParaCentavos(tarifa)) : liquido) : 0;
   const opcoes = [atualizado, creditado].filter((v) => v > 0);
@@ -788,6 +797,22 @@ function chaveNossoNumero(valor) {
   return parte.replace(/\D/g, '').replace(/^0+/, '');
 }
 
+function chavesNossoNumero(valor) {
+  const bruto = String(valor ?? '').trim();
+  const chaves = new Set();
+  const base = chaveNossoNumero(bruto);
+  if (base) chaves.add(base);
+  if (bruto.includes('-')) {
+    const comDigito = bruto.replace(/\D/g, '').replace(/^0+/, '');
+    if (comDigito) chaves.add(comDigito);
+  }
+  return [...chaves];
+}
+
+function chaveSeuNumero(valor) {
+  return String(valor ?? '').trim().toUpperCase().slice(0, 15);
+}
+
 function unzipPrimeiroJson(base64) {
   const buf = Buffer.from(String(base64).replace(/\s/g, ''), 'base64');
   const textoDireto = buf.toString('utf8').trim();
@@ -853,9 +878,13 @@ async function baixarLiquidacoesSicoob(admin, userId, rodada, janelas, deadline)
       listarSicoobPorStatus(admin, userId, 'pago'),
     ]);
     const porNumero = new Map();
+    const porSeu = new Map();
     for (const boleto of [...pagos, ...abertos]) {
-      const chave = chaveNossoNumero(boleto.nosso_numero_banco);
-      if (chave) porNumero.set(chave, boleto);
+      for (const chave of chavesNossoNumero(boleto.nosso_numero_banco)) porNumero.set(chave, boleto);
+      for (const origem of [boleto.sicoob_seu_numero, boleto.numero_documento]) {
+        const seu = chaveSeuNumero(origem);
+        if (seu) porSeu.set(seu, boleto);
+      }
     }
 
     for (let i = 0; i < janelas; i += 1) {
@@ -871,15 +900,16 @@ async function baixarLiquidacoesSicoob(admin, userId, rodada, janelas, deadline)
           dataFinal: janela.dataFinal,
         });
         let arquivos = [];
-        for (let tentativa = 0; tentativa < 4; tentativa += 1) {
-          if (tentativa > 0) await esperar(1000);
+        for (let tentativa = 0; tentativa < 10; tentativa += 1) {
+          if (Date.now() > deadline - 3000) break;
+          if (tentativa > 0) await esperar(1500);
           const consulta = await consultarSolicitacaoMovimentacaoSicoobApi({
             config: creds.config,
             certPath: creds.certPath,
             senha: creds.senha,
             codigoSolicitacao: codigo,
           });
-          if (consulta.pronto) {
+          if (consulta.pronto && consulta.idArquivos?.length) {
             arquivos = consulta.idArquivos;
             break;
           }
@@ -894,7 +924,10 @@ async function baixarLiquidacoesSicoob(admin, userId, rodada, janelas, deadline)
             idArquivo,
           });
           for (const titulo of titulosDaLiquidacao(base64)) {
-            const boleto = porNumero.get(chaveNossoNumero(titulo.numeroTitulo));
+            const boleto =
+              chavesNossoNumero(titulo.numeroTitulo)
+                .map((chave) => porNumero.get(chave))
+                .find(Boolean) || porSeu.get(chaveSeuNumero(titulo.seuNumero));
             if (!boleto) continue;
             const dataPagamento = String(titulo.dataLiquidacao || titulo.dataMovimentoLiquidacao || hojeIsoBrasil()).slice(0, 10);
             const valorPago = valorPagoPeloCliente(titulo, boleto.valor_documento);
@@ -904,7 +937,9 @@ async function baixarLiquidacoesSicoob(admin, userId, rodada, janelas, deadline)
               origem: 'LIQUIDACAO_SICOOB',
               payload: titulo,
             });
-            porNumero.delete(chaveNossoNumero(titulo.numeroTitulo));
+            for (const chave of chavesNossoNumero(boleto.nosso_numero_banco)) porNumero.delete(chave);
+            const seuBoleto = chaveSeuNumero(boleto.sicoob_seu_numero || boleto.numero_documento);
+            if (seuBoleto) porSeu.delete(seuBoleto);
             resultados.push({ boletoId: boleto.id, origem: 'movimentacao', ...baixa });
             if (baixa.baixado) baixados += 1;
           }
