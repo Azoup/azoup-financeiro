@@ -1197,6 +1197,76 @@ function aplicarFiltrosBoleto(
   return query;
 }
 
+type ChaveLista = {
+  id: string;
+  pagador_nome?: string | null;
+  data_vencimento?: string | null;
+  valor_documento?: number | null;
+};
+
+function ordenarChaves(a: ChaveLista, b: ChaveLista): number {
+  const nome = String(a.pagador_nome ?? '').localeCompare(String(b.pagador_nome ?? ''), 'pt-BR');
+  if (nome) return nome;
+  const data = String(a.data_vencimento ?? '').localeCompare(String(b.data_vencimento ?? ''));
+  if (data) return data;
+  return String(a.id).localeCompare(String(b.id));
+}
+
+async function listarChavesPagas(
+  userId: string,
+  lado: 'mensalidade' | 'venda',
+  opts: ContasReceberConsulta,
+): Promise<ChaveLista[]> {
+  const segmento =
+    opts.segmentoCodigo && opts.segmentoCodigo !== 'todos' ? opts.segmentoCodigo.trim() : null;
+  const rel = lado === 'venda' ? 'parcelas_venda.status' : 'mensalidades.status';
+  const select =
+    lado === 'venda'
+      ? `id, pagador_nome, data_vencimento, valor_documento, parcelas_venda!inner(status)${
+          segmento ? ', vendas!inner(clientes!inner(segmento_cliente_codigo))' : ''
+        }`
+      : `id, pagador_nome, data_vencimento, valor_documento, mensalidades!inner(status${
+          segmento ? ', clientes!inner(segmento_cliente_codigo)' : ''
+        })`;
+
+  const base = () => {
+    let q = aplicarFiltrosBoleto(
+      supabase.from('boletos_parcela_venda').select(select),
+      userId,
+      opts,
+      lado,
+    );
+    if (segmento) {
+      q = q.eq(
+        lado === 'venda'
+          ? 'vendas.clientes.segmento_cliente_codigo'
+          : 'mensalidades.clientes.segmento_cliente_codigo',
+        segmento,
+      );
+    }
+    return q;
+  };
+
+  const buscar = async (montar: () => ReturnType<typeof base>) => {
+    const out: ChaveLista[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await montar().range(from, from + 999);
+      if (error) throw new Error(error.message);
+      out.push(...((data ?? []) as ChaveLista[]));
+      if (!data || data.length < 1000) break;
+    }
+    return out;
+  };
+
+  const [peloBanco, peloTitulo] = await Promise.all([
+    buscar(() => base().eq('status_registro', 'pago')),
+    buscar(() => base().in(rel, STATUS_PAGO).neq('status_registro', 'pago')),
+  ]);
+  const unicos = new Map<string, ChaveLista>();
+  for (const row of [...peloBanco, ...peloTitulo]) unicos.set(row.id, row);
+  return [...unicos.values()].sort(ordenarChaves);
+}
+
 async function consultarLado(
   userId: string,
   lado: 'mensalidade' | 'venda',
@@ -1204,6 +1274,28 @@ async function consultarLado(
   from: number,
   to: number,
 ): Promise<{ rows: BoletoConsulta[]; total: number }> {
+  if (opts.situacao === 'pago') {
+    const chaves = await listarChavesPagas(userId, lado, opts);
+    const pagina = chaves.slice(from, to + 1);
+    if (!pagina.length) return { rows: [], total: chaves.length };
+    const ids = pagina.map((c) => c.id);
+    const { data, error } = await supabase
+      .from('boletos_parcela_venda')
+      .select(
+        lado === 'venda'
+          ? '*, parcelas_venda(status)'
+          : '*, mensalidades(status, cliente_id, data_pagamento)',
+      )
+      .eq('user_id', userId)
+      .in('id', ids);
+    if (error) throw new Error(error.message);
+    const porId = new Map(((data ?? []) as BoletoConsulta[]).map((row) => [row.id, row]));
+    return {
+      rows: ids.map((id) => porId.get(id)).filter((row): row is BoletoConsulta => Boolean(row)),
+      total: chaves.length,
+    };
+  }
+
   const statuses = statusesDaSituacao(opts.situacao);
   const segmento =
     opts.segmentoCodigo && opts.segmentoCodigo !== 'todos' ? opts.segmentoCodigo.trim() : null;
@@ -1229,15 +1321,9 @@ async function consultarLado(
       segmento,
     );
   }
-  if (opts.situacao === 'pago') {
-    const rel = lado === 'venda' ? 'parcelas_venda.status' : 'mensalidades.status';
-    const pagos = STATUS_PAGO.map((s) => `${rel}.eq.${s}`).join(',');
-    q = q.or(`status_registro.eq.pago,${pagos}`);
-  } else if (statuses) {
+  if (statuses) {
     q = q.in(lado === 'venda' ? 'parcelas_venda.status' : 'mensalidades.status', statuses);
-    if (opts.situacao === 'aberto') {
-      q = q.or('status_registro.is.null,status_registro.neq.pago');
-    }
+    if (opts.situacao === 'aberto') q = q.neq('status_registro', 'pago');
   }
   const { data, error, count } = await q
     .order('pagador_nome', { ascending: true })
@@ -1259,13 +1345,9 @@ async function somarRecebido(userId: string, opts: ContasReceberConsulta): Promi
       ? [optsPago.origem]
       : ['mensalidade', 'venda'];
   let soma = 0;
-  const tamanho = 500;
   for (const lado of lados) {
-    for (let from = 0; ; from += tamanho) {
-      const { rows, total } = await consultarLado(userId, lado, optsPago, from, from + tamanho - 1);
-      for (const row of rows) soma += Number(row.valor_documento) || 0;
-      if (from + rows.length >= total || rows.length < tamanho) break;
-    }
+    const chaves = await listarChavesPagas(userId, lado, optsPago);
+    for (const row of chaves) soma += Number(row.valor_documento) || 0;
   }
   return Math.round(soma * 100) / 100;
 }
