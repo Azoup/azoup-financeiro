@@ -1231,7 +1231,8 @@ async function consultarLado(
   }
   if (opts.situacao === 'pago') {
     const rel = lado === 'venda' ? 'parcelas_venda.status' : 'mensalidades.status';
-    q = q.or(`status_registro.eq.pago,${rel}.in.(${STATUS_PAGO.join(',')})`);
+    const pagos = STATUS_PAGO.map((s) => `${rel}.eq.${s}`).join(',');
+    q = q.or(`status_registro.eq.pago,${pagos}`);
   } else if (statuses) {
     q = q.in(lado === 'venda' ? 'parcelas_venda.status' : 'mensalidades.status', statuses);
     if (opts.situacao === 'aberto') {
