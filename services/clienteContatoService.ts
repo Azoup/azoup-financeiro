@@ -8,19 +8,32 @@ export function isEmailValido(email: unknown): boolean {
   return Boolean(s) && EMAIL_RE.test(s);
 }
 
-/** Primeiro e-mail cadastrado em contatos_cliente (tipo email). */
-export async function fetchEmailCliente(clienteId: unknown): Promise<string | null> {
+/** Todos os e-mails cadastrados em contatos_cliente (tipo email), sem repetir. */
+export async function fetchEmailsCliente(clienteId: unknown): Promise<string[]> {
   const id = safeTrim(clienteId);
-  if (!id) return null;
+  if (!id) return [];
   const { data, error } = await supabase
     .from('contatos_cliente')
     .select('valor_contato')
     .eq('cliente_id', id)
     .eq('tipo_contato', 'email')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .order('created_at', { ascending: true });
   if (error) throw new Error(error.message);
-  const email = safeTrim((data as { valor_contato?: unknown } | null)?.valor_contato);
-  return email && isEmailValido(email) ? email : null;
+  const emails: string[] = [];
+  const vistos = new Set<string>();
+  for (const row of (data ?? []) as { valor_contato?: unknown }[]) {
+    const email = safeTrim(row?.valor_contato);
+    if (!isEmailValido(email)) continue;
+    const chave = email.toLowerCase();
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    emails.push(email);
+  }
+  return emails;
+}
+
+/** E-mails do cliente, separados por vírgula. */
+export async function fetchEmailCliente(clienteId: unknown): Promise<string | null> {
+  const emails = await fetchEmailsCliente(clienteId);
+  return emails.length ? emails.join(', ') : null;
 }

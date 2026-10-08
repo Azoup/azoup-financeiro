@@ -1,7 +1,7 @@
 /**
  * Envio automático do boleto por e-mail (Resend).
  * From: EMAIL_FROM ou Azoup <jessica@azoup.com.br>
- * To: primeiro e-mail em contatos_cliente do cliente do boleto.
+ * To: todos os e-mails em contatos_cliente do cliente do boleto.
  * API key: só RESEND_API_KEY (nunca hardcoded).
  */
 
@@ -32,20 +32,32 @@ function isEmailValido(email) {
   return Boolean(s) && EMAIL_RE.test(s);
 }
 
-async function fetchEmailClienteAdmin(admin, clienteId) {
+async function fetchEmailsClienteAdmin(admin, clienteId) {
   const id = safeTrim(clienteId);
-  if (!id) return null;
+  if (!id) return [];
   const { data, error } = await admin
     .from('contatos_cliente')
     .select('valor_contato')
     .eq('cliente_id', id)
     .eq('tipo_contato', 'email')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .order('created_at', { ascending: true });
   if (error) throw new Error(error.message);
-  const email = safeTrim(data?.valor_contato);
-  return isEmailValido(email) ? email : null;
+  const emails = [];
+  const vistos = new Set();
+  for (const row of data ?? []) {
+    const email = safeTrim(row?.valor_contato);
+    if (!isEmailValido(email)) continue;
+    const chave = email.toLowerCase();
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    emails.push(email);
+  }
+  return emails;
+}
+
+async function fetchEmailClienteAdmin(admin, clienteId) {
+  const emails = await fetchEmailsClienteAdmin(admin, clienteId);
+  return emails[0] ?? null;
 }
 
 async function resolveClienteId(admin, boleto) {
@@ -141,9 +153,22 @@ async function enviarEmailResend({ to, subject, text, pdfBuffer, filename, attac
 
   const from = safeTrim(process.env.EMAIL_FROM) || DEFAULT_FROM;
 
+  const lista = (Array.isArray(to) ? to : [to]).map((item) => safeTrim(item)).filter(isEmailValido);
+  const destinatarios = [];
+  const vistos = new Set();
+  for (const email of lista) {
+    const chave = email.toLowerCase();
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    destinatarios.push(email);
+  }
+  if (!destinatarios.length) {
+    return { skipped: true, reason: 'sem_email_cadastro' };
+  }
+
   const payload = {
     from,
-    to: [to],
+    to: destinatarios,
     subject,
     text,
     html: corpoHtml(text),
@@ -174,10 +199,10 @@ async function enviarEmailResend({ to, subject, text, pdfBuffer, filename, attac
       body?.error?.message ||
       (typeof body?.error === 'string' ? body.error : null) ||
       `Resend HTTP ${res.status}`;
-    return { skipped: false, enviado: false, error: msg, to };
+    return { skipped: false, enviado: false, error: msg, to: destinatarios.join(', ') };
   }
 
-  return { enviado: true, to, id: body?.id ?? null };
+  return { enviado: true, to: destinatarios.join(', '), id: body?.id ?? null };
 }
 
 /**
@@ -213,8 +238,8 @@ async function tentarEnviarEmailAposEmissao(admin, userId, emitResult) {
     const clienteId = await resolveClienteId(admin, boleto);
     if (!clienteId) return { skipped: true, reason: 'sem_cliente' };
 
-    const to = await fetchEmailClienteAdmin(admin, clienteId);
-    if (!to) return { skipped: true, reason: 'sem_email_cadastro' };
+    const to = await fetchEmailsClienteAdmin(admin, clienteId);
+    if (!to.length) return { skipped: true, reason: 'sem_email_cadastro' };
 
     const { data: cliente } = await admin
       .from('clientes')
@@ -266,7 +291,7 @@ async function tentarEnviarEmailAposEmissao(admin, userId, emitResult) {
 
     const pdfBuffer = await baixarPdfBytes(admin, boleto);
     if (!pdfBuffer?.length) {
-      return { skipped: true, reason: 'sem_pdf', to };
+      return { skipped: true, reason: 'sem_pdf', to: to.join(', ') };
     }
 
     const nomeCliente = safeTrim(cliente?.nome) || safeTrim(cliente?.nome_fantasia) || 'cliente';
@@ -302,4 +327,5 @@ module.exports = {
   tentarEnviarEmailAposEmissao,
   enviarEmailResend,
   fetchEmailClienteAdmin,
+  fetchEmailsClienteAdmin,
 };

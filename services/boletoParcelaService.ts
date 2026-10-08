@@ -1089,8 +1089,15 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
       if (c.tipo_contato === 'whatsapp' && !whatsappPorCliente.has(c.cliente_id)) {
         whatsappPorCliente.set(c.cliente_id, { valor: c.valor_contato, nome: c.nome_contato });
       }
-      if (c.tipo_contato === 'email' && !emailPorCliente.has(c.cliente_id)) {
-        emailPorCliente.set(c.cliente_id, { valor: c.valor_contato, nome: c.nome_contato });
+      if (c.tipo_contato === 'email') {
+        const email = String(c.valor_contato ?? '').trim();
+        if (!email) continue;
+        const atual = emailPorCliente.get(c.cliente_id);
+        if (!atual) {
+          emailPorCliente.set(c.cliente_id, { valor: email, nome: c.nome_contato });
+        } else if (!atual.valor.toLowerCase().split(', ').includes(email.toLowerCase())) {
+          atual.valor = `${atual.valor}, ${email}`;
+        }
       }
     }
   }

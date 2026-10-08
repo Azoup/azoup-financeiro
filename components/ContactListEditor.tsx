@@ -33,15 +33,11 @@ export function ContactListEditor({ contatos, onChange, compact, hideTitle }: Pr
   return (
     <View style={[styles.block, compact && styles.blockCompact]}>
       {!hideTitle ? (
-        <>
-          <Text style={[styles.sectionTitle, compact && styles.sectionTitleCompact]}>Contatos</Text>
-          {!compact ? (
-            <Text style={styles.sectionHint}>
-              Opcional. Você pode cadastrar o cliente sem contato e incluir depois.
-            </Text>
-          ) : null}
-        </>
+        <Text style={[styles.sectionTitle, compact && styles.sectionTitleCompact]}>Contatos</Text>
       ) : null}
+      <Text style={[styles.sectionHint, compact && styles.sectionHintCompact]}>
+        Pode cadastrar vários e-mails. Boleto e nota fiscal são enviados para todos.
+      </Text>
       {contatos.length === 0 ? (
         <Text style={[styles.emptyHint, compact && styles.emptyHintCompact]}>Nenhum contato.</Text>
       ) : null}
@@ -109,12 +105,20 @@ export function ContactListEditor({ contatos, onChange, compact, hideTitle }: Pr
         </View>
       ))}
 
-      <PrimaryButton
-        title={compact ? '+ Contato' : 'Adicionar contato'}
-        variant="secondary"
-        onPress={add}
-        style={compact ? styles.addBtnCompact : undefined}
-      />
+      <View style={styles.addRow}>
+        <PrimaryButton
+          title="+ E-mail"
+          variant="secondary"
+          onPress={() => onChange([...contatos, { nome_contato: '', tipo_contato: 'email', valor_contato: '' }])}
+          style={compact ? styles.addBtnCompact : styles.addBtn}
+        />
+        <PrimaryButton
+          title="+ WhatsApp"
+          variant="secondary"
+          onPress={add}
+          style={compact ? styles.addBtnCompact : styles.addBtn}
+        />
+      </View>
     </View>
   );
 }
@@ -141,6 +145,17 @@ const styles = StyleSheet.create({
     color: colors.gray600,
     lineHeight: 17,
     marginBottom: spacing.md,
+  },
+  sectionHintCompact: {
+    fontSize: 12,
+    marginBottom: spacing.sm,
+  },
+  addRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  addBtn: {
+    flex: 1,
   },
   emptyHint: {
     fontSize: 14,
@@ -236,6 +251,7 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   addBtnCompact: {
+    flex: 1,
     minHeight: 40,
   },
 });

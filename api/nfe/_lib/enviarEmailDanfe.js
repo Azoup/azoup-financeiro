@@ -1,10 +1,8 @@
 /**
- * Após autorizar a NFS-e: envia a DANFE (HTML) e o XML ao e-mail do cliente.
+ * Após autorizar a NFS-e: envia a DANFE (HTML) e o XML a todos os e-mails do cliente.
  * Mesmo remetente do boleto (Resend). Falha de e-mail não desfaz a nota.
  */
-const { enviarEmailResend } = require('../../boleto/_lib/enviarEmailBoleto');
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const { enviarEmailResend, fetchEmailsClienteAdmin } = require('../../boleto/_lib/enviarEmailBoleto');
 
 function safeTrim(v) {
   return typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim();
@@ -20,22 +18,6 @@ function htmlSemBotaoImprimir(html) {
   return String(html).replace(/<p class="noprint"[\s\S]*?<\/p>/gi, '');
 }
 
-async function fetchEmailCliente(admin, clienteId) {
-  const id = safeTrim(clienteId);
-  if (!id) return null;
-  const { data, error } = await admin
-    .from('contatos_cliente')
-    .select('valor_contato')
-    .eq('cliente_id', id)
-    .eq('tipo_contato', 'email')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  if (error) return null;
-  const email = safeTrim(data?.valor_contato);
-  return email && EMAIL_RE.test(email) ? email : null;
-}
-
 async function baixarHtmlDanfe(admin, storagePath) {
   const path = safeTrim(storagePath);
   if (!path) return null;
@@ -49,8 +31,8 @@ async function baixarHtmlDanfe(admin, storagePath) {
 async function tentarEnviarEmailDanfe(admin, { nota, cliente, danfeStoragePath, xml, danfeUrl }) {
   try {
     const clienteId = nota?.cliente_id || cliente?.id;
-    const to = await fetchEmailCliente(admin, clienteId);
-    if (!to) return { skipped: true, reason: 'sem_email_cadastro' };
+    const to = await fetchEmailsClienteAdmin(admin, clienteId);
+    if (!to.length) return { skipped: true, reason: 'sem_email_cadastro' };
 
     const nome = safeTrim(cliente?.nome) || safeTrim(cliente?.nome_fantasia) || 'cliente';
     const serie = safeTrim(nota?.serie) || '1';
@@ -90,7 +72,7 @@ async function tentarEnviarEmailDanfe(admin, { nota, cliente, danfeStoragePath, 
       });
     }
     if (!attachments.length && !danfeUrl) {
-      return { skipped: true, reason: 'sem_pdf', to };
+      return { skipped: true, reason: 'sem_pdf', to: to.join(', ') };
     }
 
     return await enviarEmailResend({
