@@ -47,7 +47,7 @@ import { confirmDestructive } from '@/utils/confirmDialog';
 import type { ContaReceberSituacao } from '@/utils/contaReceberCobranca';
 import { buildContasReceberExport } from '@/utils/exportReportBuilders';
 import { abrirDocumentoBoleto } from '@/utils/openBoletoDocumento';
-import { compartilharBoletoComFeedback } from '@/utils/compartilharBoletoEmail';
+import { compartilharBoletoComFeedback, enviarPendenciasEmLotes } from '@/utils/compartilharBoletoEmail';
 import { compartilharDanfseComFeedback } from '@/utils/danfseDocumento';
 import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate, toISODate } from '@/utils/date';
@@ -184,6 +184,8 @@ export default function ContasReceberScreen() {
   const [nfConfirmItem, setNfConfirmItem] = useState<ContaReceberListRow | null>(null);
   const [nfConfirmCompetencia, setNfConfirmCompetencia] = useState<string | null>(null);
   const [nfConfirmDisc, setNfConfirmDisc] = useState<string | undefined>(undefined);
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [pendenciaBusy, setPendenciaBusy] = useState(false);
 
   const carregar = useCallback(async (opts?: { silencioso?: boolean }) => {
     if (!user?.id) return;
@@ -330,6 +332,62 @@ export default function ContasReceberScreen() {
   }, [allRows]);
 
   const totalPaginas = Math.max(1, Math.ceil(totalDocumentos / 40));
+
+  const abertosIds = useMemo(
+    () => filteredRows.filter((r) => r.situacao_cobranca === 'aberto').map((r) => r.id),
+    [filteredRows],
+  );
+  const chaveAbertos = abertosIds.join('|');
+  useEffect(() => {
+    setSelecionados(new Set(chaveAbertos ? chaveAbertos.split('|') : []));
+  }, [chaveAbertos]);
+
+  const selecionadosAbertos = abertosIds.filter((id) => selecionados.has(id));
+  const todosAbertosMarcados = abertosIds.length > 0 && selecionadosAbertos.length === abertosIds.length;
+
+  const alternarSelecao = (id: string) => {
+    setSelecionados((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const alternarTodosPendentes = () => {
+    setSelecionados(todosAbertosMarcados ? new Set() : new Set(abertosIds));
+  };
+
+  const enviarPendencia = async () => {
+    if (!selecionadosAbertos.length || pendenciaBusy) return;
+    setPendenciaBusy(true);
+    try {
+      const resultados = await enviarPendenciasEmLotes(selecionadosAbertos);
+      const enviados = resultados.filter((r) => r.enviado).length;
+      const semEmail = resultados.filter((r) => r.reason === 'sem_email_cadastro').length;
+      const semPdf = resultados.filter((r) => r.reason === 'sem_pdf').length;
+      const outros = resultados.length - enviados - semEmail - semPdf;
+      const partes = [
+        `Enviados ${enviados}`,
+        `sem e-mail ${semEmail}`,
+        `sem PDF ${semPdf}`,
+      ];
+      if (outros > 0) {
+        const falha = resultados.find((r) => !r.enviado && r.reason !== 'sem_email_cadastro' && r.reason !== 'sem_pdf');
+        partes.push(falha?.error || `${outros} não enviado(s)`);
+      }
+      Toast.show({
+        type: enviados > 0 ? 'success' : 'info',
+        text1: 'Pendência por e-mail',
+        text2: partes.join(' · '),
+        visibilityTime: 8000,
+      });
+    } catch (e) {
+      Toast.show({ type: 'error', text1: 'Pendência por e-mail', text2: (e as Error).message });
+    } finally {
+      setPendenciaBusy(false);
+    }
+  };
 
   const resumo = useMemo(() => {
     let aberto = 0;
@@ -859,6 +917,8 @@ export default function ContasReceberScreen() {
       ? formatBRDate(parseISODate(item.data_pagamento)) || item.data_pagamento
       : '—';
     const isLast = index === filteredRows.length - 1;
+    const aberto = item.situacao_cobranca === 'aberto';
+    const marcado = aberto && selecionados.has(item.id);
     const atrasado =
       item.situacao_cobranca === 'aberto' && item.parcela_status === 'atrasado';
     const temWhats = Boolean(item.whatsapp?.trim());
@@ -867,6 +927,20 @@ export default function ContasReceberScreen() {
 
     return (
       <View style={[styles.row, isLast && styles.rowLast]}>
+        <Pressable
+          style={styles.colCheck}
+          onPress={() => aberto && alternarSelecao(item.id)}
+          disabled={!aberto || pendenciaBusy}
+          accessibilityLabel={marcado ? 'Desmarcar pendência' : 'Marcar pendência'}
+        >
+          {aberto ? (
+            <Ionicons
+              name={marcado ? 'checkbox' : 'square-outline'}
+              size={20}
+              color={marcado ? colors.petroleum : colors.gray400}
+            />
+          ) : null}
+        </Pressable>
         <Pressable
           style={({ pressed }) => [styles.rowMain, pressed && styles.rowPressed]}
           onPress={() => abrirAcoes(item)}
@@ -1119,6 +1193,22 @@ export default function ContasReceberScreen() {
           </View>
         </View>
       </View>
+      <View style={styles.pendenciaRow}>
+        <Pressable
+          style={[styles.pendenciaBtn, (!selecionadosAbertos.length || pendenciaBusy) && styles.pendenciaBtnOff]}
+          onPress={() => void enviarPendencia()}
+          disabled={!selecionadosAbertos.length || pendenciaBusy}
+        >
+          {pendenciaBusy ? (
+            <ActivityIndicator size="small" color={colors.white} />
+          ) : (
+            <Ionicons name="mail-outline" size={16} color={colors.white} />
+          )}
+          <Text style={styles.pendenciaBtnTxt}>
+            {pendenciaBusy ? 'Enviando…' : `Enviar pendência (${selecionadosAbertos.length})`}
+          </Text>
+        </Pressable>
+      </View>
       <View style={styles.recebidoCard}>
         <Text style={styles.recebidoLab}>Recebido no filtro</Text>
         <Text style={styles.recebidoVal}>{formatBRL(totalRecebido)}</Text>
@@ -1171,6 +1261,18 @@ export default function ContasReceberScreen() {
 
       {filteredRows.length > 0 ? (
         <View style={styles.tableHead}>
+          <Pressable
+            style={styles.thCheck}
+            onPress={alternarTodosPendentes}
+            disabled={!abertosIds.length || pendenciaBusy}
+            accessibilityLabel="Marcar ou desmarcar pendentes desta página"
+          >
+            <Ionicons
+              name={todosAbertosMarcados ? 'checkbox' : 'square-outline'}
+              size={18}
+              color={abertosIds.length ? colors.white : 'rgba(255,255,255,0.4)'}
+            />
+          </Pressable>
           <Text style={[styles.th, styles.thCliente]}>Cliente</Text>
           <Text style={[styles.th, styles.thSeg]}>Segmento</Text>
           <Text style={[styles.th, styles.thTipo]}>Tipo</Text>
@@ -1491,6 +1593,24 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.3,
   },
+  thCheck: { width: 36, alignItems: 'center', justifyContent: 'center' },
+  colCheck: { width: 36, alignItems: 'center', justifyContent: 'center' },
+  pendenciaRow: {
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  pendenciaBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: colors.petroleum,
+    borderRadius: radius.md,
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+  },
+  pendenciaBtnOff: { opacity: 0.45 },
+  pendenciaBtnTxt: { color: colors.white, fontWeight: '700', fontSize: 14 },
   thCliente: { flex: 2, minWidth: 0 },
   thSeg: { width: 88 },
   segLabel: {

@@ -74,6 +74,49 @@ export async function enviarBoletoPorEmailDireto(boletoId: string): Promise<Emit
   return body.email ?? { skipped: true, reason: 'sem_resposta' };
 }
 
+export type PendenciaEmailItem = EmitirBoletoEmailResult & { boletoId?: string };
+
+/** Envia o texto de pendência e o PDF, em lotes curtos, só para os boletos informados. */
+export async function enviarPendenciasEmLotes(boletoIds: string[]): Promise<PendenciaEmailItem[]> {
+  const ids = boletoIds.map((id) => safeTrim(id)).filter(Boolean);
+  if (!ids.length) return [];
+
+  const { data: session } = await supabase.auth.getSession();
+  const token = session.session?.access_token;
+  if (!token) throw new Error('Sessão expirada. Faça login novamente.');
+
+  const base = boletoApiBaseUrl();
+  if (!base) {
+    throw new Error('URL da API não configurada (use a mesma origem web ou EXPO_PUBLIC_NFE_API_URL).');
+  }
+
+  const saida: PendenciaEmailItem[] = [];
+  const tamanho = 5;
+  for (let i = 0; i < ids.length; i += tamanho) {
+    const slice = ids.slice(i, i + tamanho);
+    const res = await fetch(`${base}/api/boleto/emitir-lote`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ action: 'enviar-pendencia', boletoIds: slice }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      success?: boolean;
+      message?: string;
+      resultados?: PendenciaEmailItem[];
+    };
+    if (!res.ok || body.success === false) {
+      const msg = body.message ?? `Falha ao enviar pendência (${res.status}).`;
+      for (const boletoId of slice) saida.push({ boletoId, enviado: false, error: msg });
+      continue;
+    }
+    saida.push(...(body.resultados ?? []));
+  }
+  return saida;
+}
+
 function mensagemEmailResultado(email: EmitirBoletoEmailResult): { type: 'success' | 'info' | 'error'; text1: string; text2?: string } {
   if (email.enviado && email.to) {
     return {

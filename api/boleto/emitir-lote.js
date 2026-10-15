@@ -2,7 +2,7 @@ const { getAdmin, getUserFromBearer } = require('../nfe/_lib/supabaseAdmin');
 const { emitirUmBoleto } = require('./_lib/emitirBoleto');
 const { emitirUmBoletoC6 } = require('./_lib/emitirBoletoC6');
 const { loadC6Credentials } = require('./_lib/c6Credentials');
-const { tentarEnviarEmailAposEmissao } = require('./_lib/enviarEmailBoleto');
+const { tentarEnviarEmailAposEmissao, enviarPendenciaBoleto } = require('./_lib/enviarEmailBoleto');
 const { cancelarUmBoletoNoBanco } = require('./_lib/cancelarBoletoRegistrado');
 const { alterarVencimentoBoleto } = require('./_lib/alterarVencimentoBoleto');
 const {
@@ -20,6 +20,7 @@ const {
  * - padrão: emite boletos (Sicoob/C6) + e-mail automático do PDF
  * - action=pix-cob | pix-cobv | pix-get | pix-patch | receivables | transactions
  * - action=enviar-email-boleto (reenvio pontual)
+ * - action=enviar-pendencia (texto de cobrança + PDF, só títulos em aberto)
  * - action=cancelar-boletos (baixa/cancelamento no banco)
  * - action=alterar-vencimento (data no sistema e no Sicoob/C6)
  * (evita nova serverless function no limite Hobby)
@@ -67,6 +68,21 @@ module.exports = async function handler(req, res) {
       }
       const result = await alterarVencimentoBoleto(admin, user.id, boletoId, dataVencimento);
       return res.status(200).json(result);
+    }
+
+    if (action === 'enviar-pendencia') {
+      const boletoIds = Array.isArray(body.boletoIds) ? body.boletoIds.map((id) => String(id || '').trim()).filter(Boolean) : [];
+      if (!boletoIds.length) {
+        return res.status(400).json({ success: false, message: 'Informe boletoIds.' });
+      }
+      if (boletoIds.length > 8) {
+        return res.status(400).json({ success: false, message: 'Envie no máximo 8 pendências por vez.' });
+      }
+      const resultados = [];
+      for (const boletoId of boletoIds) {
+        resultados.push(await enviarPendenciaBoleto(admin, user.id, boletoId));
+      }
+      return res.status(200).json({ success: true, resultados });
     }
 
     if (action === 'enviar-email-boleto') {
