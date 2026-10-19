@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { enderecoPagadorAtualDoBoleto } from '@/services/boletoParcelaService';
 import type { BoletoParcelaVendaRow } from '@/types/contasReceber';
 import { calcularEncargosBoleto } from '@/utils/boletoEncargos';
 import { buildBoletoCobrancaHtml } from '@/utils/boletoCobrancaHtml';
@@ -87,7 +88,8 @@ export async function abrirDocumentoBoleto(row: BoletoParcelaVendaRow): Promise<
     );
   }
 
-  const html = buildBoletoCobrancaHtml(row);
+  const pagadorAtual = await enderecoPagadorAtualDoBoleto(row).catch(() => null);
+  const html = buildBoletoCobrancaHtml(pagadorAtual ? { ...row, ...pagadorAtual } : row);
 
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     openHtmlInNewTabWeb(html);

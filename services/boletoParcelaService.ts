@@ -185,6 +185,98 @@ function cidadeUfCepCliente(c: ClienteAddr): string {
   return trimJoin([cidadeUf, cep], ' · ');
 }
 
+function camposPagadorDoCliente(cli: ClienteAddr): {
+  pagador_nome: string;
+  pagador_documento: string;
+  pagador_endereco: string;
+  pagador_cidade_uf_cep: string;
+} {
+  const pagNome = (cli.nome_empresa || cli.nome_cliente || '').trim();
+  return {
+    pagador_nome: pagNome || '—',
+    pagador_documento: clienteDocFiscal(cli) || '—',
+    pagador_endereco: linhaEnderecoCliente(cli) || '—',
+    pagador_cidade_uf_cep: cidadeUfCepCliente(cli) || '—',
+  };
+}
+
+/** Atualiza endereço/cidade do pagador nos boletos em aberto desse cliente. */
+export async function sincronizarEnderecoPagadorBoletos(clienteId: string): Promise<void> {
+  const id = String(clienteId ?? '').trim();
+  if (!id) return;
+
+  const { data: cliente, error } = await supabase
+    .from('clientes')
+    .select(CLIENTE_EMBED_SELECT)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!cliente) return;
+
+  const campos = camposPagadorDoCliente(mapClienteEnderecoFiscal(cliente as ClienteDbRow));
+
+  const [{ data: mens }, { data: vendas }] = await Promise.all([
+    supabase.from('mensalidades').select('id').eq('cliente_id', id),
+    supabase.from('vendas').select('id').eq('cliente_id', id),
+  ]);
+  const mensIds = (mens ?? []).map((r) => String((r as { id: string }).id));
+  const vendaIds = (vendas ?? []).map((r) => String((r as { id: string }).id));
+  if (!mensIds.length && !vendaIds.length) return;
+
+  const abertos = ['informativo', 'pendente', 'registrado', 'erro'];
+  if (mensIds.length) {
+    const { error: e1 } = await supabase
+      .from('boletos_parcela_venda')
+      .update(campos)
+      .in('mensalidade_id', mensIds)
+      .in('status_registro', abertos);
+    if (e1) throw new Error(e1.message);
+  }
+  if (vendaIds.length) {
+    const { error: e2 } = await supabase
+      .from('boletos_parcela_venda')
+      .update(campos)
+      .in('venda_id', vendaIds)
+      .in('status_registro', abertos);
+    if (e2) throw new Error(e2.message);
+  }
+}
+
+/** Lê o endereço atual do cliente para o carnê HTML, sem depender do snapshot antigo. */
+export async function enderecoPagadorAtualDoBoleto(
+  boleto: Pick<BoletoParcelaVendaRow, 'mensalidade_id' | 'venda_id' | 'pagador_nome' | 'pagador_documento' | 'pagador_endereco' | 'pagador_cidade_uf_cep'>,
+): Promise<{
+  pagador_nome: string;
+  pagador_documento: string;
+  pagador_endereco: string;
+  pagador_cidade_uf_cep: string;
+} | null> {
+  let clienteId: string | null = null;
+  if (boleto.mensalidade_id) {
+    const { data } = await supabase
+      .from('mensalidades')
+      .select('cliente_id')
+      .eq('id', boleto.mensalidade_id)
+      .maybeSingle();
+    clienteId = (data as { cliente_id?: string } | null)?.cliente_id ?? null;
+  } else if (boleto.venda_id) {
+    const { data } = await supabase
+      .from('vendas')
+      .select('cliente_id')
+      .eq('id', boleto.venda_id)
+      .maybeSingle();
+    clienteId = (data as { cliente_id?: string } | null)?.cliente_id ?? null;
+  }
+  if (!clienteId) return null;
+  const { data: cliente, error } = await supabase
+    .from('clientes')
+    .select(CLIENTE_EMBED_SELECT)
+    .eq('id', clienteId)
+    .maybeSingle();
+  if (error || !cliente) return null;
+  return camposPagadorDoCliente(mapClienteEnderecoFiscal(cliente as ClienteDbRow));
+}
+
 function linhaEnderecoBenef(perfil: {
   logradouro: string;
   numero: string;
@@ -305,7 +397,7 @@ async function buildSnapshotBenefPag(
         })
       : '—';
 
-  const pagNome = (cli.nome_empresa || cli.nome_cliente || '').trim();
+  const pagador = camposPagadorDoCliente(cli);
 
   return {
     beneficiario_razao_social: benefRazao,
@@ -313,10 +405,7 @@ async function buildSnapshotBenefPag(
     beneficiario_endereco: benefEnd,
     beneficiario_bairro: benefBairro,
     beneficiario_cidade_uf_cep: benefCidade,
-    pagador_nome: pagNome || '—',
-    pagador_documento: clienteDocFiscal(cli) || '—',
-    pagador_endereco: linhaEnderecoCliente(cli) || '—',
-    pagador_cidade_uf_cep: cidadeUfCepCliente(cli) || '—',
+    ...pagador,
     mensagem_pagador: (perfil?.mensagem_padrao_pagador ?? '').trim() || null,
     local_pagamento:
       (perfil?.local_pagamento ?? '').trim() || 'PAGÁVEL PREFERENCIALMENTE NOS CANAIS DO SEU BANCO',

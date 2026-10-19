@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { sincronizarEnderecoPagadorBoletos } from '@/services/boletoParcelaService';
 import { removeClientePdf, uploadClientePdf } from '@/services/clientePdfStorage';
 import type {
   Cliente,
@@ -405,6 +406,8 @@ export async function updateCliente(
     );
     if (insErr) throw new Error(insErr.message);
   }
+
+  await sincronizarEnderecoPagadorBoletos(clienteId).catch(() => undefined);
 
   if (values.cancelado) {
     const texto = values.cancelamento_justificativa.trim();

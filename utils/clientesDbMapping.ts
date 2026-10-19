@@ -57,7 +57,8 @@ export const CLIENTE_GERAR_MENSALIDADES_SELECT =
   'id, nome, nome_fantasia, mensalidade, valor_mensalidade_anterior, segmento_cliente_codigo, tipo_cliente, cancelado, ativo, data_cancelamento, data_reajuste, data_inicio, dia_vencimento, tipo_faturamento, parcelas_anuais, proxima_geracao_mes, congelado_ate, emite_nf, emitente_nf_id';
 
 /** Join embutido em outras tabelas (mensalidades, vendas, NF). */
-export const CLIENTE_EMBED_SELECT = 'nome_fantasia, nome, cnpj, documento, emite_nf, emitente_nf_id, logradouro, numero, bairro, cidade, estado, cep';
+export const CLIENTE_EMBED_SELECT =
+  'nome_fantasia, nome, cnpj, documento, emite_nf, emitente_nf_id, logradouro, numero, complemento, bairro, cidade, estado, cep';
 
 export const SORT_FIELD_DB: Record<SortField, string> = {
   nome_cliente: 'nome_fantasia',

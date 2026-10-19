@@ -22,6 +22,37 @@ async function resolveClienteId(admin, boleto) {
   return null;
 }
 
+function camposPagadorDoCliente(cliente) {
+  const endereco = [cliente.logradouro, cliente.numero, cliente.complemento]
+    .map((x) => (x == null ? '' : String(x).trim()))
+    .filter(Boolean)
+    .join(', ');
+  const uf = String(cliente.estado ?? cliente.uf ?? '')
+    .trim()
+    .toUpperCase()
+    .slice(0, 2);
+  const cidadeUf = [cliente.cidade, uf]
+    .map((x) => (x == null ? '' : String(x).trim()))
+    .filter(Boolean)
+    .join(' / ');
+  const cep = String(cliente.cep ?? '').trim();
+  const nome = String(cliente.nome || cliente.razao_social || cliente.nome_empresa || cliente.nome_fantasia || '')
+    .trim();
+  const doc = String(cliente.cnpj || cliente.documento || cliente.cpf || '').trim();
+  return {
+    pagador_nome: nome || '—',
+    pagador_documento: doc || '—',
+    pagador_endereco: endereco || '—',
+    pagador_cidade_uf_cep: [cidadeUf, cep].filter(Boolean).join(' · ') || '—',
+  };
+}
+
+async function sincronizarPagadorNoBoleto(admin, boletoId, cliente) {
+  const campos = camposPagadorDoCliente(cliente);
+  await admin.from('boletos_parcela_venda').update(campos).eq('id', boletoId);
+  return campos;
+}
+
 function diaIso(offsetDias) {
   const d = new Date();
   d.setDate(d.getDate() + offsetDias);
@@ -257,6 +288,7 @@ async function emitirUmBoleto(admin, userId, boletoId) {
 
   const { data: cliente, error: cliErr } = await admin.from('clientes').select('*').eq('id', clienteId).single();
   if (cliErr || !cliente) throw new Error(cliErr?.message ?? 'Cliente não encontrado.');
+  await sincronizarPagadorNoBoleto(admin, boletoId, cliente);
 
   let notaFiscal = null;
   if (boleto.nota_fiscal_id) {
