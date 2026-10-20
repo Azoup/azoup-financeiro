@@ -27,7 +27,7 @@ function sheetFromTable(name: string, columns: string[], rows: string[][]) {
 
 export function buildClientsListExport(
   items: ClienteListItem[],
-  opts: { search: string; situacao: ClienteSituacaoFiltro; sortLabel: string },
+  opts: { search: string; situacao: ClienteSituacaoFiltro; sortLabel: string; rangeLabel?: string },
 ): ExportReportPayload {
   const columns = [
     'Cliente',
@@ -54,7 +54,12 @@ export function buildClientsListExport(
 
   return {
     title: 'Clientes',
-    subtitle: `Filtros: busca "${opts.search || '—'}" · situação ${opts.situacao} · ordenação ${opts.sortLabel}`,
+    subtitle: [
+      `Filtros: busca "${opts.search || '—'}" · situação ${opts.situacao} · ordenação ${opts.sortLabel}`,
+      opts.rangeLabel ? opts.rangeLabel : null,
+    ]
+      .filter(Boolean)
+      .join(' · '),
     sections: [
       kvSection('Resumo', [
         { label: 'Total de registros', value: String(items.length) },
