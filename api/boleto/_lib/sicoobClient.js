@@ -625,4 +625,5 @@ module.exports = {
   isBoletoLiquidado,
   listarBoletosPagadorSicoobApi,
   onlyDigits,
+  textoSemAcento,
 };

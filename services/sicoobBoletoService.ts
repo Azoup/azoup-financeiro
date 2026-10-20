@@ -134,6 +134,46 @@ export async function reemitirBoletosSicoob(userId: string, boletoIds: string[])
   return emitirBoletosSicoobLote(userId, boletoIds, { exigirRegistro: true });
 }
 
+export async function atualizarPagadorBoletoSicoob(boletoId: string): Promise<{
+  success: boolean;
+  cidade?: string;
+  pdfAtualizado?: boolean;
+  message: string;
+}> {
+  const { data: session } = await supabase.auth.getSession();
+  const token = session.session?.access_token;
+  if (!token) throw new Error('Sessão expirada. Faça login novamente.');
+
+  const base = boletoApiBaseUrl();
+  if (!base) {
+    throw new Error('URL da API não configurada (use a mesma origem web ou EXPO_PUBLIC_NFE_API_URL).');
+  }
+
+  const res = await fetch(`${base}/api/boleto/emitir-lote`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ action: 'atualizar-pagador', boletoId }),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    success?: boolean;
+    cidade?: string;
+    pdfAtualizado?: boolean;
+    message?: string;
+  };
+  if (!res.ok || body.success === false) {
+    throw new Error(body.message ?? `Não atualizou o PDF do pagador (${res.status}).`);
+  }
+  return {
+    success: true,
+    cidade: body.cidade,
+    pdfAtualizado: body.pdfAtualizado,
+    message: body.message ?? 'PDF atualizado.',
+  };
+}
+
 export async function sincronizarBoletosPendentes(rodada = 0): Promise<{
   consultados: number;
   baixados: number;

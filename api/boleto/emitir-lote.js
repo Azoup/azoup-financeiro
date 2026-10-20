@@ -5,6 +5,7 @@ const { loadC6Credentials } = require('./_lib/c6Credentials');
 const { tentarEnviarEmailAposEmissao, enviarPendenciaBoleto } = require('./_lib/enviarEmailBoleto');
 const { cancelarUmBoletoNoBanco } = require('./_lib/cancelarBoletoRegistrado');
 const { alterarVencimentoBoleto } = require('./_lib/alterarVencimentoBoleto');
+const { atualizarPagadorBoletoSicoob } = require('./_lib/atualizarPagadorBoleto');
 const {
   cleanupTemp,
   criarPixCobC6Api,
@@ -23,6 +24,7 @@ const {
  * - action=enviar-pendencia (texto de cobrança + PDF, só títulos em aberto)
  * - action=cancelar-boletos (baixa/cancelamento no banco)
  * - action=alterar-vencimento (data no sistema e no Sicoob/C6)
+ * - action=atualizar-pagador (cidade/endereço no Sicoob e PDF oficial novo)
  * (evita nova serverless function no limite Hobby)
  */
 module.exports = async function handler(req, res) {
@@ -58,6 +60,15 @@ module.exports = async function handler(req, res) {
         erros,
         resultados,
       });
+    }
+
+    if (action === 'atualizar-pagador') {
+      const boletoId = body.boletoId;
+      if (!boletoId) {
+        return res.status(400).json({ success: false, message: 'Informe boletoId.' });
+      }
+      const result = await atualizarPagadorBoletoSicoob(admin, user.id, boletoId);
+      return res.status(200).json(result);
     }
 
     if (action === 'alterar-vencimento') {

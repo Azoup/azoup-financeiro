@@ -19,6 +19,7 @@ type Props = {
   onPdf: () => void;
   onRegistrarC6?: () => void;
   onRegistrarSicoob?: () => void;
+  onAtualizarPagador?: () => void;
   onWhatsApp: () => void;
   onEmail: () => void;
   onEmailNota?: () => void;
@@ -28,6 +29,7 @@ type Props = {
   pdfBusy?: boolean;
   c6Busy?: boolean;
   sicoobBusy?: boolean;
+  pagadorBusy?: boolean;
   emailBusy?: boolean;
   emailNotaBusy?: boolean;
   whatsBusy?: boolean;
@@ -102,6 +104,7 @@ export function ContaReceberAcoesModal({
   onPdf,
   onRegistrarC6,
   onRegistrarSicoob,
+  onAtualizarPagador,
   onWhatsApp,
   onEmail,
   onEmailNota,
@@ -111,6 +114,7 @@ export function ContaReceberAcoesModal({
   pdfBusy,
   c6Busy,
   sicoobBusy,
+  pagadorBusy,
   emailBusy,
   emailNotaBusy,
   whatsBusy,
@@ -255,6 +259,20 @@ export function ContaReceberAcoesModal({
                 disabled={sicoobBusy}
                 busy={sicoobBusy}
                 accent={colors.petroleum}
+              />
+            ) : null}
+
+            {aberto &&
+            item.tipo_emissao === 'sicoob' &&
+            Boolean(item.nosso_numero_banco) &&
+            Boolean(onAtualizarPagador) ? (
+              <AcaoRow
+                icon="refresh-outline"
+                label={pagadorBusy ? 'Atualizando PDF…' : 'Atualizar cidade no PDF'}
+                sub="Corrige o endereço do cadastro no boleto oficial do Sicoob"
+                onPress={onAtualizarPagador!}
+                disabled={pagadorBusy}
+                busy={pagadorBusy}
               />
             ) : null}
 

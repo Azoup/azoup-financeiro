@@ -15,7 +15,7 @@ import {
 import { alterarVencimentoBoleto } from '@/services/cancelarBoletoBancoService';
 import { reemitirBoletosC6 } from '@/services/c6BoletoService';
 import { pickEmitenteC6 } from '@/services/c6ConfigService';
-import { reemitirBoletosSicoob, sincronizarBoletosPendentes } from '@/services/sicoobBoletoService';
+import { atualizarPagadorBoletoSicoob, reemitirBoletosSicoob, sincronizarBoletosPendentes } from '@/services/sicoobBoletoService';
 import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import {
   fetchMensalidadeGeradaById,
@@ -163,6 +163,7 @@ export default function ContasReceberScreen() {
   const [emailNotaBusyId, setEmailNotaBusyId] = useState<string | null>(null);
   const [c6BusyId, setC6BusyId] = useState<string | null>(null);
   const [sicoobBusyId, setSicoobBusyId] = useState<string | null>(null);
+  const [pagadorBusyId, setPagadorBusyId] = useState<string | null>(null);
   const [cancelBusyId, setCancelBusyId] = useState<string | null>(null);
   const [reativarBusyId, setReativarBusyId] = useState<string | null>(null);
   const [nomeBeneficiario, setNomeBeneficiario] = useState<string | null>(null);
@@ -603,6 +604,32 @@ export default function ContasReceberScreen() {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setC6BusyId(null);
+    }
+  };
+
+  const atualizarPdfPagador = async (boletoId: string) => {
+    if (!user?.id) return;
+    setPagadorBusyId(boletoId);
+    try {
+      const result = await atualizarPagadorBoletoSicoob(boletoId);
+      await refreshLista();
+      Toast.show({
+        type: 'success',
+        text1: 'PDF do boleto atualizado',
+        text2: result.message,
+        visibilityTime: 8000,
+      });
+      const updated = await fetchBoletoParcelaById(user.id, boletoId);
+      if (updated) await abrirDocumentoBoleto(updated);
+    } catch (e) {
+      Toast.show({
+        type: 'error',
+        text1: 'Não atualizou o PDF',
+        text2: (e as Error).message,
+        visibilityTime: 9000,
+      });
+    } finally {
+      setPagadorBusyId(null);
     }
   };
 
@@ -1335,6 +1362,9 @@ export default function ContasReceberScreen() {
         onRegistrarSicoob={() => {
           if (acoesItem) void registrarNoSicoob(acoesItem.id);
         }}
+        onAtualizarPagador={() => {
+          if (acoesItem) void atualizarPdfPagador(acoesItem.id);
+        }}
         onWhatsApp={() => {
           if (acoesItem) void enviarWhatsApp(acoesItem);
         }}
@@ -1350,6 +1380,7 @@ export default function ContasReceberScreen() {
         pdfBusy={acoesItem != null && pdfId === acoesItem.id}
         c6Busy={acoesItem != null && c6BusyId === acoesItem.id}
         sicoobBusy={acoesItem != null && sicoobBusyId === acoesItem.id}
+        pagadorBusy={acoesItem != null && pagadorBusyId === acoesItem.id}
         emailBusy={acoesItem != null && emailBusyId === acoesItem.id}
         emailNotaBusy={acoesItem != null && emailNotaBusyId === acoesItem.id}
         whatsBusy={acoesItem != null && whatsBusyId === acoesItem.id}
