@@ -1,8 +1,6 @@
 import type { ContaReceberListRow } from '@/types/contasReceber';
 import { buildBoletoCobrancaHtml } from '@/utils/boletoCobrancaHtml';
-import { calcularEncargosBoleto } from '@/utils/boletoEncargos';
-import { formatBRL } from '@/utils/currency';
-import { formatBRDate, parseISODate } from '@/utils/date';
+import { mensagemPendenciaBoleto } from '@/utils/mensagemPendenciaBoleto';
 import { resolveBoletoPdfUrl } from '@/utils/openBoletoDocumento';
 import { safeTrim } from '@/utils/safeTrim';
 import * as Print from 'expo-print';
@@ -53,53 +51,9 @@ export function formatWhatsAppDisplay(raw: string): string {
 }
 
 export function buildMensagemCobrancaWhatsapp(
-  row: Pick<
-    ContaReceberListRow,
-    | 'nome_cliente'
-    | 'referencia_label'
-    | 'valor_documento'
-    | 'data_vencimento'
-    | 'numero_documento'
-    | 'whatsapp'
-    | 'linha_digitavel'
-    | 'pix_copia_cola'
-  >,
-  opts?: { nomeBeneficiario?: string; incluirTelefone?: boolean; pdfUrl?: string | null },
+  row: Pick<ContaReceberListRow, 'data_vencimento'>,
 ): string {
-  const venc = formatBRDate(parseISODate(row.data_vencimento)) || row.data_vencimento;
-  const encargos = calcularEncargosBoleto(row.valor_documento, row.data_vencimento);
-  const beneficiario = opts?.nomeBeneficiario?.trim();
-  const tel =
-    opts?.incluirTelefone && row.whatsapp
-      ? formatWhatsAppDisplay(row.whatsapp)
-      : null;
-  const linhas = [
-    `Olá, ${row.nome_cliente.trim() || 'cliente'}!`,
-    '',
-    beneficiario ? `Aqui é da *${beneficiario}*.` : null,
-    'Segue o boleto para pagamento:',
-    `• ${row.referencia_label}`,
-    encargos.vencido
-      ? `• Valor original: ${formatBRL(row.valor_documento)}`
-      : `• Valor: *${formatBRL(row.valor_documento)}*`,
-    encargos.vencido ? `• Multa (2%): *${formatBRL(encargos.multa)}*` : null,
-    encargos.vencido
-      ? `• Juros (0,033% ao dia × ${encargos.dias} dia(s)): *${formatBRL(encargos.juros)}*`
-      : null,
-    encargos.vencido ? `• Valor para pagamento hoje: *${formatBRL(encargos.total)}*` : null,
-    `• Vencimento: *${venc}*`,
-    row.numero_documento ? `• Documento: ${row.numero_documento}` : null,
-    row.linha_digitavel ? `\n*Linha digitável do boleto:*\n${row.linha_digitavel}` : null,
-    row.pix_copia_cola ? `\n*Pix Copia e Cola:*\n${row.pix_copia_cola}` : null,
-    '',
-    'O boleto segue em anexo.',
-    'Qualquer dúvida, estamos à disposição.',
-    'WhatsApp: (19) 98111-1724',
-    'Obrigado!',
-    tel ? `\n(Contato WhatsApp: ${tel})` : null,
-  ].filter((l): l is string => l != null && l !== '');
-
-  return linhas.join('\n');
+  return mensagemPendenciaBoleto(row.data_vencimento);
 }
 
 /**
@@ -123,7 +77,7 @@ export function resolveWhatsAppCobrancaUrl(
   if (!phone) {
     throw new Error('Número de WhatsApp inválido no cadastro do cliente.');
   }
-  const message = buildMensagemCobrancaWhatsapp(row, opts);
+  const message = buildMensagemCobrancaWhatsapp(row);
   return buildWhatsAppDeepLink(phone, message);
 }
 
@@ -264,9 +218,7 @@ export async function compartilharBoletoWhatsAppComPdf(
 
   const { blob, uri } = await obterPdfBoleto(row);
   const filename = `boleto_${safeTrim(row.numero_documento) || row.id}.pdf`;
-  const message = buildMensagemCobrancaWhatsapp(row, {
-    nomeBeneficiario: opts?.nomeBeneficiario,
-  });
+  const message = buildMensagemCobrancaWhatsapp(row);
 
   if (isWeb() && typeof File !== 'undefined') {
     const file = new File([blob], filename, { type: 'application/pdf' });
