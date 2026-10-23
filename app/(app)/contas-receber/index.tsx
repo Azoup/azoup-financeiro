@@ -11,6 +11,7 @@ import { useDebounce } from '@/hooks/useDebounce';
 import {
   fetchBoletoParcelaById,
   fetchContasReceberPagina,
+  sincronizarCarnesVendasFaltantes,
 } from '@/services/boletoParcelaService';
 import { alterarVencimentoBoleto } from '@/services/cancelarBoletoBancoService';
 import { reemitirBoletosC6 } from '@/services/c6BoletoService';
@@ -253,8 +254,39 @@ export default function ContasReceberScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      void carregar();
-    }, [carregar]),
+      void (async () => {
+        if (user?.id) {
+          try {
+            const r = await sincronizarCarnesVendasFaltantes(user.id);
+            if (r.gerados > 0) {
+              Toast.show({
+                type: 'success',
+                text1:
+                  r.gerados === 1
+                    ? '1 venda sem carnê foi lançada em A receber.'
+                    : `${r.gerados} vendas sem carnê foram lançadas em A receber.`,
+              });
+            }
+            if (r.falhas.length) {
+              Toast.show({
+                type: 'error',
+                text1: 'Não consegui gerar o carnê de uma venda',
+                text2: r.falhas[0],
+                visibilityTime: 9000,
+              });
+            }
+          } catch (e) {
+            Toast.show({
+              type: 'error',
+              text1: 'Não consegui lançar vendas em A receber',
+              text2: (e as Error).message,
+              visibilityTime: 9000,
+            });
+          }
+        }
+        await carregar();
+      })();
+    }, [carregar, user?.id]),
   );
 
   useFocusEffect(

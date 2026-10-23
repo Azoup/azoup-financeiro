@@ -144,8 +144,12 @@ export default function VendaDetailScreen() {
     if (!user?.id || !id) return;
     setGerandoCarne(true);
     try {
-      await regenerarCarneVenda(user.id, id);
-      Toast.show({ type: 'success', text1: 'Carnê gerado.', text2: 'Veja em A receber.' });
+      const r = await regenerarCarneVenda(user.id, id);
+      if (r.avisoBoleto) {
+        Toast.show({ type: 'error', text1: r.avisoBoleto, visibilityTime: 8000 });
+      } else {
+        Toast.show({ type: 'success', text1: 'Carnê gerado.', text2: 'Veja em A receber.' });
+      }
       await load();
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message, visibilityTime: 8000 });
@@ -284,15 +288,17 @@ export default function VendaDetailScreen() {
           <Text style={styles.meta}>Criada em {formatDateTimeBRFromISO(detail.created_at)}</Text>
         </Card>
 
-        {avisoBoletoMsg && qtdCarne === 0 ? (
+        {avisoBoletoMsg ? (
           <Card style={styles.avisoCard}>
-            <Text style={styles.avisoTit}>Carnê não foi gerado na venda</Text>
+            <Text style={styles.avisoTit}>
+              {qtdCarne === 0 ? 'Carnê não foi gerado na venda' : 'Carnê da venda incompleto'}
+            </Text>
             <Text style={styles.avisoTxt}>{avisoBoletoMsg}</Text>
           </Card>
         ) : null}
 
         <View style={styles.actions}>
-          {qtdCarne === 0 && detail.status !== 'cancelada' ? (
+          {detail.status !== 'cancelada' && qtdCarne < detail.parcelas.filter((p) => p.status !== 'cancelado').length ? (
             <PrimaryButton
               title={gerandoCarne ? 'Gerando carnê…' : 'Gerar carnê em A receber'}
               onPress={() => void onGerarCarne()}

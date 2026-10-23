@@ -50,7 +50,7 @@ export function textoDiaBoleto(valor: string): string {
 }
 
 function chaveClienteDia(clienteId: string, data: string): string {
-  return `${clienteId}|${diaIsoBoleto(data)}`;
+  return `${String(clienteId)}|${diaIsoBoleto(data)}`;
 }
 
 /** Clientes que já têm carnê não baixado naquele vencimento. */
@@ -455,7 +455,7 @@ export async function gerarBoletosParaVendaCriada(
   userId: string,
   vendaId: string,
   opts: { descricao: string },
-): Promise<{ avisoEmail?: string }> {
+): Promise<{ avisoEmail?: string; avisoBoleto?: string }> {
   const { data: venda, error: e0 } = await supabase
     .from('vendas')
     .select('cliente_id')
@@ -466,7 +466,10 @@ export async function gerarBoletosParaVendaCriada(
   if (e0) throw new Error(e0.message);
   if (!venda) throw new Error('Venda não encontrada para gerar boletos.');
 
-  const clienteId = (venda as { cliente_id: string }).cliente_id;
+  const clienteId = String((venda as { cliente_id: string | number | null }).cliente_id ?? '').trim();
+  if (!clienteId || clienteId === 'null' || clienteId === 'undefined') {
+    throw new Error('Esta venda está sem cliente. Não dá para gerar boleto em A receber.');
+  }
   const { data: cliRow } = await supabase
     .from('clientes')
     .select('emitente_nf_id')
@@ -493,16 +496,30 @@ export async function gerarBoletosParaVendaCriada(
   }[];
   if (!plist.length) throw new Error('Nenhuma parcela para gerar boletos.');
 
+  const { data: jaTem, error: eJa } = await supabase
+    .from('boletos_parcela_venda')
+    .select('parcela_id')
+    .eq('venda_id', vendaId)
+    .not('parcela_id', 'is', null);
+  if (eJa) throw wrapBoletoDbError(eJa);
+  const comBoleto = new Set(
+    ((jaTem ?? []) as { parcela_id: string | null }[])
+      .map((b) => b.parcela_id)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const faltantes = plist.filter((p) => !comBoleto.has(p.id));
+  if (!faltantes.length) return {};
+
   const ocupados = await chavesCobrancaClienteDia(
     userId,
     [clienteId],
-    plist.map((p) => p.data_vencimento),
+    faltantes.map((p) => p.data_vencimento),
   );
   const bloqueadas: string[] = [];
-  const livres = plist.filter((p) => {
+  const livres = faltantes.filter((p) => {
     const chave = `${clienteId}|${String(p.data_vencimento).slice(0, 10)}`;
     if (ocupados.has(chave)) {
-      bloqueadas.push(textoDiaBoleto(p.data_vencimento));
+      bloqueadas.push(`parcela ${p.numero_parcela} (${textoDiaBoleto(p.data_vencimento)})`);
       return false;
     }
     ocupados.add(chave);
@@ -510,14 +527,16 @@ export async function gerarBoletosParaVendaCriada(
   });
   if (!livres.length) {
     throw new Error(
-      `Este cliente já tem boleto neste dia (${bloqueadas.join(', ')}). Não gere nem emita outro.`,
+      `Este cliente já tem boleto neste dia (${bloqueadas.join(', ')}). Não gerei outro nesses vencimentos.`,
     );
   }
 
   const total = plist.length;
-  const rows = livres.map((p) => {
+  const insertedIds: string[] = [];
+  const falhasInsert: string[] = [];
+  for (const p of livres) {
     const descResumo = `${opts.descricao.trim()}\nParcela ${p.numero_parcela} de ${total}.`;
-    return {
+    const row = {
       user_id: userId,
       origem: 'venda' as const,
       venda_id: vendaId,
@@ -536,12 +555,19 @@ export async function gerarBoletosParaVendaCriada(
       tipo_emissao: banco,
       status_registro: 'pendente' as const,
     };
-  });
+    const { data: inserted, error: e3 } = await supabase
+      .from('boletos_parcela_venda')
+      .insert(row)
+      .select('id')
+      .maybeSingle();
+    if (e3) {
+      falhasInsert.push(`parcela ${p.numero_parcela}: ${wrapBoletoDbError(e3).message}`);
+      continue;
+    }
+    if (inserted?.id) insertedIds.push(inserted.id as string);
+  }
 
-  const { data: inserted, error: e3 } = await supabase.from('boletos_parcela_venda').insert(rows).select('id');
-  if (e3) throw wrapBoletoDbError(e3);
-
-  const boletoIds = ((inserted ?? []) as { id: string }[]).map((r) => r.id);
+  const boletoIds = insertedIds;
   let avisoEmail: string | undefined;
   if (boletoIds.length) {
     const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
@@ -557,10 +583,24 @@ export async function gerarBoletosParaVendaCriada(
       // Carnê informativo permanece em A receber; banco pode ser reemitido depois.
     }
   }
-  if (bloqueadas.length) {
+  if (!boletoIds.length && (bloqueadas.length || falhasInsert.length)) {
     throw new Error(
-      `Este cliente já tem boleto neste dia (${bloqueadas.join(', ')}). Não gerei outro nesses vencimentos.`,
+      [...bloqueadas.map((d) => `Já existe boleto neste dia (${d}).`), ...falhasInsert].join(' '),
     );
+  }
+  if (bloqueadas.length || falhasInsert.length) {
+    return {
+      avisoEmail,
+      avisoBoleto: [
+        boletoIds.length ? `Gerei ${boletoIds.length} carnê(s) em A receber.` : null,
+        bloqueadas.length
+          ? `Não gerei outro nestes vencimentos: ${bloqueadas.join(', ')}.`
+          : null,
+        ...falhasInsert,
+      ]
+        .filter(Boolean)
+        .join(' '),
+    };
   }
   return { avisoEmail };
 }
@@ -928,7 +968,7 @@ export async function sincronizarCarnesMensalidadesFaltantes(
 /** Recria carnês em A receber para vendas que foram salvas sem boleto/carnê. */
 export async function sincronizarCarnesVendasFaltantes(
   userId: string,
-): Promise<{ gerados: number }> {
+): Promise<{ gerados: number; falhas: string[] }> {
   const { data: vendas, error: e0 } = await supabase
     .from('vendas')
     .select('id, descricao')
@@ -936,40 +976,59 @@ export async function sincronizarCarnesVendasFaltantes(
     .neq('status', 'cancelada');
   if (e0) throw wrapBoletoDbError(e0);
   const vlist = (vendas ?? []) as { id: string; descricao: string }[];
-  if (!vlist.length) return { gerados: 0 };
+  if (!vlist.length) return { gerados: 0, falhas: [] };
 
-  const { data: boletos, error: e1 } = await supabase
-    .from('boletos_parcela_venda')
-    .select('venda_id')
-    .eq('user_id', userId)
-    .not('venda_id', 'is', null);
-  if (e1) throw wrapBoletoDbError(e1);
-
-  const comCarne = new Set(
-    ((boletos ?? []) as { venda_id: string | null }[])
-      .map((b) => b.venda_id)
-      .filter((id): id is string => Boolean(id)),
-  );
-
-  let gerados = 0;
-  for (const v of vlist) {
-    if (comCarne.has(v.id)) continue;
-
-    const { data: parcs, error: e2 } = await supabase
-      .from('parcelas_venda')
-      .select('id')
-      .eq('venda_id', v.id)
-      .limit(1);
-    if (e2) throw new Error(e2.message);
-    if (!parcs?.length) continue;
-
-    await gerarBoletosParaVendaCriada(userId, v.id, {
-      descricao: v.descricao?.trim() || 'Venda',
-    });
-    gerados += 1;
+  const boletosPorVenda = new Map<string, Set<string>>();
+  const vendaIds = vlist.map((v) => v.id);
+  for (let i = 0; i < vendaIds.length; i += 80) {
+    const fatia = vendaIds.slice(i, i + 80);
+    const { data: boletos, error: e1 } = await supabase
+      .from('boletos_parcela_venda')
+      .select('venda_id, parcela_id')
+      .eq('user_id', userId)
+      .in('venda_id', fatia);
+    if (e1) throw wrapBoletoDbError(e1);
+    for (const b of (boletos ?? []) as { venda_id: string | null; parcela_id: string | null }[]) {
+      if (!b.venda_id) continue;
+      const set = boletosPorVenda.get(b.venda_id) ?? new Set<string>();
+      if (b.parcela_id) set.add(b.parcela_id);
+      boletosPorVenda.set(b.venda_id, set);
+    }
   }
 
-  return { gerados };
+  const parcPorVenda = new Map<string, string[]>();
+  for (let i = 0; i < vendaIds.length; i += 80) {
+    const fatia = vendaIds.slice(i, i + 80);
+    const { data: parcs, error: e2 } = await supabase
+      .from('parcelas_venda')
+      .select('id, venda_id')
+      .in('venda_id', fatia);
+    if (e2) throw new Error(e2.message);
+    for (const p of (parcs ?? []) as { id: string; venda_id: string }[]) {
+      const arr = parcPorVenda.get(p.venda_id) ?? [];
+      arr.push(p.id);
+      parcPorVenda.set(p.venda_id, arr);
+    }
+  }
+
+  let gerados = 0;
+  const falhas: string[] = [];
+  for (const v of vlist) {
+    const todas = parcPorVenda.get(v.id) ?? [];
+    if (!todas.length) continue;
+    const ja = boletosPorVenda.get(v.id) ?? new Set<string>();
+    if (todas.every((id) => ja.has(id))) continue;
+    try {
+      await gerarBoletosParaVendaCriada(userId, v.id, {
+        descricao: v.descricao?.trim() || 'Venda',
+      });
+      gerados += 1;
+    } catch (e) {
+      falhas.push((e as Error).message);
+    }
+  }
+
+  return { gerados, falhas };
 }
 
 export async function countBoletosVenda(userId: string, vendaId: string): Promise<number> {
@@ -982,7 +1041,10 @@ export async function countBoletosVenda(userId: string, vendaId: string): Promis
   return count ?? 0;
 }
 
-export async function regenerarCarneVenda(userId: string, vendaId: string): Promise<void> {
+export async function regenerarCarneVenda(
+  userId: string,
+  vendaId: string,
+): Promise<{ avisoBoleto?: string }> {
   const { data: venda, error: e0 } = await supabase
     .from('vendas')
     .select('descricao, status')
@@ -995,12 +1057,7 @@ export async function regenerarCarneVenda(userId: string, vendaId: string): Prom
     throw new Error('Venda cancelada.');
   }
 
-  const qtd = await countBoletosVenda(userId, vendaId);
-  if (qtd > 0) {
-    throw new Error('Esta venda já possui carnê em A receber.');
-  }
-
-  await gerarBoletosParaVendaCriada(userId, vendaId, {
+  return gerarBoletosParaVendaCriada(userId, vendaId, {
     descricao: ((venda as { descricao: string }).descricao ?? '').trim() || 'Venda',
   });
 }
@@ -1288,7 +1345,9 @@ function aplicarFiltrosBoleto(
   if (opts.pagamentoAte) query = query.lte('data_liquidacao_sicoob', opts.pagamentoAte);
   const busca = textoBusca(opts.search);
   if (busca) {
-    query = query.or(`pagador_nome.ilike.%${busca}%,numero_documento.ilike.%${busca}%`);
+    query = query.or(
+      `pagador_nome.ilike.%${busca}%,numero_documento.ilike.%${busca}%,venda_descricao_resumo.ilike.%${busca}%`,
+    );
   }
   return query;
 }

@@ -122,6 +122,15 @@ export async function createVendaWithParcelas(
   try {
     const boletoRes = await gerarBoletosParaVendaCriada(userId, vendaId, { descricao });
     avisoEmail = boletoRes.avisoEmail;
+    avisoBoleto = boletoRes.avisoBoleto;
+    if (avisoBoleto) {
+      await supabase.from('vendas_financeiro_log').insert({
+        venda_id: vendaId,
+        user_id: userId,
+        tipo: 'aviso_boleto',
+        detalhe: { mensagem: avisoBoleto },
+      });
+    }
   } catch (eb) {
     avisoBoleto = (eb as Error).message ?? 'Não foi possível gerar os carnês em A receber.';
     await supabase.from('vendas_financeiro_log').insert({
@@ -271,7 +280,7 @@ export async function fetchVendasPage(params: {
 
   const baseRows = (data ?? []) as Venda[];
 
-  const clienteIds = [...new Set(baseRows.map((r) => r.cliente_id).filter(Boolean))];
+  const clienteIds = [...new Set(baseRows.map((r) => String(r.cliente_id ?? '')).filter(Boolean))];
   const clienteMap = new Map<string, { nome_cliente: string; nome_empresa: string | null }>();
   if (clienteIds.length) {
     const { data: cliRows, error: ec } = await supabase
@@ -322,7 +331,7 @@ export async function fetchVendasPage(params: {
   }
 
   const rows: VendaListRow[] = baseRows.map((r) => {
-    const c = clienteMap.get(r.cliente_id);
+    const c = clienteMap.get(String(r.cliente_id ?? ''));
     const agg = parcelasAgg.get(r.id);
     return {
       ...r,
