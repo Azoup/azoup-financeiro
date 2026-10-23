@@ -1041,6 +1041,20 @@ export async function countBoletosVenda(userId: string, vendaId: string): Promis
   return count ?? 0;
 }
 
+export async function fetchBoletosPorVendaId(
+  userId: string,
+  vendaId: string,
+): Promise<BoletoParcelaVendaRow[]> {
+  const { data, error } = await supabase
+    .from('boletos_parcela_venda')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('venda_id', vendaId)
+    .order('numero_parcela', { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as BoletoParcelaVendaRow[];
+}
+
 export async function regenerarCarneVenda(
   userId: string,
   vendaId: string,
@@ -1422,6 +1436,89 @@ async function listarChavesPagas(
   return [...unicos.values()].sort(ordenarChaves);
 }
 
+async function listarChavesLado(
+  userId: string,
+  lado: 'mensalidade' | 'venda',
+  opts: ContasReceberConsulta,
+): Promise<ChaveLista[]> {
+  if (opts.situacao === 'pago') return listarChavesPagas(userId, lado, opts);
+
+  const statuses = statusesDaSituacao(opts.situacao);
+  const segmento =
+    opts.segmentoCodigo && opts.segmentoCodigo !== 'todos' ? opts.segmentoCodigo.trim() : null;
+  const filtrarParcelaNoApp = lado === 'venda' && Boolean(statuses);
+  const select =
+    lado === 'venda'
+      ? `id, pagador_nome, data_vencimento, valor_documento, parcelas_venda(status)${
+          segmento ? ', vendas!inner(clientes!inner(segmento_cliente_codigo))' : ''
+        }`
+      : `id, pagador_nome, data_vencimento, valor_documento, mensalidades${
+          statuses || segmento ? '!inner' : ''
+        }(status, cliente_id, data_pagamento${
+          segmento ? ', clientes!inner(segmento_cliente_codigo)' : ''
+        })`;
+
+  const montar = () => {
+    let q = aplicarFiltrosBoleto(
+      supabase.from('boletos_parcela_venda').select(select),
+      userId,
+      opts,
+      lado,
+    );
+    if (segmento) {
+      q = q.eq(
+        lado === 'venda'
+          ? 'vendas.clientes.segmento_cliente_codigo'
+          : 'mensalidades.clientes.segmento_cliente_codigo',
+        segmento,
+      );
+    }
+    if (statuses && !filtrarParcelaNoApp) {
+      q = q.in('mensalidades.status', statuses);
+      if (opts.situacao === 'aberto') q = q.neq('status_registro', 'pago');
+    } else if (opts.situacao === 'aberto') {
+      q = q.neq('status_registro', 'pago');
+    }
+    return q
+      .order('pagador_nome', { ascending: true })
+      .order('data_vencimento', { ascending: true })
+      .order('id', { ascending: true });
+  };
+
+  const out: ChaveLista[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await montar().range(from, from + 999);
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as (ChaveLista & {
+      parcelas_venda?: { status?: string } | { status?: string }[] | null;
+    })[];
+    for (const row of rows) {
+      if (filtrarParcelaNoApp && statuses) {
+        const rel = row.parcelas_venda;
+        const st = Array.isArray(rel) ? rel[0]?.status : rel?.status;
+        if (st && STATUS_CANCELADO.includes(st)) continue;
+        if (opts.situacao === 'aberto' && st && STATUS_PAGO.includes(st)) continue;
+        if (opts.situacao === 'cancelado' && st && !STATUS_CANCELADO.includes(st)) continue;
+      }
+      out.push(row);
+    }
+    if (!data || data.length < 1000) break;
+  }
+  return out.sort(ordenarChaves);
+}
+
+async function buscarBoletosPorIds(userId: string, ids: string[]): Promise<BoletoConsulta[]> {
+  if (!ids.length) return [];
+  const { data, error } = await supabase
+    .from('boletos_parcela_venda')
+    .select('*, mensalidades(status, cliente_id, data_pagamento), parcelas_venda(status)')
+    .eq('user_id', userId)
+    .in('id', ids);
+  if (error) throw new Error(error.message);
+  const porId = new Map(((data ?? []) as BoletoConsulta[]).map((row) => [row.id, row]));
+  return ids.map((id) => porId.get(id)).filter((row): row is BoletoConsulta => Boolean(row));
+}
+
 async function consultarLado(
   userId: string,
   lado: 'mensalidade' | 'venda',
@@ -1429,64 +1526,16 @@ async function consultarLado(
   from: number,
   to: number,
 ): Promise<{ rows: BoletoConsulta[]; total: number }> {
-  if (opts.situacao === 'pago') {
-    const chaves = await listarChavesPagas(userId, lado, opts);
-    const pagina = chaves.slice(from, to + 1);
-    if (!pagina.length) return { rows: [], total: chaves.length };
-    const ids = pagina.map((c) => c.id);
-    const { data, error } = await supabase
-      .from('boletos_parcela_venda')
-      .select(
-        lado === 'venda'
-          ? '*, parcelas_venda(status)'
-          : '*, mensalidades(status, cliente_id, data_pagamento)',
-      )
-      .eq('user_id', userId)
-      .in('id', ids);
-    if (error) throw new Error(error.message);
-    const porId = new Map(((data ?? []) as BoletoConsulta[]).map((row) => [row.id, row]));
-    return {
-      rows: ids.map((id) => porId.get(id)).filter((row): row is BoletoConsulta => Boolean(row)),
-      total: chaves.length,
-    };
-  }
-
-  const statuses = statusesDaSituacao(opts.situacao);
-  const segmento =
-    opts.segmentoCodigo && opts.segmentoCodigo !== 'todos' ? opts.segmentoCodigo.trim() : null;
-  const select =
-    lado === 'venda'
-      ? `${statuses ? '*, parcelas_venda!inner(status)' : '*, parcelas_venda(status)'}${
-          segmento ? ', vendas!inner(clientes!inner(segmento_cliente_codigo))' : ''
-        }`
-      : `*, mensalidades${statuses || segmento ? '!inner' : ''}(status, cliente_id, data_pagamento${
-          segmento ? ', clientes!inner(segmento_cliente_codigo)' : ''
-        })`;
-  let q = aplicarFiltrosBoleto(
-    supabase.from('boletos_parcela_venda').select(select, { count: 'exact' }),
-    userId,
-    opts,
-    lado,
-  );
-  if (segmento) {
-    q = q.eq(
-      lado === 'venda'
-        ? 'vendas.clientes.segmento_cliente_codigo'
-        : 'mensalidades.clientes.segmento_cliente_codigo',
-      segmento,
-    );
-  }
-  if (statuses) {
-    q = q.in(lado === 'venda' ? 'parcelas_venda.status' : 'mensalidades.status', statuses);
-    if (opts.situacao === 'aberto') q = q.neq('status_registro', 'pago');
-  }
-  const { data, error, count } = await q
-    .order('pagador_nome', { ascending: true })
-    .order('data_vencimento', { ascending: true })
-    .order('id', { ascending: true })
-    .range(from, to);
-  if (error) throw new Error(error.message);
-  return { rows: (data ?? []) as BoletoConsulta[], total: count ?? 0 };
+  const chaves = await listarChavesLado(userId, lado, opts);
+  const pagina = chaves.slice(from, to + 1);
+  if (!pagina.length) return { rows: [], total: chaves.length };
+  return {
+    rows: await buscarBoletosPorIds(
+      userId,
+      pagina.map((c) => c.id),
+    ),
+    total: chaves.length,
+  };
 }
 
 async function somarRecebido(userId: string, opts: ContasReceberConsulta): Promise<number> {
@@ -1518,60 +1567,31 @@ export async function fetchContasReceberPagina(
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
   const origem = opts.origem ?? 'todos';
-  const situacao = opts.situacao ?? 'todos';
 
-  const segmentoAtivo = Boolean(opts.segmentoCodigo && opts.segmentoCodigo !== 'todos');
-
-  if (origem !== 'todos') {
+  if (origem === 'mensalidade' || origem === 'venda') {
     const { rows, total } = await consultarLado(userId, origem, opts, from, to);
     return { rows: await hidratarContasReceber(userId, rows), total, page, pageSize, totalRecebido };
   }
 
-  if (situacao === 'todos' && !segmentoAtivo) {
-    const { data, error, count } = await aplicarFiltrosBoleto(
-      supabase
-        .from('boletos_parcela_venda')
-        .select('*, mensalidades(status, cliente_id, data_pagamento), parcelas_venda(status)', { count: 'exact' }),
-      userId,
-      opts,
-    )
-      .order('pagador_nome', { ascending: true })
-      .order('data_vencimento', { ascending: true })
-      .order('id', { ascending: true })
-      .range(from, to);
-    if (error) throw new Error(error.message);
-    return {
-      rows: await hidratarContasReceber(userId, (data ?? []) as BoletoConsulta[]),
-      total: count ?? 0,
-      page,
-      pageSize,
-      totalRecebido,
-    };
-  }
-
-  const [mensalidades, vendasCabeca] = await Promise.all([
-    consultarLado(userId, 'mensalidade', opts, 0, 0),
-    consultarLado(userId, 'venda', opts, 0, 0),
+  const [chavesM, chavesV] = await Promise.all([
+    listarChavesLado(userId, 'mensalidade', opts),
+    listarChavesLado(userId, 'venda', opts),
   ]);
-  const totalM = mensalidades.total;
-  const totalV = vendasCabeca.total;
-  const total = totalM + totalV;
-  let brutos: BoletoConsulta[] = [];
-  if (from < totalM) {
-    const take = Math.min(pageSize, totalM - from);
-    const parteM = await consultarLado(userId, 'mensalidade', opts, from, from + take - 1);
-    brutos = parteM.rows;
-    const resto = pageSize - brutos.length;
-    if (resto > 0 && totalV > 0) {
-      const parteV = await consultarLado(userId, 'venda', opts, 0, resto - 1);
-      brutos = [...brutos, ...parteV.rows];
-    }
-  } else if (totalV > 0) {
-    const vFrom = from - totalM;
-    const parteV = await consultarLado(userId, 'venda', opts, vFrom, vFrom + pageSize - 1);
-    brutos = parteV.rows;
-  }
-  return { rows: await hidratarContasReceber(userId, brutos), total, page, pageSize, totalRecebido };
+  const chaves = [...chavesM, ...chavesV].sort(ordenarChaves);
+  const pagina = chaves.slice(from, to + 1);
+  return {
+    rows: await hidratarContasReceber(
+      userId,
+      await buscarBoletosPorIds(
+        userId,
+        pagina.map((c) => c.id),
+      ),
+    ),
+    total: chaves.length,
+    page,
+    pageSize,
+    totalRecebido,
+  };
 }
 
 export async function fetchContasReceberLista(userId: string): Promise<ContaReceberListRow[]> {

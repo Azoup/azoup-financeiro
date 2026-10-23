@@ -8,6 +8,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import {
   countBoletosVenda,
+  fetchBoletosPorVendaId,
   regenerarCarneVenda,
 } from '@/services/boletoParcelaService';
 import {
@@ -23,9 +24,11 @@ import {
   registrarPagamentoVenda,
 } from '@/services/vendasService';
 import { colors, radius, spacing } from '@/theme/colors';
+import type { BoletoParcelaVendaRow } from '@/types/contasReceber';
 import type { NotaFiscalListRow } from '@/types/notaFiscal';
 import type { VendaDetail } from '@/types/vendas';
 import { formatBRL } from '@/utils/currency';
+import { abrirDocumentoBoleto } from '@/utils/openBoletoDocumento';
 import { formatDateTimeBRFromISO } from '@/utils/date';
 import { vendaDescricaoLinhas } from '@/utils/vendasDescricao';
 import { centavosParaReais, reaisParaCentavos } from '@/utils/vendasParcelas';
@@ -33,7 +36,7 @@ import { CONSULTA, goToConsulta, useHardwareBackToConsulta } from '@/utils/navig
 import { confirmDestructive } from '@/utils/confirmDialog';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -75,23 +78,46 @@ export default function VendaDetailScreen() {
   const [nfConfirmOpen, setNfConfirmOpen] = useState(false);
   const [qtdCarne, setQtdCarne] = useState(0);
   const [gerandoCarne, setGerandoCarne] = useState(false);
+  const [boletos, setBoletos] = useState<BoletoParcelaVendaRow[]>([]);
+  const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
+  const tentouCarne = useRef(false);
 
   const load = useCallback(async () => {
     if (!user?.id || !id) return;
     setLoading(true);
     try {
-      const [d, lg, nf, nfUlt, carne] = await Promise.all([
+      const [d, lg, nf, nfUlt, carneIni, bolsIni] = await Promise.all([
         fetchVendaDetail(user.id, id),
         fetchVendasFinanceiroLog(id),
         fetchNotaFiscalPorVenda(user.id, id).catch(() => null),
         fetchUltimaNotaFiscalVenda(user.id, id).catch(() => null),
         countBoletosVenda(user.id, id).catch(() => 0),
+        fetchBoletosPorVendaId(user.id, id).catch(() => [] as BoletoParcelaVendaRow[]),
       ]);
+      let carne = carneIni;
+      let bols = bolsIni;
+      const abertas = d?.parcelas.filter((p) => p.status !== 'cancelado').length ?? 0;
+      if (d && d.status !== 'cancelada' && carne < abertas && !tentouCarne.current) {
+        tentouCarne.current = true;
+        try {
+          const r = await regenerarCarneVenda(user.id, id);
+          if (r.avisoBoleto) {
+            Toast.show({ type: 'error', text1: r.avisoBoleto, visibilityTime: 8000 });
+          }
+          [carne, bols] = await Promise.all([
+            countBoletosVenda(user.id, id),
+            fetchBoletosPorVendaId(user.id, id),
+          ]);
+        } catch (e) {
+          Toast.show({ type: 'error', text1: (e as Error).message, visibilityTime: 8000 });
+        }
+      }
       setDetail(d);
       setLogs(lg);
       setNotaFiscal(nf);
       setNotaFiscalUltima(nfUlt);
       setQtdCarne(carne);
+      setBoletos(bols);
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
       setDetail(null);
@@ -363,6 +389,7 @@ export default function VendaDetailScreen() {
           const rest = centavosParaReais(
             reaisParaCentavos(p.valor) - reaisParaCentavos(p.valor_pago),
           );
+          const boleto = boletos.find((b) => b.parcela_id === p.id);
           return (
             <Card key={p.id} style={styles.parc}>
               <View style={styles.rowBetween}>
@@ -376,6 +403,23 @@ export default function VendaDetailScreen() {
                 {open ? ` · em aberto ${formatBRL(rest)}` : ''}
               </Text>
               <Text style={styles.pVen}>Vencimento {p.data_vencimento.split('-').reverse().join('/')}</Text>
+              {boleto ? (
+                <Pressable
+                  style={styles.pPdf}
+                  disabled={pdfBusyId === boleto.id}
+                  onPress={() => {
+                    setPdfBusyId(boleto.id);
+                    void abrirDocumentoBoleto(boleto).finally(() => setPdfBusyId(null));
+                  }}
+                >
+                  <Ionicons name="download-outline" size={16} color={colors.orange} />
+                  <Text style={styles.pPdfTxt}>
+                    {pdfBusyId === boleto.id ? 'Abrindo boleto…' : 'Baixar boleto'}
+                  </Text>
+                </Pressable>
+              ) : (
+                <Text style={styles.pSem}>Sem carnê em A receber nesta parcela</Text>
+              )}
             </Card>
           );
         })}
@@ -543,6 +587,16 @@ const styles = StyleSheet.create({
   pVal: { fontSize: 18, fontWeight: '800', color: colors.orange, marginTop: spacing.xs },
   pSub: { fontSize: 13, color: colors.gray800, marginTop: 4 },
   pVen: { fontSize: 12, color: colors.gray400, marginTop: 4 },
+  pPdf: {
+    marginTop: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+  },
+  pPdfTxt: { fontSize: 13, fontWeight: '700', color: colors.orange },
+  pSem: { fontSize: 12, color: colors.gray400, marginTop: spacing.sm },
   empty: { color: colors.gray400, marginBottom: spacing.md },
   payCard: { marginBottom: spacing.sm },
   payVal: { fontSize: 18, fontWeight: '800', color: colors.success },
