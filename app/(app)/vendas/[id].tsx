@@ -72,6 +72,7 @@ export default function VendaDetailScreen() {
   const [logs, setLogs] = useState<{ id: string; tipo: string; detalhe: unknown; created_at: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [baixaOpen, setBaixaOpen] = useState(false);
+  const [baixaParcelaId, setBaixaParcelaId] = useState<string | null>(null);
   const [notaFiscal, setNotaFiscal] = useState<NotaFiscalListRow | null>(null);
   const [notaFiscalUltima, setNotaFiscalUltima] = useState<NotaFiscalListRow | null>(null);
   const [emittingNf, setEmittingNf] = useState(false);
@@ -369,7 +370,10 @@ export default function VendaDetailScreen() {
           ) : null}
           <PrimaryButton
             title="Dar baixa"
-            onPress={() => setBaixaOpen(true)}
+            onPress={() => {
+              setBaixaParcelaId(null);
+              setBaixaOpen(true);
+            }}
             disabled={pendente <= 0.009 || detail.status === 'cancelada'}
           />
           <PrimaryButton
@@ -403,23 +407,46 @@ export default function VendaDetailScreen() {
                 {open ? ` · em aberto ${formatBRL(rest)}` : ''}
               </Text>
               <Text style={styles.pVen}>Vencimento {p.data_vencimento.split('-').reverse().join('/')}</Text>
-              {boleto ? (
-                <Pressable
-                  style={styles.pPdf}
-                  disabled={pdfBusyId === boleto.id}
-                  onPress={() => {
-                    setPdfBusyId(boleto.id);
-                    void abrirDocumentoBoleto(boleto).finally(() => setPdfBusyId(null));
-                  }}
-                >
-                  <Ionicons name="download-outline" size={16} color={colors.orange} />
-                  <Text style={styles.pPdfTxt}>
-                    {pdfBusyId === boleto.id ? 'Abrindo boleto…' : 'Baixar boleto'}
-                  </Text>
-                </Pressable>
-              ) : (
-                <Text style={styles.pSem}>Sem carnê em A receber nesta parcela</Text>
-              )}
+              <View style={styles.pAcoes}>
+                {boleto ? (
+                  <Pressable
+                    style={styles.pPdf}
+                    disabled={pdfBusyId === boleto.id}
+                    onPress={() => {
+                      setPdfBusyId(boleto.id);
+                      void abrirDocumentoBoleto(boleto).finally(() => setPdfBusyId(null));
+                    }}
+                  >
+                    <Ionicons name="download-outline" size={16} color={colors.orange} />
+                    <Text style={styles.pPdfTxt}>
+                      {pdfBusyId === boleto.id ? 'Abrindo boleto…' : 'Baixar boleto'}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    style={styles.pPdf}
+                    disabled={gerandoCarne}
+                    onPress={() => void onGerarCarne()}
+                  >
+                    <Ionicons name="document-text-outline" size={16} color={colors.orange} />
+                    <Text style={styles.pPdfTxt}>
+                      {gerandoCarne ? 'Gerando carnê…' : 'Gerar boleto'}
+                    </Text>
+                  </Pressable>
+                )}
+                {open ? (
+                  <Pressable
+                    style={styles.pPdf}
+                    onPress={() => {
+                      setBaixaParcelaId(p.id);
+                      setBaixaOpen(true);
+                    }}
+                  >
+                    <Ionicons name="checkmark-circle-outline" size={16} color={colors.success} />
+                    <Text style={[styles.pPdfTxt, { color: colors.success }]}>Dar baixa</Text>
+                  </Pressable>
+                ) : null}
+              </View>
             </Card>
           );
         })}
@@ -471,8 +498,12 @@ export default function VendaDetailScreen() {
 
       <BaixaPagamentoModal
         visible={baixaOpen}
-        onClose={() => setBaixaOpen(false)}
+        onClose={() => {
+          setBaixaOpen(false);
+          setBaixaParcelaId(null);
+        }}
         parcelas={detail.parcelas}
+        parcelaFocoId={baixaParcelaId}
         onSubmit={onBaixa}
       />
 
@@ -587,8 +618,8 @@ const styles = StyleSheet.create({
   pVal: { fontSize: 18, fontWeight: '800', color: colors.orange, marginTop: spacing.xs },
   pSub: { fontSize: 13, color: colors.gray800, marginTop: 4 },
   pVen: { fontSize: 12, color: colors.gray400, marginTop: 4 },
+  pAcoes: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.sm },
   pPdf: {
-    marginTop: spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -596,7 +627,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   pPdfTxt: { fontSize: 13, fontWeight: '700', color: colors.orange },
-  pSem: { fontSize: 12, color: colors.gray400, marginTop: spacing.sm },
   empty: { color: colors.gray400, marginBottom: spacing.md },
   payCard: { marginBottom: spacing.sm },
   payVal: { fontSize: 18, fontWeight: '800', color: colors.success },

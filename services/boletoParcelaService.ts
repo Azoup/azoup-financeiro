@@ -58,6 +58,7 @@ export async function chavesBoletoClienteDia(
   userId: string,
   clienteIds: string[],
   datas: string[],
+  opts?: { excluirVendaId?: string },
 ): Promise<Set<string>> {
   const chaves = new Set<string>();
   const ids = [...new Set(clienteIds.filter(Boolean))];
@@ -110,6 +111,7 @@ export async function chavesBoletoClienteDia(
         .neq('status_registro', 'baixado');
       if (eB) throw new Error(eB.message);
       for (const b of bols ?? []) {
+        if (opts?.excluirVendaId && b.venda_id === opts.excluirVendaId) continue;
         const cid = clientePorVenda.get(b.venda_id as string);
         if (cid) chaves.add(chaveClienteDia(cid, b.data_vencimento as string));
       }
@@ -510,19 +512,19 @@ export async function gerarBoletosParaVendaCriada(
   const faltantes = plist.filter((p) => !comBoleto.has(p.id));
   if (!faltantes.length) return {};
 
-  const ocupados = await chavesCobrancaClienteDia(
+  const ocupados = await chavesBoletoClienteDia(
     userId,
     [clienteId],
     faltantes.map((p) => p.data_vencimento),
+    { excluirVendaId: vendaId },
   );
   const bloqueadas: string[] = [];
   const livres = faltantes.filter((p) => {
-    const chave = `${clienteId}|${String(p.data_vencimento).slice(0, 10)}`;
+    const chave = chaveClienteDia(clienteId, p.data_vencimento);
     if (ocupados.has(chave)) {
       bloqueadas.push(`parcela ${p.numero_parcela} (${textoDiaBoleto(p.data_vencimento)})`);
       return false;
     }
-    ocupados.add(chave);
     return true;
   });
   if (!livres.length) {

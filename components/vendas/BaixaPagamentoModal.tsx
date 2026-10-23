@@ -7,14 +7,15 @@ import { centavosParaReais, reaisParaCentavos } from '@/utils/vendasParcelas';
 import { parcelaStatusVisual } from '@/services/vendasService';
 import MaskInput, { Masks } from 'react-native-mask-input';
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Toast from 'react-native-toast-message';
 
 type Props = {
   visible: boolean;
   onClose: () => void;
   parcelas: ParcelaVenda[];
+  parcelaFocoId?: string | null;
   onSubmit: (payload: {
     data_pagamento: string;
     valor_pago: number;
@@ -23,70 +24,86 @@ type Props = {
   }) => Promise<void>;
 };
 
-export function BaixaPagamentoModal({ visible, onClose, parcelas, onSubmit }: Props) {
+function saldoParcelaCent(p: ParcelaVenda): number {
+  return Math.max(0, reaisParaCentavos(p.valor) - reaisParaCentavos(p.valor_pago));
+}
+
+export function BaixaPagamentoModal({
+  visible,
+  onClose,
+  parcelas,
+  parcelaFocoId,
+  onSubmit,
+}: Props) {
   const abertas = useMemo(
     () =>
       parcelas.filter(
-        (p) =>
-          p.status !== 'cancelado' &&
-          reaisParaCentavos(p.valor_pago) < reaisParaCentavos(p.valor),
+        (p) => p.status !== 'cancelado' && saldoParcelaCent(p) > 0,
       ),
     [parcelas],
   );
 
   const [dataPag, setDataPag] = useState<Date | null>(() => new Date());
-  const [valorMask, setValorMask] = useState('');
   const [obs, setObs] = useState('');
-  const [manual, setManual] = useState(false);
   const [manualMap, setManualMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
   const reset = useCallback(() => {
     setDataPag(new Date());
-    setValorMask('');
     setObs('');
-    setManual(false);
     setManualMap({});
   }, []);
 
-  const saldoAbertoCent = useMemo(
-    () =>
-      abertas.reduce(
-        (s, p) => s + (reaisParaCentavos(p.valor) - reaisParaCentavos(p.valor_pago)),
-        0,
-      ),
-    [abertas],
-  );
+  useEffect(() => {
+    if (!visible) return;
+    setDataPag(new Date());
+    setObs('');
+    if (parcelaFocoId) {
+      const p = abertas.find((x) => x.id === parcelaFocoId);
+      if (p) {
+        setManualMap({ [p.id]: formatBRL(centavosParaReais(saldoParcelaCent(p))) });
+        return;
+      }
+    }
+    setManualMap({});
+  }, [visible, parcelaFocoId, abertas]);
+
+  const alocRows = useMemo(() => {
+    const rows: { parcela_id: string; valor: number; centavos: number }[] = [];
+    for (const p of abertas) {
+      const v = parseBRLMasked(manualMap[p.id] ?? '') ?? 0;
+      const c = reaisParaCentavos(v);
+      if (c <= 0) continue;
+      rows.push({ parcela_id: p.id, valor: v, centavos: c });
+    }
+    return rows;
+  }, [abertas, manualMap]);
+
+  const somaCent = alocRows.reduce((s, r) => s + r.centavos, 0);
+  const saldoAbertoCent = abertas.reduce((s, p) => s + saldoParcelaCent(p), 0);
+  const estouro = abertas.some((p) => {
+    const c = reaisParaCentavos(parseBRLMasked(manualMap[p.id] ?? '') ?? 0);
+    return c > saldoParcelaCent(p);
+  });
+  const valorOk = somaCent > 0 && !estouro && somaCent <= saldoAbertoCent;
+
+  const setParcelaMask = (id: string, mask: string) => {
+    setManualMap((prev) => ({ ...prev, [id]: mask }));
+  };
+
+  const usarSaldo = (p: ParcelaVenda) => {
+    setParcelaMask(p.id, formatBRL(centavosParaReais(saldoParcelaCent(p))));
+  };
 
   const handleSubmit = async () => {
-    const valor = parseBRLMasked(valorMask) ?? 0;
-    if (valor <= 0) return;
-    const valorCent = reaisParaCentavos(valor);
-    let alocacao_manual: { parcela_id: string; valor: number }[] | undefined;
-    if (manual) {
-      const rows: { parcela_id: string; valor: number }[] = [];
-      let sum = 0;
-      for (const p of abertas) {
-        const m = manualMap[p.id];
-        if (!m) continue;
-        const v = parseBRLMasked(m) ?? 0;
-        const c = reaisParaCentavos(v);
-        if (c <= 0) continue;
-        const maxOpen = reaisParaCentavos(p.valor) - reaisParaCentavos(p.valor_pago);
-        if (c > maxOpen) return;
-        rows.push({ parcela_id: p.id, valor: v });
-        sum += c;
-      }
-      if (sum !== valorCent) return;
-      alocacao_manual = rows;
-    }
+    if (!valorOk) return;
     setLoading(true);
     try {
       await onSubmit({
         data_pagamento: toISODate(dataPag ?? new Date()),
-        valor_pago: valor,
+        valor_pago: centavosParaReais(somaCent),
         observacao: obs,
-        alocacao_manual,
+        alocacao_manual: alocRows.map((r) => ({ parcela_id: r.parcela_id, valor: r.valor })),
       });
       reset();
       onClose();
@@ -97,28 +114,16 @@ export function BaixaPagamentoModal({ visible, onClose, parcelas, onSubmit }: Pr
     }
   };
 
-  const valorOk = (parseBRLMasked(valorMask) ?? 0) > 0;
-  let manualOk = true;
-  if (manual) {
-    let sum = 0;
-    for (const p of abertas) {
-      const v = parseBRLMasked(manualMap[p.id] ?? '') ?? 0;
-      sum += reaisParaCentavos(v);
-      const maxOpen = reaisParaCentavos(p.valor) - reaisParaCentavos(p.valor_pago);
-      if (reaisParaCentavos(v) > maxOpen) manualOk = false;
-    }
-    manualOk =
-      manualOk &&
-      sum === reaisParaCentavos(parseBRLMasked(valorMask) ?? 0) &&
-      sum > 0;
-  }
+  const titulo = parcelaFocoId
+    ? `Dar baixa · parcela ${abertas.find((p) => p.id === parcelaFocoId)?.numero_parcela ?? ''}`
+    : 'Dar baixa';
 
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable style={styles.card} onPress={(e) => e.stopPropagation()}>
           <View style={styles.header}>
-            <Text style={styles.title}>Dar baixa</Text>
+            <Text style={styles.title}>{titulo}</Text>
             <Pressable onPress={onClose} hitSlop={12}>
               <Ionicons name="close" size={24} color={colors.gray600} />
             </Pressable>
@@ -126,49 +131,40 @@ export function BaixaPagamentoModal({ visible, onClose, parcelas, onSubmit }: Pr
           <Text style={styles.hint}>
             Saldo em aberto: {formatBRL(centavosParaReais(saldoAbertoCent))}
           </Text>
+          <Text style={styles.total}>
+            Desta baixa: {formatBRL(centavosParaReais(somaCent))}
+          </Text>
 
           <DatePickerField label="Data do pagamento" value={dataPag} onChange={setDataPag} />
 
-          <Text style={styles.label}>Valor pago</Text>
-          <MaskInput
-            style={styles.input}
-            value={valorMask}
-            onChangeText={(m) => setValorMask(m)}
-            mask={Masks.BRL_CURRENCY}
-            keyboardType="numeric"
-            placeholder="R$ 0,00"
-          />
-
-          <View style={styles.rowSwitch}>
-            <Text style={styles.label}>Alocação manual nas parcelas</Text>
-            <Switch value={manual} onValueChange={setManual} trackColor={{ true: colors.orangeLight }} />
-          </View>
-
-          {manual ? (
-            <ScrollView style={{ maxHeight: 200 }} keyboardShouldPersistTaps="always">
-              {abertas.map((p) => {
-                const vis = parcelaStatusVisual(p);
-                const rest = centavosParaReais(
-                  reaisParaCentavos(p.valor) - reaisParaCentavos(p.valor_pago),
-                );
-                return (
-                  <View key={p.id} style={styles.manRow}>
+          <Text style={styles.label}>Valor em cada parcela</Text>
+          <ScrollView style={{ maxHeight: 280 }} keyboardShouldPersistTaps="always">
+            {abertas.map((p) => {
+              const vis = parcelaStatusVisual(p);
+              const rest = centavosParaReais(saldoParcelaCent(p));
+              const foco = p.id === parcelaFocoId;
+              return (
+                <View key={p.id} style={[styles.manRow, foco && styles.manRowFoco]}>
+                  <View style={styles.manHead}>
                     <Text style={styles.manLabel}>
-                      #{p.numero_parcela} · máx {formatBRL(rest)} · {vis}
+                      Parcela {p.numero_parcela} · em aberto {formatBRL(rest)} · {vis}
                     </Text>
-                    <MaskInput
-                      style={styles.inputSm}
-                      value={manualMap[p.id] ?? ''}
-                      onChangeText={(m) => setManualMap((prev) => ({ ...prev, [p.id]: m }))}
-                      mask={Masks.BRL_CURRENCY}
-                      keyboardType="numeric"
-                      placeholder="R$ 0,00"
-                    />
+                    <Pressable onPress={() => usarSaldo(p)} hitSlop={8}>
+                      <Text style={styles.usarSaldo}>Usar saldo</Text>
+                    </Pressable>
                   </View>
-                );
-              })}
-            </ScrollView>
-          ) : null}
+                  <MaskInput
+                    style={styles.inputSm}
+                    value={manualMap[p.id] ?? ''}
+                    onChangeText={(m) => setParcelaMask(p.id, m)}
+                    mask={Masks.BRL_CURRENCY}
+                    keyboardType="numeric"
+                    placeholder="R$ 0,00"
+                  />
+                </View>
+              );
+            })}
+          </ScrollView>
 
           <Text style={styles.label}>Observação</Text>
           <TextInput
@@ -181,9 +177,9 @@ export function BaixaPagamentoModal({ visible, onClose, parcelas, onSubmit }: Pr
           />
 
           <Pressable
-            style={[styles.primary, (!valorOk || !manualOk || loading) && styles.primaryDisabled]}
-            disabled={!valorOk || !manualOk || loading}
-            onPress={handleSubmit}
+            style={[styles.primary, (!valorOk || loading) && styles.primaryDisabled]}
+            disabled={!valorOk || loading}
+            onPress={() => void handleSubmit()}
           >
             <Text style={styles.primaryTxt}>{loading ? 'Salvando…' : 'Confirmar baixa'}</Text>
           </Pressable>
@@ -207,8 +203,15 @@ const styles = StyleSheet.create({
     maxHeight: '90%',
   },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  title: { fontSize: 20, fontWeight: '700', color: colors.petroleum },
-  hint: { color: colors.gray600, marginTop: spacing.sm, marginBottom: spacing.md },
+  title: { fontSize: 20, fontWeight: '700', color: colors.petroleum, flex: 1, paddingRight: spacing.sm },
+  hint: { color: colors.gray600, marginTop: spacing.sm },
+  total: {
+    color: colors.petroleum,
+    fontWeight: '800',
+    fontSize: 16,
+    marginTop: 4,
+    marginBottom: spacing.md,
+  },
   label: { fontSize: 13, fontWeight: '600', color: colors.gray600, marginTop: spacing.sm },
   input: {
     borderWidth: 1,
@@ -227,17 +230,26 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.petroleum,
     marginTop: 4,
-    minWidth: 140,
   },
   textArea: { minHeight: 72, textAlignVertical: 'top' },
-  rowSwitch: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: spacing.md,
+  manRow: {
+    marginBottom: spacing.md,
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.gray50,
   },
-  manRow: { marginBottom: spacing.md },
-  manLabel: { fontSize: 12, color: colors.gray600 },
+  manRowFoco: {
+    borderWidth: 1,
+    borderColor: colors.orange,
+  },
+  manHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  manLabel: { fontSize: 12, color: colors.gray600, flex: 1 },
+  usarSaldo: { fontSize: 12, fontWeight: '700', color: colors.orange },
   primary: {
     backgroundColor: colors.orange,
     borderRadius: radius.md,
