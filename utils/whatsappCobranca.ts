@@ -233,9 +233,15 @@ async function obterPdfBoleto(
   return { blob, uri, pdfUrl: published };
 }
 
+function legendaCurtaBoleto(row: ContaReceberListRow): string {
+  const doc = safeTrim(row.numero_documento) || row.referencia_label || 'boleto';
+  return `Boleto ${doc}`;
+}
+
 /**
  * O WhatsApp não aceita anexo por link (wa.me). O PDF só entra na conversa
- * pelo compartilhamento do celular/navegador — ou pelo link na mensagem.
+ * pelo compartilhamento do app (Web Share / expo-sharing).
+ * Legenda curta: texto longo no share costuma falhar e cair no WhatsApp Web.
  */
 async function compartilharPdf(file: File, legenda: string): Promise<'ok' | 'cancelado' | 'indisponivel'> {
   if (!isWeb() || typeof navigator === 'undefined' || typeof navigator.share !== 'function') {
@@ -268,6 +274,36 @@ async function compartilharPdf(file: File, legenda: string): Promise<'ok' | 'can
   return sawAbort ? 'cancelado' : 'indisponivel';
 }
 
+/** Abre o app do WhatsApp (desktop/mobile), nunca o web.whatsapp.com. */
+async function abrirWhatsAppApp(phone: string, message: string): Promise<void> {
+  const digits = phone.replace(/\D/g, '');
+  const appUrl = `whatsapp://send?phone=${digits}&text=${encodeURIComponent(message)}`;
+  const waMe = buildWhatsAppDeepLink(digits, message);
+
+  if (isWeb() && typeof window !== 'undefined') {
+    // Protocolo do app; se não houver app, cai no wa.me (que também prefere o app).
+    const started = Date.now();
+    window.location.href = appUrl;
+    await new Promise((r) => setTimeout(r, 900));
+    // Se a página ainda está visível, o protocolo provavelmente não abriu o app.
+    if (typeof document !== 'undefined' && !document.hidden && Date.now() - started < 2000) {
+      window.open(waMe, '_blank', 'noopener,noreferrer') || window.location.assign(waMe);
+    }
+    return;
+  }
+
+  try {
+    const can = await Linking.canOpenURL(appUrl);
+    if (can) {
+      await Linking.openURL(appUrl);
+      return;
+    }
+  } catch {
+    /* fallback wa.me */
+  }
+  await Linking.openURL(waMe);
+}
+
 async function gravarBlobNativo(blob: Blob, rowId: string): Promise<string> {
   const FileSystem = await import('expo-file-system/legacy');
   const path = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}boleto_wa_${rowId}.pdf`;
@@ -283,9 +319,9 @@ async function gravarBlobNativo(blob: Blob, rowId: string): Promise<string> {
 }
 
 /**
- * Compartilha cobrança no WhatsApp com PDF do boleto.
- * 1) Web Share / expo-sharing com o arquivo
- * 2) Fallback: baixa o PDF e abre o chat com a mensagem + link do boleto
+ * Compartilha cobrança no WhatsApp app com PDF do boleto.
+ * 1) Web Share / expo-sharing → usuário escolhe o app WhatsApp (PDF já vai junto)
+ * 2) Fallback: baixa o PDF e abre o app (whatsapp:// / wa.me), nunca o WhatsApp Web
  */
 export async function compartilharBoletoWhatsAppComPdf(
   row: ContaReceberListRow,
@@ -299,10 +335,11 @@ export async function compartilharBoletoWhatsAppComPdf(
   const { blob, uri: uriInicial, pdfUrl } = await obterPdfBoleto(row);
   const filename = `boleto_${safeTrim(row.numero_documento) || row.id}.pdf`;
   const message = buildMensagemCobrancaWhatsappComPdf(row, pdfUrl);
+  const legendaShare = legendaCurtaBoleto(row);
 
   if (isWeb() && typeof File !== 'undefined') {
     const file = new File([blob], filename, { type: 'application/pdf' });
-    const compartilhou = await compartilharPdf(file, message);
+    const compartilhou = await compartilharPdf(file, legendaShare);
     if (compartilhou === 'ok') return { modo: 'compartilhado' };
     if (compartilhou === 'cancelado') return { modo: 'cancelado' };
   }
@@ -325,7 +362,7 @@ export async function compartilharBoletoWhatsAppComPdf(
         });
         return { modo: 'compartilhado' };
       } catch {
-        /* fallback wa.me com link */
+        /* fallback app com link */
       }
     }
   }
@@ -334,12 +371,7 @@ export async function compartilharBoletoWhatsAppComPdf(
     baixarPdfWeb(blob, filename);
   }
 
-  const noComputador =
-    isWeb() && typeof window !== 'undefined' && window.matchMedia?.('(pointer: fine)').matches;
-  const url = noComputador
-    ? `https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`
-    : buildWhatsAppDeepLink(phone, message);
-  abrirUrlWhatsApp(url);
+  await abrirWhatsAppApp(phone, message);
   return { modo: 'pdf_e_app' };
 }
 
@@ -361,8 +393,8 @@ export async function compartilharBoletoWhatsAppComFeedback(
   if (result.modo === 'pdf_e_app') {
     Toast.show({
       type: 'info',
-      text1: 'WhatsApp aberto com o link do boleto.',
-      text2: 'O PDF também foi baixado — anexe o arquivo se o link não abrir.',
+      text1: 'WhatsApp app aberto com a mensagem e o link do boleto.',
+      text2: 'O PDF também foi baixado — anexe o arquivo no app se ainda não estiver junto.',
       visibilityTime: 9000,
     });
   }
