@@ -1,5 +1,8 @@
 import type { ContaReceberListRow } from '@/types/contasReceber';
 import { buildBoletoCobrancaHtml } from '@/utils/boletoCobrancaHtml';
+import { calcularEncargosBoleto } from '@/utils/boletoEncargos';
+import { formatBRL } from '@/utils/currency';
+import { formatBRDate, parseISODate } from '@/utils/date';
 import { mensagemPendenciaBoleto } from '@/utils/mensagemPendenciaBoleto';
 import { resolveBoletoPdfUrl } from '@/utils/openBoletoDocumento';
 import { safeTrim } from '@/utils/safeTrim';
@@ -50,19 +53,63 @@ export function formatWhatsAppDisplay(raw: string): string {
   return raw.trim();
 }
 
+/**
+ * WhatsApp:
+ * - Em aberto (não vencido) → texto amigável de pendência (sem multa/juros).
+ * - Vencido → cobrança com valor original, multa, juros, valor hoje e linha digitável.
+ */
 export function buildMensagemCobrancaWhatsapp(
-  row: Pick<ContaReceberListRow, 'data_vencimento'>,
+  row: Pick<
+    ContaReceberListRow,
+    | 'data_vencimento'
+    | 'nome_cliente'
+    | 'referencia_label'
+    | 'valor_documento'
+    | 'numero_documento'
+    | 'linha_digitavel'
+    | 'pix_copia_cola'
+    | 'beneficiario_razao_social'
+  >,
+  opts?: { nomeBeneficiario?: string },
 ): string {
-  return mensagemPendenciaBoleto(row.data_vencimento);
+  const encargos = calcularEncargosBoleto(row.valor_documento, row.data_vencimento);
+  if (!encargos.vencido) {
+    return mensagemPendenciaBoleto(row.data_vencimento);
+  }
+
+  const venc = formatBRDate(parseISODate(row.data_vencimento)) || row.data_vencimento;
+  const cliente = safeTrim(row.nome_cliente) || 'cliente';
+  const beneficiario =
+    safeTrim(opts?.nomeBeneficiario) || safeTrim(row.beneficiario_razao_social) || 'Azoup Tecnologia LTDA';
+  const linhas = [
+    `Olá, ${cliente}!`,
+    `Aqui é da ${beneficiario}.`,
+    'Segue o boleto para pagamento:',
+    safeTrim(row.referencia_label) || 'Mensalidade recorrente',
+    `Valor original: ${formatBRL(row.valor_documento)}`,
+    `Multa (2%): ${formatBRL(encargos.multa)}`,
+    `Juros (0,033% ao dia × ${encargos.dias} dia(s)): ${formatBRL(encargos.juros)}`,
+    `Valor para pagamento hoje: ${formatBRL(encargos.total)}`,
+    `Vencimento: ${venc}`,
+    row.numero_documento ? `Documento: ${safeTrim(row.numero_documento)}` : null,
+    row.linha_digitavel ? `\nLinha digitável do boleto:\n${safeTrim(row.linha_digitavel)}` : null,
+    row.pix_copia_cola ? `\nPix Copia e Cola:\n${safeTrim(row.pix_copia_cola)}` : null,
+    'O boleto segue em anexo.',
+    'Qualquer dúvida, estamos à disposição.',
+    'WhatsApp: (19) 98111-1724',
+    'Obrigado!',
+  ].filter((l): l is string => l != null && l !== '');
+
+  return linhas.join('\n');
 }
 
 /** Texto da cobrança + link do PDF (wa.me não anexa arquivo; o link leva o boleto junto). */
 export function buildMensagemCobrancaWhatsappComPdf(
-  row: Pick<ContaReceberListRow, 'data_vencimento'>,
-  pdfUrl?: string | null,
+  row: ContaReceberListRow,
+  opts?: { nomeBeneficiario?: string; pdfUrl?: string | null },
 ): string {
-  const base = buildMensagemCobrancaWhatsapp(row);
-  const url = safeTrim(pdfUrl);
+  const base = buildMensagemCobrancaWhatsapp(row, opts);
+  const url = safeTrim(opts?.pdfUrl);
   if (!url) return base;
   return `${base}\n\n📄 Boleto em PDF:\n${url}`;
 }
@@ -88,7 +135,10 @@ export function resolveWhatsAppCobrancaUrl(
   if (!phone) {
     throw new Error('Número de WhatsApp inválido no cadastro do cliente.');
   }
-  const message = buildMensagemCobrancaWhatsappComPdf(row, opts?.pdfUrl);
+  const message = buildMensagemCobrancaWhatsappComPdf(row, {
+    nomeBeneficiario: opts?.nomeBeneficiario,
+    pdfUrl: opts?.pdfUrl,
+  });
   return buildWhatsAppDeepLink(phone, message);
 }
 
@@ -401,7 +451,7 @@ export async function compartilharBoletoWhatsAppComPdf(
   const { blob, uri: uriInicial } = await obterPdfBoleto(row);
   const filename = `boleto_${safeTrim(row.numero_documento) || row.id}.pdf`;
   // Sem URL do PDF na mensagem — o arquivo vai pelo compartilhar, não como link.
-  const message = buildMensagemCobrancaWhatsapp(row);
+  const message = buildMensagemCobrancaWhatsapp(row, opts);
 
   if (!isWeb()) {
     let uri = uriInicial;
