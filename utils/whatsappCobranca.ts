@@ -220,10 +220,22 @@ async function obterPdfBoleto(
   return { blob, uri, pdfUrl: published };
 }
 
+function baixarPdfWeb(blob: Blob, filename: string): void {
+  if (typeof document === 'undefined') return;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 /**
  * O WhatsApp NÃO anexa PDF por link (wa.me). Só pelo compartilhar do SO
- * (Windows/Android/iOS) escolhendo o app WhatsApp — aí o arquivo vai como documento.
- * Não usa canShare para barrar: em alguns Chromes ele mente e o share funciona.
+ * escolhendo o app WhatsApp — aí o arquivo vai como documento.
  */
 async function compartilharPdf(file: File, legenda?: string): Promise<'ok' | 'cancelado' | 'indisponivel'> {
   if (!isWeb() || typeof navigator === 'undefined' || typeof navigator.share !== 'function') {
@@ -253,6 +265,89 @@ async function compartilharPdf(file: File, legenda?: string): Promise<'ok' | 'ca
     }
   }
   return sawAbort ? 'cancelado' : 'indisponivel';
+}
+
+/**
+ * Modal com botão: o clique é o gesto do usuário que o Chrome exige
+ * para abrir o compartilhar do Windows com o arquivo.
+ */
+function pedirCliqueParaCompartilharPdf(
+  file: File,
+  legenda: string,
+): Promise<'ok' | 'cancelado' | 'indisponivel'> {
+  if (typeof document === 'undefined') return Promise.resolve('indisponivel');
+
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.setAttribute('role', 'dialog');
+    overlay.style.cssText =
+      'position:fixed;inset:0;z-index:999999;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:16px;font-family:system-ui,sans-serif';
+
+    const box = document.createElement('div');
+    box.style.cssText =
+      'background:#fff;max-width:420px;width:100%;border-radius:12px;padding:20px 22px;box-shadow:0 20px 50px rgba(0,0,0,.25)';
+
+    const title = document.createElement('div');
+    title.textContent = 'Enviar boleto no WhatsApp';
+    title.style.cssText = 'font-size:17px;font-weight:700;color:#0f172a;margin-bottom:8px';
+
+    const body = document.createElement('p');
+    body.textContent =
+      'Clique no botão verde. Na lista do Windows, escolha o WhatsApp instalado (ícone verde) — o PDF vai como documento anexado.';
+    body.style.cssText = 'font-size:14px;line-height:1.45;color:#334155;margin:0 0 16px';
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap';
+
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancelar';
+    cancel.style.cssText =
+      'border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:8px;padding:10px 14px;font-size:14px;cursor:pointer';
+
+    const send = document.createElement('button');
+    send.type = 'button';
+    send.textContent = 'Anexar PDF no WhatsApp';
+    send.style.cssText =
+      'border:0;background:#16a34a;color:#fff;border-radius:8px;padding:10px 14px;font-size:14px;font-weight:600;cursor:pointer';
+
+    const fechar = (result: 'ok' | 'cancelado' | 'indisponivel') => {
+      try {
+        overlay.remove();
+      } catch {
+        /* ignore */
+      }
+      resolve(result);
+    };
+
+    cancel.onclick = () => fechar('cancelado');
+    send.onclick = () => {
+      void (async () => {
+        send.disabled = true;
+        send.textContent = 'Abrindo…';
+        const r = await compartilharPdf(file, legenda);
+        if (r === 'indisponivel') {
+          const soArquivo = await compartilharPdf(file);
+          fechar(soArquivo);
+          return;
+        }
+        fechar(r);
+      })();
+    };
+
+    overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) fechar('cancelado');
+    });
+
+    row.appendChild(cancel);
+    row.appendChild(send);
+    box.appendChild(title);
+    box.appendChild(body);
+    box.appendChild(row);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    send.focus();
+  });
 }
 
 /**
@@ -333,41 +428,24 @@ export async function compartilharBoletoWhatsAppComPdf(
     return { modo: 'pdf_e_app' };
   }
 
-  if (typeof File === 'undefined' || typeof navigator === 'undefined' || typeof navigator.share !== 'function') {
-    throw new Error(
-      'Este navegador não anexa PDF no WhatsApp. Use Chrome ou Edge no Windows, com o WhatsApp Desktop instalado.',
-    );
-  }
-
   const pdfBlob =
     blob.type === 'application/pdf' ? blob : new Blob([await blob.arrayBuffer()], { type: 'application/pdf' });
-  const file = new File([pdfBlob], filename, {
-    type: 'application/pdf',
-    lastModified: Date.now(),
-  });
+  const file =
+    typeof File !== 'undefined'
+      ? new File([pdfBlob], filename, { type: 'application/pdf', lastModified: Date.now() })
+      : null;
 
-  // O await do PDF perde o gesto do clique; o OK renova e libera o share com arquivo.
-  const seguir = window.confirm(
-    'PDF pronto.\n\n1) Clique em OK\n2) Na lista do Windows, escolha o WhatsApp instalado (não o Web)\n3) Selecione o contato — o boleto vai como documento anexado.',
-  );
-  if (!seguir) return { modo: 'cancelado' };
-
-  // 1) Tenta texto + PDF juntos (documento anexado na conversa).
-  let compartilhou = await compartilharPdf(file, message);
-  if (compartilhou === 'ok') return { modo: 'compartilhado' };
-  if (compartilhou === 'cancelado') return { modo: 'cancelado' };
-
-  // 2) Só o arquivo; em seguida abre a conversa com o texto (sem link).
-  compartilhou = await compartilharPdf(file);
-  if (compartilhou === 'ok') {
-    abrirWhatsAppDesktopProtocol(phone, message);
-    return { modo: 'compartilhado' };
+  // Clique real no botão do modal = gesto válido para o compartilhar com arquivo.
+  if (file && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+    const compartilhou = await pedirCliqueParaCompartilharPdf(file, message);
+    if (compartilhou === 'ok') return { modo: 'compartilhado' };
+    if (compartilhou === 'cancelado') return { modo: 'cancelado' };
   }
-  if (compartilhou === 'cancelado') return { modo: 'cancelado' };
 
-  throw new Error(
-    'Não foi possível anexar o PDF. Use Chrome/Edge, confirme o compartilhar do Windows e escolha o app WhatsApp (ícone verde), não o WhatsApp Web.',
-  );
+  // Fallback: abre a conversa no app + baixa o PDF para arrastar/anexar na conversa.
+  baixarPdfWeb(pdfBlob, filename);
+  abrirWhatsAppDesktopProtocol(phone, message);
+  return { modo: 'pdf_e_app' };
 }
 
 export async function compartilharBoletoWhatsAppComFeedback(
@@ -388,9 +466,9 @@ export async function compartilharBoletoWhatsAppComFeedback(
   if (result.modo === 'pdf_e_app') {
     Toast.show({
       type: 'info',
-      text1: 'WhatsApp aberto com a mensagem.',
-      text2: 'Anexe o PDF pela conversa se o documento não aparecer.',
-      visibilityTime: 9000,
+      text1: 'WhatsApp aberto e PDF baixado.',
+      text2: 'Na conversa, clique no clipe e anexe o boleto que acabou de baixar (ou arraste o arquivo).',
+      visibilityTime: 12000,
     });
   }
 }
