@@ -2,10 +2,8 @@
  * Roteamento de emissão NFS-e por município (IBGE).
  * - 3550308 São Paulo capital → WebService Paulistana (SOAP)
  * - 3501608 Americana + Regime Normal → WebService ABRASF TipLan (SOAP)
- * - 3501608 Americana + Simples Nacional (ME/EPP/MEI) → DPS nacional na API ADN
- *   da própria Americana (`/api/adn/dps/recepcao`).
- *   Motivo: SEFIN “emissor público nacional” devolve E0039 (município TipLan não
- *   parametrizado para emissores públicos); TipLan SOAP devolve L999 para Simples.
+ * - 3501608 Americana + Simples Nacional (ME/EPP/MEI) → SEFIN Emissor Nacional (ADN)
+ *   (XML autorizado: SefinNacional + opSimpNac=3 + regApTribSN=1 + IBSCBS)
  * - demais → SEFIN Nacional (ADN)
  */
 const AMERICANA_ADN = {
@@ -65,15 +63,15 @@ function resolveNfseGateway(ibge, ambiente = 1, opts = {}) {
     opts.optanteSimples === true ||
     (opts.config != null && isOptanteSimplesNacional(opts.config));
 
-  // Simples em Americana: DPS nacional via API ADN municipal (não SEFIN público, não TipLan SOAP).
+  // Simples em Americana: SEFIN Emissor Nacional (sem URL municipal).
+  // RN E0039: opSimpNac 2/3 + regApTribSN=1 + competência ≥ 11/2026.
   if (forceNacional && cod === '3501608') {
-    const amb = Number(ambiente) === 1 ? 'P' : 'H';
     return {
-      mode: 'municipal',
+      mode: 'nacional',
       ibge: cod,
-      nome: 'Americana/SP — ADN DPS (Simples Nacional)',
+      nome: 'Americana/SP — SEFIN Emissor Nacional (Simples)',
       skipConvenioNacional: true,
-      urlOverrides: AMERICANA_ADN[amb] ?? AMERICANA_ADN.P,
+      urlOverrides: null,
     };
   }
 

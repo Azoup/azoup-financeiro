@@ -100,7 +100,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
   }
 
   // Americana Regime Normal → ABRASF TipLan.
-  // Simples Nacional (L999) já cai no ADN nacional via resolveNfseGateway.
+  // Simples Nacional → SEFIN Emissor Nacional via resolveNfseGateway (mode nacional).
   if (gateway.mode === 'abrasf') {
     prepareServerlessCryptoEnv();
     const senha = await decryptCertPassword(admin, senhaEnc);
@@ -208,15 +208,22 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
     });
 
     try {
-      if (optanteSimples) {
-        console.info('[nfse] gateway Simples', gw.nome, gw.mode, gw.urlOverrides?.NFSe_Autorizacao ?? 'SEFIN');
-      }
+      const inf = layout?.DPS?.infDps ?? {};
+      console.info('[nfse] gateway ADN', {
+        nome: gw.nome,
+        mode: gw.mode,
+        url: gw.urlOverrides?.NFSe_Autorizacao ?? 'SEFIN',
+        opSimpNac: inf?.prest?.regTrib?.opSimpNac,
+        regApTribSN: inf?.prest?.regTrib?.regApTribSN ?? null,
+        dCompet: inf?.dCompet,
+        hasIBSCBS: Boolean(inf?.IBSCBS),
+      });
       // Simples a partir de 11/2026: habilitado no ADN por regra federal (CGSN),
       // mesmo se ConsultarConvenio do município ainda não marca "emissor público".
       const pularConvenio =
         gw.skipConvenioNacional ||
         (optanteSimples &&
-          String(layout?.DPS?.infDps?.dCompet ?? '').slice(0, 7) >= '2026-11');
+          String(inf?.dCompet ?? '').slice(0, 7) >= '2026-11');
       if (!pularConvenio) {
         const convenio = await validarConvenioMunicipio(wizard, config.codigo_ibge_emitente);
         if (!convenio.ok) {
@@ -231,9 +238,10 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
       let ret;
       let removeRedirect = () => undefined;
       try {
-        if (gw.urlOverrides && (gw.mode === 'municipal' || gw.mode === 'nacional')) {
+        // Redirect municipal só com urlOverrides; mode nacional SEFIN não redireciona.
+        if (gw.urlOverrides && gw.mode === 'municipal') {
           removeRedirect = await installMunicipalAxiosRedirect(wizard, gw.urlOverrides);
-          console.info('[nfse] gateway ADN', gw.nome, gw.urlOverrides.NFSe_Autorizacao);
+          console.info('[nfse] redirect municipal', gw.nome, gw.urlOverrides.NFSe_Autorizacao);
         }
         ret = await wizard.Autorizacao(layout);
       } catch (authErr) {

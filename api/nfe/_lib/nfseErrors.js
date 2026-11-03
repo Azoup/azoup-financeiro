@@ -202,7 +202,7 @@ function humanizeNfseRejection(message, ibge) {
         'O ambiente está exigindo finNFSe antes de cLocEmi (NT 009 / produção restrita). Confira se a emissão não está apontando para homologação.';
     } else if (/IBSCBS|indOp|cIndOp|indFinal/i.test(detail)) {
       hint =
-        'Grupo IBSCBS inválido no XML. Em produção o grupo é opcional — a emissão omite IBSCBS incompleto. Reemitir após o deploy.';
+        'Grupo IBSCBS inválido no XML. Deve ficar no fim do infDPS (finNFSe/indFinal/cIndOp/indDest + gIBSCBS), nunca dentro de valores.trib. Reemitir após o deploy.';
     }
     return ['E1235 — O XML da DPS não bate com o schema do ADN.', hint, `Detalhe: ${detail}`].join(' ');
   }
@@ -211,16 +211,16 @@ function humanizeNfseRejection(message, ibge) {
     const cod = onlyDigits(ibge).padStart(7, '0').slice(0, 7) || 'informado';
     if (cod === '3501608') {
       return [
-        `E0039 — Americana (IBGE ${cod}): o SEFIN público rejeita o município TipLan.`,
-        'Para Simples Nacional a emissão deve ir pela API ADN da própria Americana (/api/adn/dps/recepcao), não pelo emissor público SEFIN.',
-        'Faça redeploy da correção e reemitir. Confira Regime = Simples e competência a partir de 11/2026.',
-        'Credencie o CNPJ do certificado A1 no portal da prefeitura (nfse.americana.sp.gov.br).',
+        `E0039 — Americana (IBGE ${cod}): SEFIN exige ME/EPP (opSimpNac=3) ou MEI (2) com regApTribSN=1 e competência ≥ 11/2026.`,
+        'Confira em Configurações › NFS-e: Situação no Simples = ME/EPP (ou MEI) e faça redeploy.',
+        'O CNPJ do certificado A1 precisa estar habilitado no portal nacional (gov.br/nfse).',
+        'Reemitir após o deploy.',
       ].join(' ');
     }
     return [
       `E0039 — O município IBGE ${cod} não está parametrizado para os emissores públicos nacionais.`,
       'Confira o código IBGE (7 dígitos) e a adesão em https://www.gov.br/nfse/pt-br/municipios',
-      'Optantes do Simples (competência ≥ 11/2026) devem emitir pelo ADN mesmo sem parametrização antiga do município — reemitir após o deploy.',
+      'Optantes do Simples (ME/EPP/MEI + regApTribSN=1, competência ≥ 11/2026) emitem pelo SEFIN mesmo sem parametrização antiga — reemitir após o deploy.',
     ].join(' ');
   }
 

@@ -39,6 +39,18 @@ function padNbs(code) {
   return onlyDigits(code).padStart(9, '0').slice(0, 9);
 }
 
+function pad3(code, fallback = '000') {
+  const d = onlyDigits(code);
+  if (!d) return fallback;
+  return d.padStart(3, '0').slice(0, 3);
+}
+
+function pad6(code, fallback = '000001') {
+  const d = onlyDigits(code);
+  if (!d) return fallback;
+  return d.padStart(6, '0').slice(0, 6);
+}
+
 /** Valores monetários NFS-e (TSDec15V2): sempre 2 casas decimais, ex. "0.20". */
 function money2(n) {
   const v = Number(n);
@@ -47,15 +59,14 @@ function money2(n) {
 }
 
 /**
- * Monta DPS nacional (ADN) no leiaute de PRODUÇÃO (NT 004/007).
+ * Monta DPS nacional (ADN/SEFIN) no leiaute de PRODUÇÃO.
  *
- * Importante (CGNFS-e, 29/10/2026):
- * - Produção oficial ainda NÃO usa NT 009 (finNFSe em infDPS). NT 009 só em
- *   produção restrita até o cronograma de 01/12/2026.
- * - finNFSe na raiz de infDPS gera E1235 em produção.
- * - IBSCBS é opcional; se omitido, o ADN não rejeita por isso. Se informado,
- *   precisa do grupo completo em infDPS/IBSCBS (finNFSe, cIndOp, indDest…).
- * - Nunca colocar IBSCBS dentro de valores/trib.
+ * Espelha XML autorizado Americana (SefinNacional_1.6.0):
+ * - Sem finNFSe na raiz de infDPS (NT 009 ainda não é produção plena).
+ * - Simples MEI/ME-EPP: regApTribSN=1 (RN E0039 / CGSN ≥ 11/2026).
+ * - IBSCBS no fim de infDPS (irmão de valores), nunca dentro de valores.trib.
+ * - endNac: cMun antes de CEP.
+ * - tribFed/piscofins CST 00.
  */
 function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   const ambiente = 1; // produção
@@ -101,13 +112,24 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
     cTribMun = '001';
   }
 
-  if (ibge === '3501608' && !onlyDigits(config.inscricao_municipal)) {
-    throw new Error('Informe a Inscrição Municipal de Americana (ex.: 69842) em Configurações › NFS-e.');
-  }
+  // SEFIN autorizado não exige IM; só inclui se cadastrada.
+  const im = onlyDigits(config.inscricao_municipal);
 
   // IBGE do tomador: se o cadastro trouxer, usa; senão, município do prestador.
   const cMunTomador = onlyDigits(cliente.codigo_ibge || cliente.cMun || cliente.codigo_municipio).slice(0, 7);
   const cMunToma = cMunTomador.length === 7 ? cMunTomador : ibge;
+
+  const opSimpNac = Number(config.op_simp_nac ?? 1);
+  const regTrib = {
+    opSimpNac,
+    regEspTrib: Number(config.reg_esp_trib ?? 0),
+  };
+  // MEI (2) / ME-EPP (3): regApTribSN=1 dispensa parametrização municipal no emissor público (E0039).
+  if (opSimpNac === 2 || opSimpNac === 3) {
+    regTrib.regApTribSN = Number(config.reg_ap_trib_sn ?? 1);
+  }
+
+  const pisCst = onlyDigits(config.cst_pis_cofins ?? '00').padStart(2, '0').slice(0, 2) || '00';
 
   return {
     DPS: {
@@ -122,22 +144,17 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
         cLocEmi: ibge,
         prest: {
           ...(isCnpjEmit ? { CNPJ: emitDoc } : { CPF: emitDoc }),
-          ...(config.inscricao_municipal?.trim()
-            ? { IM: onlyDigits(config.inscricao_municipal) }
-            : {}),
-          regTrib: {
-            opSimpNac: Number(config.op_simp_nac ?? 1),
-            regEspTrib: Number(config.reg_esp_trib ?? 0),
-          },
+          ...(im ? { IM: im } : {}),
+          regTrib,
         },
         toma: {
           ...(isCnpjDest ? { CNPJ: destDoc } : { CPF: destDoc }),
           xNome: tomadorNome,
           end: {
-            // Ordem do schema: CEP antes de cMun.
+            // Ordem do XML autorizado SEFIN: cMun antes de CEP.
             endNac: {
-              CEP: cepTomador.padStart(8, '0').slice(0, 8),
               cMun: cMunToma,
+              CEP: cepTomador.padStart(8, '0').slice(0, 8),
             },
             xLgr: cliente.logradouro || perfil.logradouro || 'Nao informado',
             nro: cliente.numero || perfil.numero || 'S/N',
@@ -160,11 +177,32 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
               tribISSQN: tribMun,
               tpRetISSQN: Number(config.tp_ret_issqn ?? 1),
             },
+            tribFed: {
+              piscofins: {
+                CST: pisCst,
+                tpRetPisCofins: Number(config.tp_ret_pis_cofins ?? 0),
+              },
+            },
             totTrib: {
               vTotTrib: {
                 vTotTribFed: money2(0),
                 vTotTribEst: money2(0),
                 vTotTribMun: vMun,
+              },
+            },
+          },
+        },
+        // Irmão de valores no fim de infDPS (nunca dentro de valores.trib).
+        IBSCBS: {
+          finNFSe: 0,
+          indFinal: Number(config.ind_final ?? 1),
+          cIndOp: pad6(config.ind_op ?? config.c_ind_op ?? '100501', '100501'),
+          indDest: Number(config.ind_dest ?? 0),
+          valores: {
+            trib: {
+              gIBSCBS: {
+                CST: pad3(config.cst_ibs_cbs ?? '000', '000'),
+                cClassTrib: pad6(config.c_class_trib ?? '000001', '000001'),
               },
             },
           },
