@@ -3,7 +3,7 @@
  * - 3550308 São Paulo capital → WebService Paulistana (SOAP)
  * - 3501608 Americana + Regime Normal → WebService ABRASF TipLan (SOAP)
  * - 3501608 Americana + Simples Nacional (ME/EPP/MEI) → SEFIN Emissor Nacional (ADN)
- *   (XML autorizado: SefinNacional + opSimpNac=3 + regApTribSN=1 + IBSCBS)
+ *   (SEFIN: opSimpNac=2|3 + regApTribSN=1, sem IBSCBS/finNFSe na raiz em prod)
  * - demais → SEFIN Nacional (ADN)
  */
 const AMERICANA_ADN = {

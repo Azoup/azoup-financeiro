@@ -50,10 +50,8 @@ function money2(n) {
  * Monta DPS nacional (ADN/SEFIN) no leiaute de PRODUÇÃO (NT 004/007).
  *
  * - Sem finNFSe na raiz de infDPS (NT 009 ainda não é produção plena → E1235).
- * - Sem IBSCBS: o @nfewizard serializa o grupo de forma inválida no schema
- *   de produção (E1235). Outros emissores mandam IBSCBS em XML cru; aqui
- *   o grupo é opcional e omitido evita a rejeição.
- * - Simples MEI/ME-EPP: regApTribSN=1 (RN E0039 / CGSN ≥ 11/2026).
+ * - Sem IBSCBS (opcional no ADN; omitido evita E1235 via nfewizard).
+ * - Simples MEI/ME-EPP: regApTribSN=1 ANTES de regEspTrib (TCRegTrib / E0039).
  */
 function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   const ambiente = 1; // produção
@@ -107,14 +105,14 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   const cMunToma = cMunTomador.length === 7 ? cMunTomador : ibge;
 
   const opSimpNac = Number(config.op_simp_nac ?? 1);
+  // xml2js preserva ordem das chaves; TCRegTrib exige regApTribSN antes de regEspTrib (DPS_v1.01).
   const regTrib = {
     opSimpNac,
+    ...(opSimpNac === 2 || opSimpNac === 3
+      ? { regApTribSN: Number(config.reg_ap_trib_sn ?? 1) }
+      : {}),
     regEspTrib: Number(config.reg_esp_trib ?? 0),
   };
-  // MEI (2) / ME-EPP (3): regApTribSN=1 dispensa parametrização municipal no emissor público (E0039).
-  if (opSimpNac === 2 || opSimpNac === 3) {
-    regTrib.regApTribSN = Number(config.reg_ap_trib_sn ?? 1);
-  }
 
   return {
     DPS: {
@@ -136,10 +134,10 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
           ...(isCnpjDest ? { CNPJ: destDoc } : { CPF: destDoc }),
           xNome: tomadorNome,
           end: {
-            // Ordem do schema do nfewizard/ADN: CEP antes de cMun.
+            // TCEnderNac (DPS_v1.01): cMun antes de CEP.
             endNac: {
-              CEP: cepTomador.padStart(8, '0').slice(0, 8),
               cMun: cMunToma,
+              CEP: cepTomador.padStart(8, '0').slice(0, 8),
             },
             xLgr: cliente.logradouro || perfil.logradouro || 'Nao informado',
             nro: cliente.numero || perfil.numero || 'S/N',

@@ -203,6 +203,12 @@ function humanizeNfseRejection(message, ibge) {
     } else if (/IBSCBS|indOp|cIndOp|indFinal/i.test(detail)) {
       hint =
         'Grupo IBSCBS inválido no XML do ADN. A emissão omite IBSCBS no leiaute de produção (grupo opcional). Reemitir após o deploy.';
+    } else if (/regApTribSN|regEspTrib|TCRegTrib/i.test(detail)) {
+      hint =
+        'Ordem inválida em prest/regTrib: deve ser opSimpNac → regApTribSN → regEspTrib. Reemitir após o deploy.';
+    } else if (/endNac|TCEnderNac|cMun.*CEP|CEP.*cMun/i.test(detail)) {
+      hint =
+        'Ordem inválida em endNac: deve ser cMun → CEP. Reemitir após o deploy.';
     }
     return ['E1235 — O XML da DPS não bate com o schema do ADN.', hint, `Detalhe: ${detail}`].join(' ');
   }
