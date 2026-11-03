@@ -190,6 +190,14 @@ function humanizeNfseRejection(message, ibge) {
     ].join(' ');
   }
 
+  if (/E0240|CEP informado.*não existe|CEP informado.*nao existe|não pertence ao município|nao pertence ao municipio/i.test(raw)) {
+    return [
+      'E0240 — O CEP do tomador não confere com o município (IBGE) enviado na DPS.',
+      'No cadastro do cliente, confira CEP e cidade. A emissão consulta o ViaCEP para alinhar o IBGE ao CEP.',
+      'Corrija o endereço do cliente e reemitir.',
+    ].join(' ');
+  }
+
   if (/E0120|IM do prestador não deve ser informado|IM do prestador nao deve ser informado/i.test(raw)) {
     return [
       'E0120 — No Emissor Nacional (SEFIN) a Inscrição Municipal do prestador não deve ser enviada.',

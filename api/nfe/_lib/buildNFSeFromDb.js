@@ -47,14 +47,43 @@ function money2(n) {
 }
 
 /**
+ * IBGE do município a partir do CEP (ViaCEP). Evita E0240 quando o cadastro
+ * do cliente não tem codigo_ibge ou está desalinhado do CEP.
+ */
+async function resolveIbgeMunicipioPorCep(cep) {
+  const digits = onlyDigits(cep).padStart(8, '0').slice(0, 8);
+  if (digits.length !== 8) return null;
+  try {
+    const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || data.erro) return null;
+    const ibge = onlyDigits(data.ibge).slice(0, 7);
+    if (ibge.length !== 7) return null;
+    return {
+      ibge,
+      logradouro: String(data.logradouro ?? '').trim(),
+      bairro: String(data.bairro ?? '').trim(),
+      localidade: String(data.localidade ?? '').trim(),
+      uf: String(data.uf ?? '').trim().toUpperCase(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Monta DPS nacional (ADN/SEFIN) no leiaute de PRODUÇÃO (NT 004/007).
  *
  * - Sem finNFSe na raiz de infDPS (NT 009 ainda não é produção plena → E1235).
  * - Sem IBSCBS (opcional no ADN; omitido evita E1235 via nfewizard).
  * - Sem IM no prestador (E0120 no SEFIN quando o município não vincula IM).
  * - Simples MEI/ME-EPP: regApTribSN=1 ANTES de regEspTrib (TCRegTrib / E0039).
+ * - endNac.cMun alinhado ao CEP do tomador via ViaCEP (E0240).
  */
-function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
+async function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   const ambiente = 1; // produção
   const ibge = onlyDigits(config.codigo_ibge_emitente).slice(0, 7);
   if (ibge.length < 7) {
@@ -74,9 +103,11 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   const isCnpjEmit = emitDoc.length === 14;
   const isCnpjDest = destDoc.length === 14;
 
-  const cepTomador = onlyDigits(cliente.cep || perfil.cep);
+  const cepTomador = onlyDigits(cliente.cep);
   if (cepTomador.length < 8) {
-    throw new Error('CEP do tomador ausente. Preencha o endereço do cliente ou do beneficiário.');
+    throw new Error(
+      `Cliente "${nomeCliente(cliente)}" sem CEP válido. Preencha o CEP no cadastro do cliente antes de emitir NFS-e.`,
+    );
   }
 
   const descricaoBase = itens[0]?.descricao ?? config.descricao_servico_padrao;
@@ -98,9 +129,15 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
     cTribMun = '001';
   }
 
-  // IBGE do tomador: se o cadastro trouxer, usa; senão, município do prestador.
-  const cMunTomador = onlyDigits(cliente.codigo_ibge || cliente.cMun || cliente.codigo_municipio).slice(0, 7);
-  const cMunToma = cMunTomador.length === 7 ? cMunTomador : ibge;
+  // E0240: cMun do tomador DEVE ser o município do CEP enviado — nunca o IBGE do prestador.
+  const viaCep = await resolveIbgeMunicipioPorCep(cepTomador);
+  const cMunCadastro = onlyDigits(cliente.codigo_ibge || cliente.cMun || cliente.codigo_municipio).slice(0, 7);
+  const cMunToma = viaCep?.ibge || (cMunCadastro.length === 7 ? cMunCadastro : '');
+  if (cMunToma.length !== 7) {
+    throw new Error(
+      `CEP ${cepTomador.slice(0, 5)}-${cepTomador.slice(5)} do cliente "${nomeCliente(cliente)}" não retornou município (IBGE). Confira o CEP no cadastro.`,
+    );
+  }
 
   const opSimpNac = Number(config.op_simp_nac ?? 1);
   // xml2js preserva ordem das chaves; TCRegTrib exige regApTribSN antes de regEspTrib (DPS_v1.01).
@@ -138,9 +175,9 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
               cMun: cMunToma,
               CEP: cepTomador.padStart(8, '0').slice(0, 8),
             },
-            xLgr: cliente.logradouro || perfil.logradouro || 'Nao informado',
-            nro: cliente.numero || perfil.numero || 'S/N',
-            xBairro: cliente.bairro || perfil.bairro || 'Centro',
+            xLgr: cliente.logradouro || viaCep?.logradouro || 'Nao informado',
+            nro: cliente.numero || 'S/N',
+            xBairro: cliente.bairro || viaCep?.bairro || 'Centro',
           },
         },
         serv: {

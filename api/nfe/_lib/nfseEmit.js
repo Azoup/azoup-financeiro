@@ -194,7 +194,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
     }
   }
 
-  const layout = buildNFSeLayout({ nota, itens, perfil, cliente, config });
+  const layout = await buildNFSeLayout({ nota, itens, perfil, cliente, config });
 
   return withHomologTlsRelaxed(async () => {
     const { wizard, certPath, gateway: gw } = await createNfseWizard({
