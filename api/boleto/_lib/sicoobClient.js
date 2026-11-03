@@ -13,8 +13,9 @@ function textoSemAcento(value, fallback) {
   const base = String(value ?? '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    // Mantém apóstrofo (ex.: Santa Barbara D'Oeste).
-    .replace(/[^A-Za-z0-9' ]/g, ' ')
+    // Banco rejeita apóstrofo (ex.: Santa Barbara D'Oeste → DOeste).
+    .replace(/[''`´’]/g, '')
+    .replace(/[^A-Za-z0-9 ]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   return base || fallback;

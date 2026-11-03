@@ -8,13 +8,14 @@ function onlyDigits(value) {
   return String(value ?? '').replace(/\D/g, '');
 }
 
-/** C6 recusa acento e pontuação. Produção também limita o tamanho de cada campo. */
+/** C6 recusa acento, apóstrofo e pontuação. Produção também limita o tamanho de cada campo. */
 function textoC6(value, fallback) {
   const base = String(value ?? '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    // Mantém apóstrofo (ex.: Santa Barbara D'Oeste).
-    .replace(/[^A-Za-z0-9' ]/g, ' ')
+    // Banco rejeita apóstrofo (ex.: Santa Barbara D'Oeste → DOeste).
+    .replace(/[''`´’]/g, '')
+    .replace(/[^A-Za-z0-9 ]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   return base || fallback;
