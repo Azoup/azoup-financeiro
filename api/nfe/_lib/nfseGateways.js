@@ -1,11 +1,26 @@
 /**
  * Roteamento de emissão NFS-e por município (IBGE).
  * - 3550308 São Paulo capital → WebService Paulistana (SOAP)
- * - 3501608 Americana + Regime Normal → WebService ABRASF TipLan
- * - 3501608 Americana + Simples Nacional (ME/EPP/MEI) → SEFIN/ADN Nacional
- *   (CGSN 189/2026 / L999: optante não emite mais pelo webservice municipal)
+ * - 3501608 Americana + Regime Normal → WebService ABRASF TipLan (SOAP)
+ * - 3501608 Americana + Simples Nacional (ME/EPP/MEI) → DPS nacional na API ADN
+ *   da própria Americana (`/api/adn/dps/recepcao`).
+ *   Motivo: SEFIN “emissor público nacional” devolve E0039 (município TipLan não
+ *   parametrizado para emissores públicos); TipLan SOAP devolve L999 para Simples.
  * - demais → SEFIN Nacional (ADN)
  */
+const AMERICANA_ADN = {
+  H: {
+    NFSe_Autorizacao: 'https://americanahomologacao.nfe.com.br/api/adn/dps/recepcao',
+    NFSe_Eventos: 'https://americanahomologacao.nfe.com.br/api/adn/dps/evento',
+    NFSe_Ws: 'https://americanahomologacao.nfe.com.br/nfse/wsnacional2/nfse.asmx',
+  },
+  P: {
+    NFSe_Autorizacao: 'https://nfse.americana.sp.gov.br/api/adn/dps/recepcao',
+    NFSe_Eventos: 'https://nfse.americana.sp.gov.br/api/adn/dps/evento',
+    NFSe_Ws: 'https://nfse.americana.sp.gov.br/nfse/wsnacional2/nfse.asmx',
+  },
+};
+
 const GATEWAYS_BY_IBGE = {
   '3550308': {
     nome: 'São Paulo/SP — Nota Fiscal Paulistana',
@@ -17,17 +32,7 @@ const GATEWAYS_BY_IBGE = {
     nome: 'Americana/SP — WebService ABRASF TipLan',
     mode: 'abrasf',
     skipConvenioNacional: true,
-    // Mantido para cancelamento/consulta ADN se necessário.
-    H: {
-      NFSe_Autorizacao: 'https://americanahomologacao.nfe.com.br/api/adn/dps/recepcao',
-      NFSe_Eventos: 'https://americanahomologacao.nfe.com.br/api/adn/dps/evento',
-      NFSe_Ws: 'https://americanahomologacao.nfe.com.br/nfse/wsnacional2/nfse.asmx',
-    },
-    P: {
-      NFSe_Autorizacao: 'https://nfse.americana.sp.gov.br/api/adn/dps/recepcao',
-      NFSe_Eventos: 'https://nfse.americana.sp.gov.br/api/adn/dps/evento',
-      NFSe_Ws: 'https://nfse.americana.sp.gov.br/nfse/wsnacional2/nfse.asmx',
-    },
+    ...AMERICANA_ADN,
   },
 };
 
@@ -60,14 +65,15 @@ function resolveNfseGateway(ibge, ambiente = 1, opts = {}) {
     opts.optanteSimples === true ||
     (opts.config != null && isOptanteSimplesNacional(opts.config));
 
-  // Simples Nacional: emissão exclusiva pelo Emissor Nacional (ADN), mesmo em Americana.
+  // Simples em Americana: DPS nacional via API ADN municipal (não SEFIN público, não TipLan SOAP).
   if (forceNacional && cod === '3501608') {
+    const amb = Number(ambiente) === 1 ? 'P' : 'H';
     return {
-      mode: 'nacional',
+      mode: 'municipal',
       ibge: cod,
-      nome: 'SEFIN Nacional (Simples Nacional / ADN)',
-      skipConvenioNacional: false,
-      urlOverrides: null,
+      nome: 'Americana/SP — ADN DPS (Simples Nacional)',
+      skipConvenioNacional: true,
+      urlOverrides: AMERICANA_ADN[amb] ?? AMERICANA_ADN.P,
     };
   }
 

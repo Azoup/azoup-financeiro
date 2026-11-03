@@ -209,9 +209,15 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
 
     try {
       if (optanteSimples) {
-        console.info('[nfse] gateway ADN nacional (Simples Nacional)', gw.nome);
+        console.info('[nfse] gateway Simples', gw.nome, gw.mode, gw.urlOverrides?.NFSe_Autorizacao ?? 'SEFIN');
       }
-      if (!gw.skipConvenioNacional) {
+      // Simples a partir de 11/2026: habilitado no ADN por regra federal (CGSN),
+      // mesmo se ConsultarConvenio do município ainda não marca "emissor público".
+      const pularConvenio =
+        gw.skipConvenioNacional ||
+        (optanteSimples &&
+          String(layout?.DPS?.infDps?.dCompet ?? '').slice(0, 7) >= '2026-11');
+      if (!pularConvenio) {
         const convenio = await validarConvenioMunicipio(wizard, config.codigo_ibge_emitente);
         if (!convenio.ok) {
           return {
@@ -225,9 +231,9 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
       let ret;
       let removeRedirect = () => undefined;
       try {
-        if (gw.mode === 'municipal' && gw.urlOverrides) {
+        if (gw.urlOverrides && (gw.mode === 'municipal' || gw.mode === 'nacional')) {
           removeRedirect = await installMunicipalAxiosRedirect(wizard, gw.urlOverrides);
-          console.info('[nfse] gateway municipal', gw.nome, gw.urlOverrides.NFSe_Autorizacao);
+          console.info('[nfse] gateway ADN', gw.nome, gw.urlOverrides.NFSe_Autorizacao);
         }
         ret = await wizard.Autorizacao(layout);
       } catch (authErr) {

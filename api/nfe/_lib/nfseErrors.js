@@ -207,21 +207,20 @@ function humanizeNfseRejection(message, ibge) {
     return ['E1235 — O XML da DPS não bate com o schema do ADN.', hint, `Detalhe: ${detail}`].join(' ');
   }
 
-  if (/E0039/i.test(raw)) {
+  if (/E0039|parametrizado para utilizar os emissores públicos nacionais/i.test(raw)) {
     const cod = onlyDigits(ibge).padStart(7, '0').slice(0, 7) || 'informado';
     if (cod === '3501608') {
       return [
-        `E0039 — Americana (IBGE ${cod}): Regime Normal usa ABRASF TipLan; Simples Nacional usa ADN (Emissor Nacional).`,
-        'Confira o regime do emitente em Configurações › NFS-e. Faça redeploy da versão mais recente.',
-        'Credencie o CNPJ do certificado A1 no portal nacional (gov.br/nfse) e, se Regime Normal, na prefeitura.',
+        `E0039 — Americana (IBGE ${cod}): o SEFIN público rejeita o município TipLan.`,
+        'Para Simples Nacional a emissão deve ir pela API ADN da própria Americana (/api/adn/dps/recepcao), não pelo emissor público SEFIN.',
+        'Faça redeploy da correção e reemitir. Confira Regime = Simples e competência a partir de 11/2026.',
+        'Credencie o CNPJ do certificado A1 no portal da prefeitura (nfse.americana.sp.gov.br).',
       ].join(' ');
     }
     return [
-      `E0039 — O município IBGE ${cod} não está habilitado no Sistema Nacional NFS-e para emissão pelo emissor público nacional (homologação).`,
-      'Confira se o código IBGE da cidade do prestador está correto (7 dígitos, ex.: 3550308).',
-      'O município precisa ter aderido e concluído a parametrização no portal nacional NFS-e (gov.br/nfse).',
-      'Se a prefeitura ainda usa sistema próprio (sem emissor nacional), esta integração não emitirá até a adesão.',
-      'Orientação: contate a contabilidade/prefeitura ou consulte a adesão em https://www.gov.br/nfse/pt-br/municipios',
+      `E0039 — O município IBGE ${cod} não está parametrizado para os emissores públicos nacionais.`,
+      'Confira o código IBGE (7 dígitos) e a adesão em https://www.gov.br/nfse/pt-br/municipios',
+      'Optantes do Simples (competência ≥ 11/2026) devem emitir pelo ADN mesmo sem parametrização antiga do município — reemitir após o deploy.',
     ].join(' ');
   }
 
