@@ -4,18 +4,15 @@ const {
   alterarBoletoSicoobApi,
   cleanupCert,
   consultarBoletoSicoobApi,
-  obterSegundaViaSicoobApi,
 } = require('./sicoobClient');
 const { loadSicoobCredentials } = require('./sicoobCredentials');
 const { mensagemSegundoBoleto } = require('./umBoletoPorClienteDia');
-
-function diaIso(valor) {
-  const s = String(valor ?? '').trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
-  return '';
-}
+const {
+  diaIso,
+  baixarPdfSicoobAlinhado,
+  salvarPdfBase64,
+  salvarPdfBuffer,
+} = require('./refreshPdfOficial');
 
 function dataValida(iso) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
@@ -137,30 +134,6 @@ async function gravarLocal(admin, userId, boleto, nova, extras) {
   }
 }
 
-async function salvarPdfBase64(admin, bucket, userId, boletoId, base64) {
-  if (!base64) return {};
-  const buf = Buffer.from(String(base64), 'base64');
-  if (!buf.length) return {};
-  const path = `${userId}/boletos/${boletoId}.pdf`;
-  const { error } = await admin.storage
-    .from(bucket)
-    .upload(path, buf, { contentType: 'application/pdf', upsert: true });
-  if (error) return {};
-  const { data } = await admin.storage.from(bucket).createSignedUrl(path, 60 * 60 * 24 * 30);
-  return { pdf_storage_path: path, pdf_url: data?.signedUrl ?? null };
-}
-
-async function salvarPdfBuffer(admin, bucket, userId, boletoId, buffer) {
-  if (!buffer?.length) return {};
-  const path = `${userId}/boletos/${boletoId}.pdf`;
-  const { error } = await admin.storage
-    .from(bucket)
-    .upload(path, buffer, { contentType: 'application/pdf', upsert: true });
-  if (error) return {};
-  const { data } = await admin.storage.from(bucket).createSignedUrl(path, 60 * 60 * 24 * 30);
-  return { pdf_storage_path: path, pdf_url: data?.signedUrl ?? null };
-}
-
 async function registrarHistorico(admin, boletoId, userId, acao, detalhes) {
   try {
     await admin.from('historico_boleto_sicoob').insert({
@@ -230,13 +203,11 @@ async function alterarNoSicoob(admin, userId, boleto, nova) {
     const extras = {};
     let pdfAtualizado = false;
     try {
-      const via = await obterSegundaViaSicoobApi({
-        config: creds.config,
-        certPath: creds.certPath,
-        senha: creds.senha,
-        nossoNumero: boleto.nosso_numero_banco,
+      const { via, alinhado } = await baixarPdfSicoobAlinhado(creds, boleto, nova, {
+        tentativas: 4,
+        intervaloMs: 2000,
       });
-      if (diaIso(via.data_vencimento) === nova) {
+      if (via?.pdf_base64 && alinhado) {
         if (via.linha_digitavel) extras.linha_digitavel = via.linha_digitavel;
         if (via.codigo_barras) extras.codigo_barras = via.codigo_barras;
         Object.assign(extras, await salvarPdfBase64(admin, 'boletos_sicoob', userId, boleto.id, via.pdf_base64));

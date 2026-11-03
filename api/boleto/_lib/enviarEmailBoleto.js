@@ -247,6 +247,24 @@ async function tentarEnviarEmailAposEmissao(admin, userId, emitResult) {
       .eq('id', clienteId)
       .maybeSingle();
 
+    // PDF em Storage pode estar desatualizado (ex.: vencimento editado no DB/banco
+    // sem a segunda via ter sido gravada). Antes do e-mail, tenta alinhar com a data do sistema.
+    if (
+      (boleto.tipo_emissao === 'sicoob' && boleto.nosso_numero_banco) ||
+      (boleto.tipo_emissao === 'c6' && boleto.c6_boleto_id)
+    ) {
+      try {
+        const { refreshPdfOficialBoleto } = require('./refreshPdfOficial');
+        const refreshed = await refreshPdfOficialBoleto(admin, userId, boletoId);
+        if (refreshed?.pdf_url) {
+          boleto.pdf_url = refreshed.pdf_url;
+          if (refreshed.pdf_storage_path) boleto.pdf_storage_path = refreshed.pdf_storage_path;
+        }
+      } catch (e) {
+        console.warn('[email-boleto] refresh PDF oficial:', e.message);
+      }
+    }
+
     // C6 modo rápido: tenta baixar PDF uma vez antes de enviar.
     let pdfUrl = boleto.pdf_url;
     let pdfStoragePath = boleto.pdf_storage_path;

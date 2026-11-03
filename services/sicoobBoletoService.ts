@@ -134,6 +134,55 @@ export async function reemitirBoletosSicoob(userId: string, boletoIds: string[])
   return emitirBoletosSicoobLote(userId, boletoIds, { exigirRegistro: true });
 }
 
+/** Baixa o PDF oficial do banco alinhado à data_vencimento do sistema (corrige PDF antigo após editar vencimento). */
+export async function atualizarPdfOficialBoleto(boletoId: string): Promise<{
+  success: boolean;
+  alinhado?: boolean;
+  pdf_url?: string | null;
+  message: string;
+}> {
+  const { data: session } = await supabase.auth.getSession();
+  const token = session.session?.access_token;
+  if (!token) throw new Error('Sessão expirada. Faça login novamente.');
+
+  const base = boletoApiBaseUrl();
+  if (!base) {
+    throw new Error('URL da API não configurada (use a mesma origem web ou EXPO_PUBLIC_NFE_API_URL).');
+  }
+
+  const res = await fetch(`${base}/api/boleto/emitir-lote`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ action: 'atualizar-pdf', boletoId }),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    success?: boolean;
+    message?: string;
+    erros?: string[];
+    resultados?: Array<{
+      success?: boolean;
+      alinhado?: boolean;
+      pdf_url?: string | null;
+      message?: string;
+    }>;
+  };
+  const first = body.resultados?.[0];
+  if (!res.ok || body.success === false) {
+    throw new Error(
+      first?.message ?? body.erros?.[0] ?? body.message ?? `Não atualizou o PDF oficial (${res.status}).`,
+    );
+  }
+  return {
+    success: true,
+    alinhado: first?.alinhado,
+    pdf_url: first?.pdf_url,
+    message: first?.message ?? 'PDF atualizado.',
+  };
+}
+
 export async function atualizarPagadorBoletoSicoob(boletoId: string): Promise<{
   success: boolean;
   cidade?: string;

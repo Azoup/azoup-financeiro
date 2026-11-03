@@ -154,7 +154,24 @@ async function obterPdfBoleto(
     );
   }
 
-  const pdfUrl = await resolveBoletoPdfUrl(row);
+  // Vencimento editado no sistema pode deixar o PDF do Storage com a data antiga.
+  let rowPdf = row;
+  if (
+    (row.tipo_emissao === 'sicoob' && row.nosso_numero_banco) ||
+    (row.tipo_emissao === 'c6' && row.c6_boleto_id)
+  ) {
+    try {
+      const { atualizarPdfOficialBoleto } = await import('@/services/sicoobBoletoService');
+      const refreshed = await atualizarPdfOficialBoleto(row.id);
+      if (refreshed.pdf_url) {
+        rowPdf = { ...row, pdf_url: refreshed.pdf_url };
+      }
+    } catch {
+      /* segue com o PDF já gravado */
+    }
+  }
+
+  const pdfUrl = await resolveBoletoPdfUrl(rowPdf);
   if (pdfUrl) {
     if (isWeb()) {
       const blob = await fetchPdfBlob(pdfUrl);

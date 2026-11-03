@@ -6,6 +6,7 @@ const { tentarEnviarEmailAposEmissao, enviarPendenciaBoleto } = require('./_lib/
 const { cancelarUmBoletoNoBanco } = require('./_lib/cancelarBoletoRegistrado');
 const { alterarVencimentoBoleto } = require('./_lib/alterarVencimentoBoleto');
 const { atualizarPagadorBoletoSicoob } = require('./_lib/atualizarPagadorBoleto');
+const { refreshPdfOficialBoleto } = require('./_lib/refreshPdfOficial');
 const {
   cleanupTemp,
   criarPixCobC6Api,
@@ -25,6 +26,7 @@ const {
  * - action=cancelar-boletos (baixa/cancelamento no banco)
  * - action=alterar-vencimento (data no sistema e no Sicoob/C6)
  * - action=atualizar-pagador (cidade/endereço no Sicoob e PDF oficial novo)
+ * - action=atualizar-pdf (baixa PDF oficial alinhado à data_vencimento do sistema)
  * (evita nova serverless function no limite Hobby)
  */
 module.exports = async function handler(req, res) {
@@ -69,6 +71,40 @@ module.exports = async function handler(req, res) {
       }
       const result = await atualizarPagadorBoletoSicoob(admin, user.id, boletoId);
       return res.status(200).json(result);
+    }
+
+    if (action === 'atualizar-pdf') {
+      const boletoIds = Array.isArray(body.boletoIds)
+        ? body.boletoIds.map((id) => String(id || '').trim()).filter(Boolean)
+        : body.boletoId
+          ? [String(body.boletoId).trim()]
+          : [];
+      if (!boletoIds.length) {
+        return res.status(400).json({ success: false, message: 'Informe boletoId ou boletoIds.' });
+      }
+      if (boletoIds.length > 15) {
+        return res.status(400).json({ success: false, message: 'Atualize no máximo 15 PDFs por vez.' });
+      }
+      const resultados = [];
+      const erros = [];
+      for (const boletoId of boletoIds) {
+        try {
+          const result = await refreshPdfOficialBoleto(admin, user.id, boletoId);
+          resultados.push({ boletoId, ...result });
+          if (!result.alinhado) {
+            erros.push(`${boletoId}: ${result.message}`);
+          }
+        } catch (error) {
+          const msg = `${boletoId}: ${error.message}`;
+          erros.push(msg);
+          resultados.push({ success: false, boletoId, message: error.message });
+        }
+      }
+      return res.status(erros.length === boletoIds.length ? 400 : 200).json({
+        success: erros.length === 0,
+        erros,
+        resultados,
+      });
     }
 
     if (action === 'alterar-vencimento') {
