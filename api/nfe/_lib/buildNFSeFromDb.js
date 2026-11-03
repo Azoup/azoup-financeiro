@@ -104,6 +104,15 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
     throw new Error('Informe a Inscrição Municipal de Americana (ex.: 69842) em Configurações › NFS-e.');
   }
 
+  // NT 009 / leiaute 1.04: finNFSe obrigatório em infDPS antes de cLocEmi.
+  // 0 = NFS-e de prestação de serviço (padrão).
+  const finNFSe = Number(config.fin_nfse ?? 0);
+  const indOp =
+    String(config.ind_op ?? '100501')
+      .replace(/\D/g, '')
+      .slice(0, 6)
+      .padStart(6, '0') || '100501';
+
   return {
     DPS: {
       infDps: {
@@ -114,6 +123,7 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
         nDPS: String(nota.numero),
         dCompet: parseCompetenciaIso(nota.competencia, nota.data_emissao),
         tpEmit: 1,
+        finNFSe: Number.isFinite(finNFSe) ? finNFSe : 0,
         cLocEmi: ibge,
         prest: {
           ...(isCnpjEmit ? { CNPJ: emitDoc } : { CPF: emitDoc }),
@@ -146,8 +156,6 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
             xDescServ,
             cNBS: padNbs(config.codigo_nbs),
           },
-          /** IndOp — indicador da operação (reforma / layout municipal). */
-          indOp: String(config.ind_op ?? '100501').replace(/\D/g, '').slice(0, 10) || '100501',
         },
         valores: {
           vServPrest: { vServ: money2(valor) },
@@ -156,8 +164,8 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
               tribISSQN: tribMun,
               tpRetISSQN: Number(config.tp_ret_issqn ?? 1),
             },
-            // Reforma tributária IBS/CBS (teste 2026).
-            IBSCBS: buildIbsCbs(config, valor),
+            // Reforma tributária IBS/CBS — indOp fica no grupo IBSCBS (NT 009).
+            IBSCBS: buildIbsCbs(config, valor, indOp),
             totTrib: {
               vTotTrib: {
                 vTotTribFed: money2(0),
@@ -173,7 +181,7 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
 }
 
 /** Grupo IBSCBS da DPS nacional (CST / cClassTrib / alíquotas teste 2026). */
-function buildIbsCbs(config, valorServico) {
+function buildIbsCbs(config, valorServico, indOp) {
   const cst = String(config.cst_ibs_cbs ?? '000').replace(/\D/g, '').padStart(3, '0').slice(0, 3);
   const cClassTrib = String(config.c_class_trib ?? '000001')
     .replace(/\D/g, '')
@@ -186,8 +194,14 @@ function buildIbsCbs(config, valorServico) {
   const vIBSUF = Math.round(vBC * (pIBSUF / 100) * 100) / 100;
   const vIBSMun = Math.round(vBC * (pIBSMun / 100) * 100) / 100;
   const vCBS = Math.round(vBC * (pCBS / 100) * 100) / 100;
+  const ind =
+    String(indOp ?? config.ind_op ?? '100501')
+      .replace(/\D/g, '')
+      .slice(0, 6)
+      .padStart(6, '0') || '100501';
 
   return {
+    indOp: ind,
     CST: cst || '000',
     cClassTrib: cClassTrib || '000001',
     gIBSCBS: {

@@ -190,6 +190,17 @@ function humanizeNfseRejection(message, ibge) {
     ].join(' ');
   }
 
+  if (/E1235|Falha no esquema XML do DF-e/i.test(raw)) {
+    const detail = raw.replace(/\s+/g, ' ').trim().slice(0, 400);
+    return [
+      'E1235 — O XML da DPS não bate com o schema do ADN (NT 009).',
+      detail.includes('finNFSe') || detail.includes('cLocEmi')
+        ? 'O layout exige finNFSe em infDPS antes de cLocEmi. Faça redeploy e reemitir.'
+        : 'Faça redeploy da correção de layout ADN e reemitir esta nota.',
+      `Detalhe: ${detail}`,
+    ].join(' ');
+  }
+
   if (/E0039/i.test(raw)) {
     const cod = onlyDigits(ibge).padStart(7, '0').slice(0, 7) || 'informado';
     if (cod === '3501608') {
