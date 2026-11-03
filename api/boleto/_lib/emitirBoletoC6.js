@@ -11,6 +11,10 @@ const {
 } = require('./c6Client');
 const { loadC6Credentials } = require('./c6Credentials');
 const { recusarSegundoBoletoNoDia } = require('./umBoletoPorClienteDia');
+const {
+  enriquecerClienteComCep,
+  persistirCidadeClienteSeCorrigida,
+} = require('./resolverEnderecoPagador');
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -189,8 +193,10 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint, opts = 
   const clienteId = await resolveClienteId(admin, boleto);
   if (!clienteId) throw new Error('Não foi possível identificar o cliente do boleto.');
 
-  const { data: cliente, error: cliErr } = await admin.from('clientes').select('*').eq('id', clienteId).single();
-  if (cliErr || !cliente) throw new Error(cliErr?.message ?? 'Cliente não encontrado.');
+  const { data: clienteRaw, error: cliErr } = await admin.from('clientes').select('*').eq('id', clienteId).single();
+  if (cliErr || !clienteRaw) throw new Error(cliErr?.message ?? 'Cliente não encontrado.');
+  const { cliente, corrigiu } = await enriquecerClienteComCep(clienteRaw);
+  await persistirCidadeClienteSeCorrigida(admin, clienteId, clienteRaw, cliente, corrigiu);
   await sincronizarPagadorNoBoleto(admin, boletoId, cliente);
 
   const valorDocumento = await resolveValorDocumentoC6(admin, boleto);

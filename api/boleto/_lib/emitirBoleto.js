@@ -9,6 +9,10 @@ const {
   listarBoletosPagadorSicoobApi,
 } = require('./sicoobClient');
 const { recusarSegundoBoletoNoDia } = require('./umBoletoPorClienteDia');
+const {
+  enriquecerClienteComCep,
+  persistirCidadeClienteSeCorrigida,
+} = require('./resolverEnderecoPagador');
 
 async function resolveClienteId(admin, boleto) {
   if (boleto.mensalidade_id) {
@@ -298,8 +302,10 @@ async function emitirUmBoleto(admin, userId, boletoId) {
   const clienteId = await resolveClienteId(admin, boleto);
   if (!clienteId) throw new Error('Não foi possível identificar o cliente do boleto.');
 
-  const { data: cliente, error: cliErr } = await admin.from('clientes').select('*').eq('id', clienteId).single();
-  if (cliErr || !cliente) throw new Error(cliErr?.message ?? 'Cliente não encontrado.');
+  const { data: clienteRaw, error: cliErr } = await admin.from('clientes').select('*').eq('id', clienteId).single();
+  if (cliErr || !clienteRaw) throw new Error(cliErr?.message ?? 'Cliente não encontrado.');
+  const { cliente, corrigiu } = await enriquecerClienteComCep(clienteRaw);
+  await persistirCidadeClienteSeCorrigida(admin, clienteId, clienteRaw, cliente, corrigiu);
   await sincronizarPagadorNoBoleto(admin, boletoId, cliente);
 
   let notaFiscal = null;

@@ -7,6 +7,10 @@ const {
   obterSegundaViaSicoobApi,
   textoSemAcento,
 } = require('./sicoobClient');
+const {
+  enriquecerClienteComCep,
+  persistirCidadeClienteSeCorrigida,
+} = require('./resolverEnderecoPagador');
 
 function campoJaAplicado(msg) {
   return /ao menos um campo deve ser alterado/i.test(String(msg ?? ''));
@@ -88,8 +92,10 @@ async function atualizarPagadorBoletoSicoob(admin, userId, boletoId) {
 
   const clienteId = await resolveClienteId(admin, boleto);
   if (!clienteId) throw new Error('Não foi possível identificar o cliente do boleto.');
-  const { data: cliente, error: cliErr } = await admin.from('clientes').select('*').eq('id', clienteId).single();
-  if (cliErr || !cliente) throw new Error(cliErr?.message ?? 'Cliente não encontrado.');
+  const { data: clienteRaw, error: cliErr } = await admin.from('clientes').select('*').eq('id', clienteId).single();
+  if (cliErr || !clienteRaw) throw new Error(cliErr?.message ?? 'Cliente não encontrado.');
+  const { cliente, corrigiu } = await enriquecerClienteComCep(clienteRaw);
+  await persistirCidadeClienteSeCorrigida(admin, clienteId, clienteRaw, cliente, corrigiu);
 
   const campos = camposPagadorDoCliente(cliente);
   const cidade = cidadePagador(cliente);

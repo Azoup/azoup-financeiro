@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { sincronizarEnderecoPagadorBoletos } from '@/services/boletoParcelaService';
 import { removeClientePdf, uploadClientePdf } from '@/services/clientePdfStorage';
+import { fetchAddressByCep } from '@/services/viacep';
 import type {
   Cliente,
   ClienteFormValues,
@@ -25,6 +26,36 @@ import {
 } from '@/utils/clientesDbMapping';
 
 export const PAGE_SIZE = 100;
+
+function textoCidadeNorm(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+/** Se o CEP existir no ViaCEP e a cidade/UF do formulário divergirem, usa a do CEP. */
+async function alinharCidadeComCep(values: ClienteFormValues): Promise<ClienteFormValues> {
+  const cepDigits = values.cep.replace(/\D/g, '');
+  if (cepDigits.length !== 8) return values;
+  const r = await fetchAddressByCep(cepDigits);
+  if (!r.ok || !r.localidade) return values;
+  const cidadeAtual = values.cidade.trim();
+  const ufAtual = values.uf.trim().toUpperCase().slice(0, 2);
+  const cidadeDivergente =
+    Boolean(cidadeAtual) && textoCidadeNorm(cidadeAtual) !== textoCidadeNorm(r.localidade);
+  const cidadeVazia = !cidadeAtual;
+  const ufDivergente = Boolean(r.uf) && Boolean(ufAtual) && ufAtual !== r.uf;
+  const ufVazia = !ufAtual;
+  if (!cidadeDivergente && !cidadeVazia && !ufDivergente && !ufVazia) return values;
+  return {
+    ...values,
+    cidade: r.localidade,
+    uf: r.uf || values.uf,
+  };
+}
 
 export type ClienteSituacaoFiltro = 'todos' | 'ativos' | 'cancelados' | 'paralisados';
 
@@ -238,7 +269,8 @@ export async function createCliente(
     throw new Error('Informe a justificativa do cancelamento.');
   }
 
-  const row = mapClienteFormToDbRow(values, documento, {
+  const valuesAlinhados = await alinharCidadeComCep(values);
+  const row = mapClienteFormToDbRow(valuesAlinhados, documento, {
     user_id: userId,
     pdf_path: null,
     ultimo_reajuste: null,
@@ -367,7 +399,8 @@ export async function updateCliente(
       ? true
       : Math.round(oldVal * 100) !== Math.round(novoValor * 100);
 
-  const row = mapClienteFormToDbRow(values, documento, {
+  const valuesAlinhados = await alinharCidadeComCep(values);
+  const row = mapClienteFormToDbRow(valuesAlinhados, documento, {
     pdf_path: nextPdf,
     ultimo_reajuste: nextUltimoReajuste,
     ...(valorMudou && oldVal != null ? { valor_mensalidade_anterior: oldVal } : {}),
