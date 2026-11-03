@@ -51,6 +51,7 @@ function money2(n) {
  *
  * - Sem finNFSe na raiz de infDPS (NT 009 ainda não é produção plena → E1235).
  * - Sem IBSCBS (opcional no ADN; omitido evita E1235 via nfewizard).
+ * - Sem IM no prestador (E0120 no SEFIN quando o município não vincula IM).
  * - Simples MEI/ME-EPP: regApTribSN=1 ANTES de regEspTrib (TCRegTrib / E0039).
  */
 function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
@@ -97,9 +98,6 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
     cTribMun = '001';
   }
 
-  // SEFIN não exige IM; só inclui se cadastrada.
-  const im = onlyDigits(config.inscricao_municipal);
-
   // IBGE do tomador: se o cadastro trouxer, usa; senão, município do prestador.
   const cMunTomador = onlyDigits(cliente.codigo_ibge || cliente.cMun || cliente.codigo_municipio).slice(0, 7);
   const cMunToma = cMunTomador.length === 7 ? cMunTomador : ibge;
@@ -125,9 +123,10 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
         dCompet: parseCompetenciaIso(nota.competencia, nota.data_emissao),
         tpEmit: 1,
         cLocEmi: ibge,
+        // E0120: no SEFIN nacional a IM do prestador NÃO deve ir na DPS
+        // (município TipLan / cadastro nacional sem IM vinculada).
         prest: {
           ...(isCnpjEmit ? { CNPJ: emitDoc } : { CPF: emitDoc }),
-          ...(im ? { IM: im } : {}),
           regTrib,
         },
         toma: {

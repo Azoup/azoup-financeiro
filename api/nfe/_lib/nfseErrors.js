@@ -190,6 +190,14 @@ function humanizeNfseRejection(message, ibge) {
     ].join(' ');
   }
 
+  if (/E0120|IM do prestador não deve ser informado|IM do prestador nao deve ser informado/i.test(raw)) {
+    return [
+      'E0120 — No Emissor Nacional (SEFIN) a Inscrição Municipal do prestador não deve ser enviada.',
+      'A emissão omite a IM na DPS. Faça redeploy e reemitir.',
+      'A IM continua no cadastro para o webservice municipal (TipLan), quando for o caso.',
+    ].join(' ');
+  }
+
   if (/E1235|Falha no esquema XML do DF-e/i.test(raw)) {
     const detail = raw.replace(/\s+/g, ' ').trim().slice(0, 500);
     let hint =
