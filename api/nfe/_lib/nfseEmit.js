@@ -217,6 +217,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
         regApTribSN: inf?.prest?.regTrib?.regApTribSN ?? null,
         dCompet: inf?.dCompet,
         hasIBSCBS: Boolean(inf?.IBSCBS),
+        regTrib: inf?.prest?.regTrib,
       });
       // Simples a partir de 11/2026: habilitado no ADN por regra federal (CGSN),
       // mesmo se ConsultarConvenio do município ainda não marca "emissor público".

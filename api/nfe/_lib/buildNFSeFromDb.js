@@ -39,18 +39,6 @@ function padNbs(code) {
   return onlyDigits(code).padStart(9, '0').slice(0, 9);
 }
 
-function pad3(code, fallback = '000') {
-  const d = onlyDigits(code);
-  if (!d) return fallback;
-  return d.padStart(3, '0').slice(0, 3);
-}
-
-function pad6(code, fallback = '000001') {
-  const d = onlyDigits(code);
-  if (!d) return fallback;
-  return d.padStart(6, '0').slice(0, 6);
-}
-
 /** Valores monetários NFS-e (TSDec15V2): sempre 2 casas decimais, ex. "0.20". */
 function money2(n) {
   const v = Number(n);
@@ -59,14 +47,13 @@ function money2(n) {
 }
 
 /**
- * Monta DPS nacional (ADN/SEFIN) no leiaute de PRODUÇÃO.
+ * Monta DPS nacional (ADN/SEFIN) no leiaute de PRODUÇÃO (NT 004/007).
  *
- * Espelha XML autorizado Americana (SefinNacional_1.6.0):
- * - Sem finNFSe na raiz de infDPS (NT 009 ainda não é produção plena).
+ * - Sem finNFSe na raiz de infDPS (NT 009 ainda não é produção plena → E1235).
+ * - Sem IBSCBS: o @nfewizard serializa o grupo de forma inválida no schema
+ *   de produção (E1235). Outros emissores mandam IBSCBS em XML cru; aqui
+ *   o grupo é opcional e omitido evita a rejeição.
  * - Simples MEI/ME-EPP: regApTribSN=1 (RN E0039 / CGSN ≥ 11/2026).
- * - IBSCBS no fim de infDPS (irmão de valores), nunca dentro de valores.trib.
- * - endNac: cMun antes de CEP.
- * - tribFed/piscofins CST 00.
  */
 function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   const ambiente = 1; // produção
@@ -112,7 +99,7 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
     cTribMun = '001';
   }
 
-  // SEFIN autorizado não exige IM; só inclui se cadastrada.
+  // SEFIN não exige IM; só inclui se cadastrada.
   const im = onlyDigits(config.inscricao_municipal);
 
   // IBGE do tomador: se o cadastro trouxer, usa; senão, município do prestador.
@@ -128,8 +115,6 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   if (opSimpNac === 2 || opSimpNac === 3) {
     regTrib.regApTribSN = Number(config.reg_ap_trib_sn ?? 1);
   }
-
-  const pisCst = onlyDigits(config.cst_pis_cofins ?? '00').padStart(2, '0').slice(0, 2) || '00';
 
   return {
     DPS: {
@@ -151,10 +136,10 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
           ...(isCnpjDest ? { CNPJ: destDoc } : { CPF: destDoc }),
           xNome: tomadorNome,
           end: {
-            // Ordem do XML autorizado SEFIN: cMun antes de CEP.
+            // Ordem do schema do nfewizard/ADN: CEP antes de cMun.
             endNac: {
-              cMun: cMunToma,
               CEP: cepTomador.padStart(8, '0').slice(0, 8),
+              cMun: cMunToma,
             },
             xLgr: cliente.logradouro || perfil.logradouro || 'Nao informado',
             nro: cliente.numero || perfil.numero || 'S/N',
@@ -177,32 +162,11 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
               tribISSQN: tribMun,
               tpRetISSQN: Number(config.tp_ret_issqn ?? 1),
             },
-            tribFed: {
-              piscofins: {
-                CST: pisCst,
-                tpRetPisCofins: Number(config.tp_ret_pis_cofins ?? 0),
-              },
-            },
             totTrib: {
               vTotTrib: {
                 vTotTribFed: money2(0),
                 vTotTribEst: money2(0),
                 vTotTribMun: vMun,
-              },
-            },
-          },
-        },
-        // Irmão de valores no fim de infDPS (nunca dentro de valores.trib).
-        IBSCBS: {
-          finNFSe: 0,
-          indFinal: Number(config.ind_final ?? 1),
-          cIndOp: pad6(config.ind_op ?? config.c_ind_op ?? '100501', '100501'),
-          indDest: Number(config.ind_dest ?? 0),
-          valores: {
-            trib: {
-              gIBSCBS: {
-                CST: pad3(config.cst_ibs_cbs ?? '000', '000'),
-                cClassTrib: pad6(config.c_class_trib ?? '000001', '000001'),
               },
             },
           },

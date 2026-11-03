@@ -202,7 +202,7 @@ function humanizeNfseRejection(message, ibge) {
         'O ambiente está exigindo finNFSe antes de cLocEmi (NT 009 / produção restrita). Confira se a emissão não está apontando para homologação.';
     } else if (/IBSCBS|indOp|cIndOp|indFinal/i.test(detail)) {
       hint =
-        'Grupo IBSCBS inválido no XML. Deve ficar no fim do infDPS (finNFSe/indFinal/cIndOp/indDest + gIBSCBS), nunca dentro de valores.trib. Reemitir após o deploy.';
+        'Grupo IBSCBS inválido no XML do ADN. A emissão omite IBSCBS no leiaute de produção (grupo opcional). Reemitir após o deploy.';
     }
     return ['E1235 — O XML da DPS não bate com o schema do ADN.', hint, `Detalhe: ${detail}`].join(' ');
   }
