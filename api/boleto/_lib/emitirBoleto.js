@@ -68,7 +68,11 @@ function numeroBanco(boleto) {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Consulta títulos em aberto do pagador. consultaOk false = não dá para afirmar que o banco não tem o boleto. */
+function esperar(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Consulta títulos do pagador. consultaOk false = não dá para afirmar que o banco não tem o boleto. */
 async function acharBoletosJaEmitidos({ config, certPath, senha, cliente, seuNumero, vencimento }) {
   const alvo = seuNumeroAlvo(seuNumero);
   if (!alvo) return { boletos: [], consultaOk: false, erro: 'Seu número vazio.' };
@@ -76,23 +80,31 @@ async function acharBoletosJaEmitidos({ config, certPath, senha, cliente, seuNum
   const venc = String(vencimento ?? '').slice(0, 10);
   const dataInicio = venc && venc < diaIso(-120) ? venc : diaIso(-120);
   const dataFim = venc && venc > diaIso(180) ? venc : diaIso(180);
-  let lista = [];
-  try {
-    lista = await listarBoletosPagadorSicoobApi({
-      config,
-      certPath,
-      senha,
-      numeroCpfCnpj: doc,
-      dataInicio,
-      dataFim,
-    });
-  } catch (error) {
-    return { boletos: [], consultaOk: false, erro: error?.message ?? 'Consulta do pagador falhou.' };
+  let ultimoErro = null;
+
+  for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+    if (tentativa > 0) await esperar(800 * tentativa);
+    try {
+      // 1ª: em aberto; 2ª/3ª: sem filtro de situação (título pode ter outro status).
+      const codigoSituacao = tentativa === 0 ? '1' : undefined;
+      const lista = await listarBoletosPagadorSicoobApi({
+        config,
+        certPath,
+        senha,
+        numeroCpfCnpj: doc,
+        dataInicio,
+        dataFim,
+        codigoSituacao,
+      });
+      const boletos = lista
+        .filter((b) => seuNumeroAlvo(b?.seuNumero ?? b?.seu_numero) === alvo)
+        .sort((a, b) => numeroBanco(b) - numeroBanco(a));
+      return { boletos, consultaOk: true, erro: null };
+    } catch (error) {
+      ultimoErro = error?.message ?? 'Consulta do pagador falhou.';
+    }
   }
-  const boletos = lista
-    .filter((b) => seuNumeroAlvo(b?.seuNumero ?? b?.seu_numero) === alvo)
-    .sort((a, b) => numeroBanco(b) - numeroBanco(a));
-  return { boletos, consultaOk: true, erro: null };
+  return { boletos: [], consultaOk: false, erro: ultimoErro };
 }
 
 async function acoesEmissao(admin, boletoId) {
@@ -373,10 +385,20 @@ async function emitirUmBoleto(admin, userId, boletoId) {
       if (busca.boletos.length) return await adotar(busca.boletos[0], payload, busca.boletos.length);
       const idade = Date.now() - new Date(ultima.criado_em).getTime();
       const recente = idade < 3 * 60 * 1000;
-      if (recente || !busca.consultaOk) {
-        const msg = recente
-          ? 'Emissão deste boleto ainda pode estar em andamento no Sicoob. Aguarde alguns minutos. Não enviei outro título.'
-          : 'Não emiti outro boleto. Uma tentativa anterior pode ter sido aceita pelo Sicoob e a consulta não confirmou. Confira no banco antes de tentar de novo.';
+      const consultaInstavelAntiga = !busca.consultaOk && idade >= 15 * 60 * 1000;
+      if (recente) {
+        const msg =
+          'Emissão deste boleto ainda pode estar em andamento no Sicoob. Aguarde alguns minutos. Não enviei outro título.';
+        await admin
+          .from('boletos_parcela_venda')
+          .update({ tipo_emissao: 'sicoob', status_registro: 'erro', mensagem_erro_registro: msg })
+          .eq('id', boletoId);
+        throw new Error(msg);
+      }
+      if (!busca.consultaOk && !consultaInstavelAntiga) {
+        const detalhe = busca.erro ? ` Detalhe: ${busca.erro}` : '';
+        const msg =
+          `Não emiti outro boleto. Uma tentativa anterior pode ter sido aceita pelo Sicoob e a consulta não confirmou.${detalhe} Aguarde cerca de 15 minutos e tente de novo, ou confira no banco.`;
         await admin
           .from('boletos_parcela_venda')
           .update({ tipo_emissao: 'sicoob', status_registro: 'erro', mensagem_erro_registro: msg })
@@ -388,7 +410,9 @@ async function emitirUmBoleto(admin, userId, boletoId) {
         boletoId,
         userId,
         'CONSULTA_SEM_TITULO',
-        'Consulta do pagador não achou título em aberto com este seu número. Nova emissão liberada.',
+        consultaInstavelAntiga
+          ? `Consulta do pagador falhou após 15 min (${busca.erro ?? 'sem detalhe'}). Liberando nova emissão; confira no Sicoob se não ficou título duplicado.`
+          : 'Consulta do pagador não achou título com este seu número. Nova emissão liberada.',
       );
     }
 

@@ -181,13 +181,22 @@ function humanizeNfseRejection(message, ibge) {
     ].join(' ');
   }
 
+  if (/L999|exclusivamente pelo Ambiente de Dados Nac|Emissor Nacional da NFS-e/i.test(raw)) {
+    return [
+      'L999 — Optante do Simples Nacional deve emitir pelo Emissor Nacional (ADN), não pelo webservice municipal.',
+      'Após o deploy, o Azoup envia ME/EPP/MEI pelo ADN automaticamente.',
+      'Em Configurações › NFS-e, confira Regime = Simples Nacional e Situação no Simples = ME/EPP (ou MEI).',
+      'Reemitir as notas rejeitadas; as autorizadas pelo ADN continuam válidas na prefeitura.',
+    ].join(' ');
+  }
+
   if (/E0039/i.test(raw)) {
     const cod = onlyDigits(ibge).padStart(7, '0').slice(0, 7) || 'informado';
     if (cod === '3501608') {
       return [
-        `E0039 — Americana (IBGE ${cod}): a prefeitura não aceita emissão pelo SEFIN nacional.`,
-        'O sistema deve usar o WebService ABRASF TipLan (nfse.americana.sp.gov.br). Faça redeploy da versão mais recente.',
-        'Credencie o CNPJ do certificado A1 e a Autorização para Emissão no portal da prefeitura.',
+        `E0039 — Americana (IBGE ${cod}): Regime Normal usa ABRASF TipLan; Simples Nacional usa ADN (Emissor Nacional).`,
+        'Confira o regime do emitente em Configurações › NFS-e. Faça redeploy da versão mais recente.',
+        'Credencie o CNPJ do certificado A1 no portal nacional (gov.br/nfse) e, se Regime Normal, na prefeitura.',
       ].join(' ');
     }
     return [

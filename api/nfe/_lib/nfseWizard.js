@@ -35,12 +35,12 @@ function cleanupCert(certPath) {
 }
 
 /** Instancia @nfewizard/nfse com certificado temporário. */
-async function createNfseWizard({ admin, cert, senhaEnc, perfil, ambiente = 1, ibge }) {
+async function createNfseWizard({ admin, cert, senhaEnc, perfil, ambiente = 1, ibge, gatewayOpts }) {
   prepareServerlessCryptoEnv();
 
   const amb = Number(ambiente) === 1 ? 1 : 2;
   const { applyNfseGatewayEnv } = require('./nfseGateways');
-  const gateway = applyNfseGatewayEnv(ibge ?? '', amb);
+  const gateway = applyNfseGatewayEnv(ibge ?? '', amb, gatewayOpts ?? {});
 
   const NFSeWizard = await loadNfseWizardClass();
   if (!NFSeWizard) {

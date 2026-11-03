@@ -4,7 +4,7 @@ const { decryptCertPassword } = require('./crypto');
 const { withHomologTlsRelaxed } = require('./tlsHomolog');
 const { humanizeNfseRejection, validarConvenioMunicipio } = require('./nfseErrors');
 const { installMunicipalAxiosRedirect } = require('./municipalAxiosRedirect');
-const { resolveNfseGateway } = require('./nfseGateways');
+const { resolveNfseGateway, isOptanteSimplesNacional } = require('./nfseGateways');
 const { emitirNfsePaulistana } = require('./nfsePaulistana');
 const { emitirNfseAbrasfAmericana, itemListaServico } = require('./nfseAbrasfAmericana');
 const { salvarArtefatosNfseAbrasf } = require('./nfseDanfseArtifacts');
@@ -24,7 +24,11 @@ function extrairXml(ret) {
 
 async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, cert, senhaEnc }) {
   const ambiente = 1; // produção
-  const gateway = resolveNfseGateway(config.codigo_ibge_emitente, ambiente);
+  const optanteSimples = isOptanteSimplesNacional(config);
+  const gateway = resolveNfseGateway(config.codigo_ibge_emitente, ambiente, {
+    config,
+    optanteSimples,
+  });
 
   // São Paulo capital → WebService Paulistana
   if (gateway.mode === 'paulistana') {
@@ -60,7 +64,8 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
     }
   }
 
-  // Americana → ABRASF TipLan (mesmo canal típico do Delphi)
+  // Americana Regime Normal → ABRASF TipLan.
+  // Simples Nacional (L999) já cai no ADN nacional via resolveNfseGateway.
   if (gateway.mode === 'abrasf') {
     prepareServerlessCryptoEnv();
     const senha = await decryptCertPassword(admin, senhaEnc);
@@ -164,9 +169,13 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
       perfil,
       ambiente,
       ibge: config.codigo_ibge_emitente,
+      gatewayOpts: { config, optanteSimples },
     });
 
     try {
+      if (optanteSimples) {
+        console.info('[nfse] gateway ADN nacional (Simples Nacional)', gw.nome);
+      }
       if (!gw.skipConvenioNacional) {
         const convenio = await validarConvenioMunicipio(wizard, config.codigo_ibge_emitente);
         if (!convenio.ok) {

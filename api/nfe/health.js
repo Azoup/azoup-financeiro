@@ -36,6 +36,8 @@ module.exports = async function handler(req, res) {
     nfewizardCertsCount,
     nfsePackage: false,
     nfseGatewayAmericana: resolveNfseGateway('3501608', 1).mode === 'abrasf',
+    nfseGatewayAmericanaSimplesAdn:
+      resolveNfseGateway('3501608', 1, { optanteSimples: true }).mode === 'nacional',
     nfseGatewayPaulistana: resolveNfseGateway('3550308', 1).mode === 'paulistana',
   };
 

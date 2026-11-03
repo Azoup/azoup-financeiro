@@ -1,7 +1,9 @@
 /**
  * Roteamento de emissão NFS-e por município (IBGE).
  * - 3550308 São Paulo capital → WebService Paulistana (SOAP)
- * - 3501608 Americana → WebService ABRASF 2.03 TipLan (mesmo canal típico do Delphi)
+ * - 3501608 Americana + Regime Normal → WebService ABRASF TipLan
+ * - 3501608 Americana + Simples Nacional (ME/EPP/MEI) → SEFIN/ADN Nacional
+ *   (CGSN 189/2026 / L999: optante não emite mais pelo webservice municipal)
  * - demais → SEFIN Nacional (ADN)
  */
 const GATEWAYS_BY_IBGE = {
@@ -37,8 +39,38 @@ function normalizeIbge(ibge) {
   return onlyDigits(ibge).padStart(7, '0').slice(0, 7);
 }
 
-function resolveNfseGateway(ibge, ambiente = 1) {
+/** ME/EPP/MEI optante (ou pendente) do Simples — deve emitir pelo ADN nacional. */
+function isOptanteSimplesNacional(config) {
+  const regime = Number(config?.regime_tributario ?? 0);
+  const opSimp = Number(config?.op_simp_nac ?? 0);
+  if (regime === 1 || regime === 2) return true;
+  if (opSimp === 2 || opSimp === 3 || opSimp === 4) return true;
+  return false;
+}
+
+/**
+ * @param {string|number} ibge
+ * @param {number} [ambiente]
+ * @param {{ forceNacional?: boolean, optanteSimples?: boolean, config?: object }} [opts]
+ */
+function resolveNfseGateway(ibge, ambiente = 1, opts = {}) {
   const cod = normalizeIbge(ibge);
+  const forceNacional =
+    opts.forceNacional === true ||
+    opts.optanteSimples === true ||
+    (opts.config != null && isOptanteSimplesNacional(opts.config));
+
+  // Simples Nacional: emissão exclusiva pelo Emissor Nacional (ADN), mesmo em Americana.
+  if (forceNacional && cod === '3501608') {
+    return {
+      mode: 'nacional',
+      ibge: cod,
+      nome: 'SEFIN Nacional (Simples Nacional / ADN)',
+      skipConvenioNacional: false,
+      urlOverrides: null,
+    };
+  }
+
   const gw = GATEWAYS_BY_IBGE[cod];
   if (!gw) {
     return {
@@ -70,8 +102,8 @@ function resolveNfseGateway(ibge, ambiente = 1) {
 }
 
 /** Define NFSE_URL_OVERRIDES para o @nfewizard/shared (patch em postinstall). */
-function applyNfseGatewayEnv(ibge, ambiente = 1) {
-  const gateway = resolveNfseGateway(ibge, ambiente);
+function applyNfseGatewayEnv(ibge, ambiente = 1, opts = {}) {
+  const gateway = resolveNfseGateway(ibge, ambiente, opts);
   if (gateway.urlOverrides) {
     process.env.NFSE_URL_OVERRIDES = JSON.stringify(gateway.urlOverrides);
   } else {
@@ -90,4 +122,5 @@ module.exports = {
   applyNfseGatewayEnv,
   clearNfseGatewayEnv,
   normalizeIbge,
+  isOptanteSimplesNacional,
 };

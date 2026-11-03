@@ -467,7 +467,15 @@ async function obterSegundaViaSicoobApi({ config, certPath, senha, nossoNumero }
 }
 
 /** Boletos em aberto do pagador. dataInicio/dataFim são vencimento (yyyy-MM-dd). */
-async function listarBoletosPagadorSicoobApi({ config, certPath, senha, numeroCpfCnpj, dataInicio, dataFim }) {
+async function listarBoletosPagadorSicoobApi({
+  config,
+  certPath,
+  senha,
+  numeroCpfCnpj,
+  dataInicio,
+  dataFim,
+  codigoSituacao,
+}) {
   const doc = onlyDigits(numeroCpfCnpj);
   if (doc.length !== 11 && doc.length !== 14) return [];
 
@@ -476,10 +484,13 @@ async function listarBoletosPagadorSicoobApi({ config, certPath, senha, numeroCp
   const params = new URLSearchParams({
     numeroCliente: String(config.numero_cliente),
     codigoModalidade: String(config.codigo_modalidade ?? 1),
-    codigoSituacao: '1',
     dataInicio,
     dataFim,
   });
+  // 1 = em aberto. Se omitido, a API devolve mais situações (ajuda a achar título já gerado).
+  if (codigoSituacao != null && String(codigoSituacao).trim() !== '') {
+    params.set('codigoSituacao', String(codigoSituacao));
+  }
   const res = await httpsRequest(
     `${apiBaseUrl(config.ambiente)}/pagadores/${doc}/boletos?${params.toString()}`,
     {
