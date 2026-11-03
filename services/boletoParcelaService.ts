@@ -1319,9 +1319,9 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
       ...boleto,
       nota_fiscal_id,
       origem: isMen ? 'mensalidade' : 'venda',
-      parcela_status: boleto.status_registro === 'pago' ? 'pago' : status,
+      parcela_status: boleto.status_registro === 'pago' || status === 'pago' ? 'pago' : status,
       situacao_cobranca:
-        boleto.status_registro === 'pago'
+        boleto.status_registro === 'pago' || status === 'pago' || status === 'quitada' || status === 'quitado'
           ? 'pago'
           : boleto.status_registro === 'baixado'
             ? 'cancelado'

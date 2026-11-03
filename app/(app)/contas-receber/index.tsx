@@ -111,8 +111,13 @@ function origemStyle(origem: ContaReceberOrigem): { bg: string; fg: string } {
 function boletoRegistroLabel(
   status?: ContaReceberListRow['status_registro'],
   tipo?: ContaReceberListRow['tipo_emissao'],
+  situacao?: ContaReceberListRow['situacao_cobranca'],
 ): string {
   const banco = tipo === 'c6' ? 'C6' : tipo === 'sicoob' ? 'Sicoob' : null;
+  // Mensalidade já paga com carnê ainda em "erro" de registro: não assusta com Erro Sicoob.
+  if (situacao === 'pago' && (status === 'erro' || status === 'informativo' || status === 'pendente')) {
+    return banco ? `Pago (${banco})` : 'Pago';
+  }
   switch (status ?? 'informativo') {
     case 'registrado':
       return banco ?? 'Registrado';
@@ -691,6 +696,14 @@ export default function ContasReceberScreen() {
   const cancelarBoleto = async (itemOverride?: ContaReceberListRow) => {
     const item = itemOverride ?? acoesItem;
     if (!user?.id || !item || item.situacao_cobranca !== 'aberto') return;
+    if (item.data_pagamento) {
+      Toast.show({
+        type: 'info',
+        text1: 'Já existe pagamento nesta cobrança.',
+        text2: 'Estorne o pagamento antes de cancelar o boleto/mês.',
+      });
+      return;
+    }
     const ok = await confirmDestructive(
       'Cancelar boleto',
       item.origem === 'mensalidade'
@@ -1052,7 +1065,11 @@ export default function ContasReceberScreen() {
                 },
               ]}
             >
-              {boletoRegistroLabel(item.status_registro ?? 'informativo', item.tipo_emissao)}
+              {boletoRegistroLabel(
+                item.status_registro ?? 'informativo',
+                item.tipo_emissao,
+                item.situacao_cobranca,
+              )}
             </Text>
           </View>
           <Text style={styles.colSeg} numberOfLines={2}>

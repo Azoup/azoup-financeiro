@@ -141,7 +141,8 @@ export function ContaReceberAcoesModal({
     precisaRegistro &&
     Boolean(onRegistrarSicoob) &&
     (item.tipo_emissao === 'sicoob' || item.tipo_emissao === 'informativo');
-  const podeCancelar = aberto && Boolean(onCancelar);
+  // Com pagamento (mesmo se o carnê ainda estiver em "Erro Sicoob"), não cancela o mês.
+  const podeCancelar = aberto && !item.data_pagamento && Boolean(onCancelar);
   const noBanco =
     (item.tipo_emissao === 'sicoob' && Boolean(item.nosso_numero_banco)) ||
     (item.tipo_emissao === 'c6' && Boolean(item.c6_boleto_id));

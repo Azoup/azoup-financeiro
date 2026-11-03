@@ -47,18 +47,23 @@ function money2(n) {
 }
 
 /**
- * IBGE do município a partir do CEP (ViaCEP). Evita E0240 quando o cadastro
- * do cliente não tem codigo_ibge ou está desalinhado do CEP.
+ * IBGE do município a partir do CEP.
+ * ViaCEP primeiro; BrasilAPI como fallback (Vercel às vezes falha no ViaCEP).
  */
+async function fetchJsonCep(url) {
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
 async function resolveIbgeMunicipioPorCep(cep) {
   const digits = onlyDigits(cep).padStart(8, '0').slice(0, 8);
   if (digits.length !== 8) return null;
-  try {
-    const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`, {
-      headers: { Accept: 'application/json' },
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
+
+  const fromVia = (data) => {
     if (!data || data.erro) return null;
     const ibge = onlyDigits(data.ibge).slice(0, 7);
     if (ibge.length !== 7) return null;
@@ -66,9 +71,48 @@ async function resolveIbgeMunicipioPorCep(cep) {
       ibge,
       logradouro: String(data.logradouro ?? '').trim(),
       bairro: String(data.bairro ?? '').trim(),
-      localidade: String(data.localidade ?? '').trim(),
-      uf: String(data.uf ?? '').trim().toUpperCase(),
+      localidade: String(data.localidade ?? data.city ?? '').trim(),
+      uf: String(data.uf ?? data.state ?? '')
+        .trim()
+        .toUpperCase()
+        .slice(0, 2),
     };
+  };
+
+  const fromBrasil = (data) => {
+    if (!data || data.message || data.errors) return null;
+    const ibge = onlyDigits(data.ibge?.city ?? data.ibge).slice(0, 7);
+    if (ibge.length !== 7) return null;
+    return {
+      ibge,
+      logradouro: String(data.street ?? '').trim(),
+      bairro: String(data.neighborhood ?? '').trim(),
+      localidade: String(data.city ?? '').trim(),
+      uf: String(data.state ?? '')
+        .trim()
+        .toUpperCase()
+        .slice(0, 2),
+    };
+  };
+
+  try {
+    const via = fromVia(await fetchJsonCep(`https://viacep.com.br/ws/${digits}/json/`));
+    if (via) return via;
+  } catch {
+    /* tenta BrasilAPI */
+  }
+
+  try {
+    const br = fromBrasil(await fetchJsonCep(`https://brasilapi.com.br/api/cep/v2/${digits}`));
+    if (br) return br;
+  } catch {
+    /* ignore */
+  }
+
+  // Segunda tentativa ViaCEP (rede intermitente na Vercel).
+  try {
+    await new Promise((r) => setTimeout(r, 400));
+    return fromVia(await fetchJsonCep(`https://viacep.com.br/ws/${digits}/json/`));
   } catch {
     return null;
   }
