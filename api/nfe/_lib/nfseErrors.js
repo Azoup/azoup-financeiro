@@ -192,11 +192,17 @@ function humanizeNfseRejection(message, ibge) {
 
   if (/E1235|Falha no esquema XML do DF-e/i.test(raw)) {
     const detail = raw.replace(/\s+/g, ' ').trim().slice(0, 400);
+    let hint =
+      'Faça redeploy da correção de layout ADN e reemitir esta nota.';
+    if (/finNFSe|cLocEmi/i.test(detail)) {
+      hint = 'O layout exige finNFSe em infDPS antes de cLocEmi. Reemitir após o deploy.';
+    } else if (/IBSCBS|indOp|cIndOp|indFinal/i.test(detail)) {
+      hint =
+        'Grupo IBSCBS inválido no XML. A emissão nacional agora omite IBSCBS (opcional na produção) — reemitir após o deploy.';
+    }
     return [
-      'E1235 — O XML da DPS não bate com o schema do ADN (NT 009).',
-      detail.includes('finNFSe') || detail.includes('cLocEmi')
-        ? 'O layout exige finNFSe em infDPS antes de cLocEmi. Faça redeploy e reemitir.'
-        : 'Faça redeploy da correção de layout ADN e reemitir esta nota.',
+      'E1235 — O XML da DPS não bate com o schema do ADN.',
+      hint,
       `Detalhe: ${detail}`,
     ].join(' ');
   }

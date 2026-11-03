@@ -104,14 +104,14 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
     throw new Error('Informe a Inscrição Municipal de Americana (ex.: 69842) em Configurações › NFS-e.');
   }
 
-  // NT 009 / leiaute 1.04: finNFSe obrigatório em infDPS antes de cLocEmi.
-  // 0 = NFS-e de prestação de serviço (padrão).
+  // ADN produção (nov/2026): schema exige finNFSe em infDPS antes de cLocEmi.
+  // 0 = NFS-e regular (prestação de serviço).
   const finNFSe = Number(config.fin_nfse ?? 0);
-  const indOp =
-    String(config.ind_op ?? '100501')
-      .replace(/\D/g, '')
-      .slice(0, 6)
-      .padStart(6, '0') || '100501';
+
+  // IBSCBS: em produção o CGNFS-e aceita DPS sem o grupo (NT 004/007, comunicado 29/10/2026).
+  // Se informado, precisa do leiaute completo (finNFSe/indFinal/cIndOp em infDPS/IBSCBS).
+  // Enviar IBSCBS dentro de valores/trib com tags erradas (indOp/CST) gera E1235.
+  // Por isso omitimos o grupo até o leiaute RTC completo estar estável em produção.
 
   return {
     DPS: {
@@ -164,8 +164,6 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
               tribISSQN: tribMun,
               tpRetISSQN: Number(config.tp_ret_issqn ?? 1),
             },
-            // Reforma tributária IBS/CBS — indOp fica no grupo IBSCBS (NT 009).
-            IBSCBS: buildIbsCbs(config, valor, indOp),
             totTrib: {
               vTotTrib: {
                 vTotTribFed: money2(0),
@@ -175,48 +173,6 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
             },
           },
         },
-      },
-    },
-  };
-}
-
-/** Grupo IBSCBS da DPS nacional (CST / cClassTrib / alíquotas teste 2026). */
-function buildIbsCbs(config, valorServico, indOp) {
-  const cst = String(config.cst_ibs_cbs ?? '000').replace(/\D/g, '').padStart(3, '0').slice(0, 3);
-  const cClassTrib = String(config.c_class_trib ?? '000001')
-    .replace(/\D/g, '')
-    .padStart(6, '0')
-    .slice(0, 6);
-  const pIBSUF = Number(config.aliquota_ibs_uf ?? 0.1);
-  const pIBSMun = Number(config.aliquota_ibs_mun ?? 0);
-  const pCBS = Number(config.aliquota_cbs ?? 0.9);
-  const vBC = Number(valorServico);
-  const vIBSUF = Math.round(vBC * (pIBSUF / 100) * 100) / 100;
-  const vIBSMun = Math.round(vBC * (pIBSMun / 100) * 100) / 100;
-  const vCBS = Math.round(vBC * (pCBS / 100) * 100) / 100;
-  const ind =
-    String(indOp ?? config.ind_op ?? '100501')
-      .replace(/\D/g, '')
-      .slice(0, 6)
-      .padStart(6, '0') || '100501';
-
-  return {
-    indOp: ind,
-    CST: cst || '000',
-    cClassTrib: cClassTrib || '000001',
-    gIBSCBS: {
-      vBC: money2(vBC),
-      gIBSUF: {
-        pIBSUF: Number.isFinite(pIBSUF) ? pIBSUF : 0.1,
-        vIBSUF: money2(vIBSUF),
-      },
-      gIBSMun: {
-        pIBSMun: Number.isFinite(pIBSMun) ? pIBSMun : 0,
-        vIBSMun: money2(vIBSMun),
-      },
-      gCBS: {
-        pCBS: Number.isFinite(pCBS) ? pCBS : 0.9,
-        vCBS: money2(vCBS),
       },
     },
   };
