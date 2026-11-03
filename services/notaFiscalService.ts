@@ -783,20 +783,34 @@ export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emiti
 
   let res: Response;
   try {
-    res = await fetch(`${base}/api/nfe/emitir`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ notaFiscalId }),
-    });
+    // Vercel maxDuration=60s; aborta antes para não deixar a UI/DB em "processando" eterno.
+    const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ac ? setTimeout(() => ac.abort(), 55_000) : null;
+    try {
+      res = await fetch(`${base}/api/nfe/emitir`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ notaFiscalId }),
+        signal: ac?.signal,
+      });
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   } catch (e) {
-    const msg = (e as Error).message || 'Falha de rede ao contactar a API de emissão.';
+    const aborted =
+      (e as { name?: string })?.name === 'AbortError' ||
+      /aborted|abort/i.test(String((e as Error).message ?? ''));
+    const msg = aborted
+      ? 'Tempo esgotado ao emitir NFS-e. A nota saiu de Processando — use Reemitir se ainda não estiver autorizada.'
+      : (e as Error).message || 'Falha de rede ao contactar a API de emissão.';
     await supabase
       .from('nota_fiscal')
       .update({ status: 'rejeitada', motivo_rejeicao: msg })
-      .eq('id', notaFiscalId);
+      .eq('id', notaFiscalId)
+      .eq('status', 'processando');
     return { success: false, message: msg };
   }
 
@@ -825,11 +839,43 @@ export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emiti
 
   if (!res.ok || !body.success) {
     const msg = body.message ?? body.error ?? `Emissão falhou (${res.status}).`;
+    // Só marca rejeitada se ainda estiver processando (API pode já ter autorizado).
+    const { data: atual } = await supabase
+      .from('nota_fiscal')
+      .select('status, chave_acesso')
+      .eq('id', notaFiscalId)
+      .maybeSingle();
+    if (atual?.status === 'autorizada' || atual?.chave_acesso) {
+      return {
+        success: true,
+        status: body.status ?? '100',
+        chave_acesso: atual.chave_acesso ?? body.chave_acesso,
+        message: 'NFS-e autorizada (resposta tardia da API).',
+      };
+    }
     await supabase
       .from('nota_fiscal')
       .update({ status: 'rejeitada', motivo_rejeicao: msg, status_sefaz: body.status ?? null })
-      .eq('id', notaFiscalId);
+      .eq('id', notaFiscalId)
+      .eq('status', 'processando');
     return { success: false, message: msg, status: body.status };
+  }
+
+  // Reforço: se a API autorizou, garante status final no cliente.
+  if (body.chave_acesso || body.status) {
+    await supabase
+      .from('nota_fiscal')
+      .update({
+        status: 'autorizada',
+        status_sefaz: body.status ?? '100',
+        chave_acesso: body.chave_acesso ?? null,
+        protocolo_autorizacao: body.protocolo_autorizacao ?? null,
+        codigo_verificacao: body.codigo_verificacao ?? null,
+        danfe_url: body.danfe_url ?? null,
+        motivo_rejeicao: null,
+      })
+      .eq('id', notaFiscalId)
+      .neq('status', 'autorizada');
   }
 
   const { data: notaRow } = await supabase

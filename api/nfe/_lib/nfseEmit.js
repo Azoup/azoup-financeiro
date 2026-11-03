@@ -278,9 +278,11 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
       }
 
       const xmlProc = extrairXml(ret);
+
+      // DANFSe é opcional e não pode segurar a autorização até estourar o timeout
+      // da Vercel (nota ficava presa em "processando").
       let danfeUrl = null;
       let danfePath = null;
-
       if (xmlProc && chave) {
         try {
           const danfeMod = await import('@nfewizard/danfe');
@@ -290,11 +292,17 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
             const os = require('os');
             const path = require('path');
             const tmpPdf = path.join(os.tmpdir(), `danfse-${Date.now()}.pdf`);
-            await gerar({
-              data: ret?.response ?? ret,
-              chave,
-              outputPath: tmpPdf,
-            });
+            const gerarComTimeout = Promise.race([
+              gerar({
+                data: ret?.response ?? ret,
+                chave,
+                outputPath: tmpPdf,
+              }),
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('DANFSe demorou demais; autorização já ok.')), 12000),
+              ),
+            ]);
+            await gerarComTimeout;
             const pdfBuffer = fs.readFileSync(tmpPdf);
             danfePath = `${nota.user_id}/${chave}.pdf`;
             const { error: upErr } = await admin.storage
@@ -311,7 +319,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
             }
           }
         } catch (danfeErr) {
-          console.warn('DANFSe PDF:', danfeErr.message);
+          console.warn('DANFSe PDF:', danfeErr?.message ?? danfeErr);
         }
       }
 
@@ -324,7 +332,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
         xml_autorizado: xmlProc,
         danfe_url: danfeUrl,
         danfe_storage_path: danfePath,
-        message,
+        message: typeof message === 'string' && message && message !== 'Autorizada' ? message : 'Autorizada',
       };
     } finally {
       cleanupCert(certPath);

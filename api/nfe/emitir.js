@@ -96,6 +96,14 @@ module.exports = async function handler(req, res) {
       });
     }
 
+    // Marca processando no servidor. Em qualquer falha/timeout gravamos rejeitada
+    // para a tela não ficar presa em "Processando".
+    await admin
+      .from('nota_fiscal')
+      .update({ status: 'processando', motivo_rejeicao: null })
+      .eq('id', notaFiscalId)
+      .eq('user_id', user.id);
+
     const [{ data: itens }, { data: pagamentos }, { data: cliente }, emitCtx] = await Promise.all([
       admin.from('nota_fiscal_item').select('*').eq('nota_fiscal_id', notaFiscalId),
       admin.from('nota_fiscal_pagamento').select('*').eq('nota_fiscal_id', notaFiscalId),
@@ -189,6 +197,8 @@ module.exports = async function handler(req, res) {
       return res.status(422).json(result);
     }
 
+    // Grava autorizada ANTES de e-mail/DANFE extras — se a função estourar tempo
+    // depois disso, a nota não fica presa em "processando".
     await admin
       .from('nota_fiscal')
       .update({
@@ -197,8 +207,8 @@ module.exports = async function handler(req, res) {
         chave_acesso: result.chave_acesso,
         protocolo_autorizacao: result.protocolo_autorizacao,
         xml_autorizado: result.xml_autorizado,
-        danfe_url: result.danfe_url,
-        danfe_storage_path: result.danfe_storage_path,
+        danfe_url: result.danfe_url ?? null,
+        danfe_storage_path: result.danfe_storage_path ?? null,
         codigo_verificacao: result.codigo_verificacao ?? null,
         tipo_documento: 'nfse',
         ambiente: 1,
@@ -207,16 +217,21 @@ module.exports = async function handler(req, res) {
       })
       .eq('id', notaFiscalId);
 
-    result.email = await tentarEnviarEmailDanfe(admin, {
-      nota: {
-        ...notaAtual,
-        codigo_verificacao: result.codigo_verificacao ?? notaAtual.codigo_verificacao,
-      },
-      cliente,
-      danfeStoragePath: result.danfe_storage_path,
-      xml: result.xml_autorizado,
-      danfeUrl: result.danfe_url,
-    });
+    try {
+      result.email = await tentarEnviarEmailDanfe(admin, {
+        nota: {
+          ...notaAtual,
+          codigo_verificacao: result.codigo_verificacao ?? notaAtual.codigo_verificacao,
+        },
+        cliente,
+        danfeStoragePath: result.danfe_storage_path,
+        xml: result.xml_autorizado,
+        danfeUrl: result.danfe_url,
+      });
+    } catch (emailErr) {
+      console.warn('[nfse] e-mail DANFSe após autorização:', emailErr?.message ?? emailErr);
+      result.email = { enviado: false, error: String(emailErr?.message ?? emailErr) };
+    }
 
     return res.status(200).json(result);
   } catch (e) {
@@ -225,6 +240,23 @@ module.exports = async function handler(req, res) {
       (e && typeof e === 'object' && 'message' in e && e.message) ||
       (typeof e === 'string' ? e : '') ||
       'Falha na emissão NFS-e.';
-    return res.status(500).json({ success: false, message: humanizeNfseRejection(String(raw)) });
+    const message = humanizeNfseRejection(String(raw));
+    if (notaFiscalId) {
+      try {
+        const admin = getAdmin();
+        await admin
+          .from('nota_fiscal')
+          .update({
+            status: 'rejeitada',
+            motivo_rejeicao: message,
+            status_sefaz: 'ERR',
+          })
+          .eq('id', notaFiscalId)
+          .eq('status', 'processando');
+      } catch (upErr) {
+        console.warn('[nfse] não gravou rejeitada após erro:', upErr?.message ?? upErr);
+      }
+    }
+    return res.status(500).json({ success: false, message });
   }
 };
