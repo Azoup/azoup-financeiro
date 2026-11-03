@@ -25,10 +25,6 @@ function nomeCliente(cliente) {
   return (cliente.nome || cliente.razao_social || cliente.nome_empresa || cliente.nome_fantasia || cliente.nome_cliente || '').trim();
 }
 
-function ufCliente(cliente) {
-  return cliente.estado || cliente.uf || '';
-}
-
 function padTribNac(code) {
   return onlyDigits(code).padStart(6, '0').slice(0, 6);
 }
@@ -50,7 +46,17 @@ function money2(n) {
   return (Math.round(v * 100) / 100).toFixed(2);
 }
 
-/** Monta DPS/NFS-e nacional a partir dos dados do banco (mensalidade = serviço). */
+/**
+ * Monta DPS nacional (ADN) no leiaute de PRODUÇÃO (NT 004/007).
+ *
+ * Importante (CGNFS-e, 29/10/2026):
+ * - Produção oficial ainda NÃO usa NT 009 (finNFSe em infDPS). NT 009 só em
+ *   produção restrita até o cronograma de 01/12/2026.
+ * - finNFSe na raiz de infDPS gera E1235 em produção.
+ * - IBSCBS é opcional; se omitido, o ADN não rejeita por isso. Se informado,
+ *   precisa do grupo completo em infDPS/IBSCBS (finNFSe, cIndOp, indDest…).
+ * - Nunca colocar IBSCBS dentro de valores/trib.
+ */
 function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   const ambiente = 1; // produção
   const ibge = onlyDigits(config.codigo_ibge_emitente).slice(0, 7);
@@ -78,14 +84,11 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
 
   const descricaoBase = itens[0]?.descricao ?? config.descricao_servico_padrao;
   const xDescServ = descricaoBase;
-
   const tomadorNome = nomeCliente(cliente);
-
   const valor = Number(nota.valor_total);
   const tribMun = Number(config.trib_issqn ?? 1);
   const vMun = tribMun === 1 ? money2(valor * 0.04) : money2(0);
 
-  // Manual Americana: série numérica 1–99998 (99999 reservada ao emissor online).
   const serieNum = Number(String(nota.serie || config.serie || '1').replace(/\D/g, '') || '1');
   if (!Number.isFinite(serieNum) || serieNum < 1 || serieNum >= 99999) {
     throw new Error(
@@ -93,8 +96,6 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
     );
   }
 
-  // cTribMun: complementar municipal (até 3 dígitos em ADN). Americana costuma exigir (ex.: 001).
-  // São Paulo capital usa Paulistana (outro fluxo) — não monta DPS nacional.
   let cTribMun = padTribMun(config.codigo_tributacao_municipal);
   if (!cTribMun && ibge === '3501608') {
     cTribMun = '001';
@@ -104,14 +105,9 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
     throw new Error('Informe a Inscrição Municipal de Americana (ex.: 69842) em Configurações › NFS-e.');
   }
 
-  // ADN produção (nov/2026): schema exige finNFSe em infDPS antes de cLocEmi.
-  // 0 = NFS-e regular (prestação de serviço).
-  const finNFSe = Number(config.fin_nfse ?? 0);
-
-  // IBSCBS: em produção o CGNFS-e aceita DPS sem o grupo (NT 004/007, comunicado 29/10/2026).
-  // Se informado, precisa do leiaute completo (finNFSe/indFinal/cIndOp em infDPS/IBSCBS).
-  // Enviar IBSCBS dentro de valores/trib com tags erradas (indOp/CST) gera E1235.
-  // Por isso omitimos o grupo até o leiaute RTC completo estar estável em produção.
+  // IBGE do tomador: se o cadastro trouxer, usa; senão, município do prestador.
+  const cMunTomador = onlyDigits(cliente.codigo_ibge || cliente.cMun || cliente.codigo_municipio).slice(0, 7);
+  const cMunToma = cMunTomador.length === 7 ? cMunTomador : ibge;
 
   return {
     DPS: {
@@ -123,7 +119,6 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
         nDPS: String(nota.numero),
         dCompet: parseCompetenciaIso(nota.competencia, nota.data_emissao),
         tpEmit: 1,
-        finNFSe: Number.isFinite(finNFSe) ? finNFSe : 0,
         cLocEmi: ibge,
         prest: {
           ...(isCnpjEmit ? { CNPJ: emitDoc } : { CPF: emitDoc }),
@@ -139,11 +134,12 @@ function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
           ...(isCnpjDest ? { CNPJ: destDoc } : { CPF: destDoc }),
           xNome: tomadorNome,
           end: {
+            // Ordem do schema: CEP antes de cMun.
             endNac: {
-              cMun: ibge,
               CEP: cepTomador.padStart(8, '0').slice(0, 8),
+              cMun: cMunToma,
             },
-            xLgr: cliente.logradouro || perfil.logradouro || 'Não informado',
+            xLgr: cliente.logradouro || perfil.logradouro || 'Nao informado',
             nro: cliente.numero || perfil.numero || 'S/N',
             xBairro: cliente.bairro || perfil.bairro || 'Centro',
           },

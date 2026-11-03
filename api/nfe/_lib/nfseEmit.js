@@ -22,6 +22,41 @@ function extrairXml(ret) {
   return null;
 }
 
+/** Junta código + complemento do ADN (quando a lib só devolve "E1235"). */
+function extrairMensagemAdn(ret, fallback) {
+  const r = ret?.response ?? ret ?? {};
+  const parts = [
+    r.erros,
+    r.mensagens,
+    r.alerts,
+    r.message,
+    r.xMotivo,
+    r.descricao,
+    r.Complemento,
+    r.complemento,
+    r.detail,
+    r.erro,
+  ]
+    .flatMap((x) => (Array.isArray(x) ? x : x != null ? [x] : []))
+    .map((item) => {
+      if (typeof item === 'string') return item;
+      if (!item || typeof item !== 'object') return '';
+      return [item.Codigo, item.codigo, item.Descricao, item.descricao, item.Complemento, item.complemento, item.mensagem, item.message]
+        .filter(Boolean)
+        .join(' — ');
+    })
+    .filter(Boolean);
+  const joined = parts.join(' | ');
+  if (joined) return joined.slice(0, 800);
+  try {
+    const dump = JSON.stringify(r);
+    if (dump && dump !== '{}' && dump !== 'null') return dump.slice(0, 800);
+  } catch {
+    /* ignore */
+  }
+  return String(fallback ?? 'Autorizacao rejeitada');
+}
+
 async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, cert, senhaEnc }) {
   const ambiente = 1; // produção
   const optanteSimples = isOptanteSimplesNacional(config);
@@ -224,12 +259,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
         null;
       const codigoVerificacao = ret?.response?.codigoVerificacao ?? ret?.codigoVerificacao ?? null;
       const status = String(ret?.status ?? ret?.response?.status ?? ret?.cStat ?? '');
-      const message =
-        ret?.response?.message ??
-        ret?.response?.xMotivo ??
-        ret?.message ??
-        ret?.xMotivo ??
-        'Autorizada';
+      const message = extrairMensagemAdn(ret, 'Autorizada');
 
       const ok =
         ret?.success === true ||
@@ -239,6 +269,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
         Boolean(chave);
 
       if (!ok) {
+        console.warn('[nfse] ADN rejeitou', status, message.slice(0, 300));
         return {
           success: false,
           status,

@@ -191,20 +191,20 @@ function humanizeNfseRejection(message, ibge) {
   }
 
   if (/E1235|Falha no esquema XML do DF-e/i.test(raw)) {
-    const detail = raw.replace(/\s+/g, ' ').trim().slice(0, 400);
+    const detail = raw.replace(/\s+/g, ' ').trim().slice(0, 500);
     let hint =
-      'Faça redeploy da correção de layout ADN e reemitir esta nota.';
-    if (/finNFSe|cLocEmi/i.test(detail)) {
-      hint = 'O layout exige finNFSe em infDPS antes de cLocEmi. Reemitir após o deploy.';
+      'Produção oficial usa NT 004/007 (sem finNFSe na raiz do infDPS). Reemitir após o deploy.';
+    if (/invalid child element ['"]finNFSe/i.test(detail)) {
+      hint =
+        'O ADN de produção rejeitou finNFSe na raiz do infDPS (leiaute NT 009 ainda não está em produção). Reemitir após o deploy.';
+    } else if (/expected:.*finNFSe|cMotivoEmisTI,\s*finNFSe/i.test(detail)) {
+      hint =
+        'O ambiente está exigindo finNFSe antes de cLocEmi (NT 009 / produção restrita). Confira se a emissão não está apontando para homologação.';
     } else if (/IBSCBS|indOp|cIndOp|indFinal/i.test(detail)) {
       hint =
-        'Grupo IBSCBS inválido no XML. A emissão nacional agora omite IBSCBS (opcional na produção) — reemitir após o deploy.';
+        'Grupo IBSCBS inválido no XML. Em produção o grupo é opcional — a emissão omite IBSCBS incompleto. Reemitir após o deploy.';
     }
-    return [
-      'E1235 — O XML da DPS não bate com o schema do ADN.',
-      hint,
-      `Detalhe: ${detail}`,
-    ].join(' ');
+    return ['E1235 — O XML da DPS não bate com o schema do ADN.', hint, `Detalhe: ${detail}`].join(' ');
   }
 
   if (/E0039/i.test(raw)) {
