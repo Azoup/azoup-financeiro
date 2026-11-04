@@ -519,6 +519,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
 /**
  * Recupera NFS-e já autorizada no ADN sem reenviar DPS (evita duplicar após L985).
  * Usado em Reemitir / L1260 quando a nota local ainda está rejeitada/processando.
+ * Também tenta o RPS anterior (reemit antigo trocava o número e a DPS ficava no n-1).
  */
 async function tentarRecuperarNfseDoAdn({ admin, nota, itens, perfil, cliente, config, cert, senhaEnc }) {
   try {
@@ -532,7 +533,10 @@ async function tentarRecuperarNfseDoAdn({ admin, nota, itens, perfil, cliente, c
       return { success: false, message: 'Recuperação ADN só no SEFIN/ADN.' };
     }
 
-    const layout = await buildNFSeLayout({ nota, itens, perfil, cliente, config });
+    const nAtual = Number(nota.numero) || 0;
+    const candidatos = [nAtual];
+    if (nAtual > 1) candidatos.push(nAtual - 1);
+
     return withHomologTlsRelaxed(async () => {
       const { wizard, certPath } = await createNfseWizard({
         admin,
@@ -548,48 +552,71 @@ async function tentarRecuperarNfseDoAdn({ admin, nota, itens, perfil, cliente, c
           String(nota.protocolo_autorizacao || '').replace(/\D/g, '') ||
           extrairProtocoloFila(nota.motivo_rejeicao) ||
           null;
-        // Uma tentativa rápida + algumas esperas curtas (nota pode ter acabado de autorizar).
-        const idDps = buildIdDps(layout, perfil);
-        for (let i = 0; i < 4; i += 1) {
-          if (i > 0) await esperar(2000);
-          try {
-            const cons = await wizard.ConsultaDPS({ id: idDps });
-            const chave =
-              cons?.chaveAcesso ??
-              cons?.response?.chaveAcesso ??
-              cons?.chNFSe ??
-              cons?.response?.chNFSe ??
-              null;
-            if (!chave) continue;
 
-            let xmlProc = extrairXml(cons);
-            let codigoVerificacao =
-              cons?.codigoVerificacao ?? cons?.response?.codigoVerificacao ?? null;
+        for (const nCand of candidatos) {
+          const notaCand = { ...nota, numero: nCand };
+          const layout = await buildNFSeLayout({
+            nota: notaCand,
+            itens,
+            perfil,
+            cliente,
+            config,
+          });
+          const idDps = buildIdDps(layout, perfil);
+          console.info('[nfse] recuperar ADN — DPS', idDps);
+
+          for (let i = 0; i < 3; i += 1) {
+            if (i > 0) await esperar(2000);
             try {
-              const nfse = await wizard.Consulta({ chaveAcesso: chave });
-              xmlProc = extrairXml(nfse) || xmlProc;
-              codigoVerificacao =
-                nfse?.codigoVerificacao ?? nfse?.response?.codigoVerificacao ?? codigoVerificacao;
-            } catch {
-              /* xml opcional */
-            }
+              const cons = await wizard.ConsultaDPS({ id: idDps });
+              const chave =
+                cons?.chaveAcesso ??
+                cons?.response?.chaveAcesso ??
+                cons?.chNFSe ??
+                cons?.response?.chNFSe ??
+                null;
+              if (!chave) continue;
 
-            return {
-              success: true,
-              status: '100',
-              chave_acesso: chave,
-              protocolo_autorizacao: protocoloHint,
-              codigo_verificacao: codigoVerificacao,
-              xml_autorizado: xmlProc,
-              message: 'NFS-e recuperada do ADN (já estava autorizada; não reemitimos).',
-            };
-          } catch (e) {
-            console.warn('[nfse] recuperar ADN', i + 1, e?.message || e);
+              let xmlProc = extrairXml(cons);
+              let codigoVerificacao =
+                cons?.codigoVerificacao ?? cons?.response?.codigoVerificacao ?? null;
+              try {
+                const nfse = await wizard.Consulta({ chaveAcesso: chave });
+                xmlProc = extrairXml(nfse) || xmlProc;
+                codigoVerificacao =
+                  nfse?.codigoVerificacao ?? nfse?.response?.codigoVerificacao ?? codigoVerificacao;
+              } catch {
+                /* xml opcional */
+              }
+
+              // Se achou no RPS anterior, realinha o número local à DPS do ADN.
+              if (nCand !== nAtual && admin && nota.id) {
+                await admin
+                  .from('nota_fiscal')
+                  .update({ numero: nCand })
+                  .eq('id', nota.id);
+              }
+
+              return {
+                success: true,
+                status: '100',
+                chave_acesso: chave,
+                protocolo_autorizacao: protocoloHint,
+                codigo_verificacao: codigoVerificacao,
+                xml_autorizado: xmlProc,
+                message:
+                  nCand !== nAtual
+                    ? `NFS-e recuperada do ADN no RPS ${nCand} (não reemitimos; número local corrigido).`
+                    : 'NFS-e recuperada do ADN (já estava autorizada; não reemitimos).',
+              };
+            } catch (e) {
+              console.warn('[nfse] recuperar ADN', idDps, i + 1, e?.message || e);
+            }
           }
         }
         return {
           success: false,
-          message: `DPS ${idDps} ainda não autorizada no ADN.`,
+          message: `DPS ainda não autorizada no ADN (RPS ${candidatos.join(' / ')}).`,
         };
       } finally {
         cleanupCert(certPath);

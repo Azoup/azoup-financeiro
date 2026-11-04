@@ -153,6 +153,8 @@ export type CancelarNfeResult = {
 
 export type EmitirNfeResult = {
   success: boolean;
+  /** L985/AL986: DPS na fila do ADN — não é rejeição; status fica processando. */
+  pending?: boolean;
   status?: string;
   chave_acesso?: string;
   protocolo_autorizacao?: string;

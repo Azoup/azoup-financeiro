@@ -335,6 +335,12 @@ export default function NotasFiscaisIndexScreen() {
       const res = await reemitirNotaFiscalSefaz(item.id);
       if (res.success) {
         showAppToast('success', 'NFS-e autorizada.');
+      } else if (res.pending) {
+        showAppToast(
+          'info',
+          'NFS-e na fila do ADN (L985).',
+          'Não é rejeição. Aguarde alguns minutos e use Reemitir de novo — o sistema só consulta, sem gerar nota duplicada.',
+        );
       } else {
         showAppToast(
           'error',

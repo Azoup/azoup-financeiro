@@ -667,6 +667,12 @@ export async function gerarNotaFiscalAvulsa(
   return { success: false, notaId, message: res.message };
 }
 
+/**
+ * Reemite mantendo o MESMO RPS/número.
+ * Trocar o número aqui quebrava L985: a DPS antiga ficava na fila do ADN e a nova
+ * gerava outra fila (risco de duplicar). O backend consulta o ADN antes e só
+ * realoca número se L1260 e a DPS antiga não for encontrada.
+ */
 export async function reemitirNotaFiscalSefaz(notaFiscalId: string): Promise<EmitirNfeResult> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user?.id;
@@ -674,7 +680,7 @@ export async function reemitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emi
 
   const { data: nota, error } = await supabase
     .from('nota_fiscal')
-    .select('id, status, user_id, numero, serie, emitente_id')
+    .select('id, status, user_id, numero, serie, emitente_id, motivo_rejeicao, status_sefaz')
     .eq('id', notaFiscalId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -686,85 +692,16 @@ export async function reemitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emi
     throw new Error('NFS-e cancelada não pode ser reemitida.');
   }
 
-  let emitente = nota.emitente_id
-    ? await fetchEmitenteById(userId, nota.emitente_id as string)
-    : await fetchEmitentePadrao(userId);
-
-  const serieNota = String((nota as { serie?: string }).serie ?? '1');
-  let usadosQuery = supabase
-    .from('nota_fiscal')
-    .select('numero')
-    .eq('user_id', userId)
-    .eq('serie', serieNota);
-  const emitenteNotaId = (nota as { emitente_id?: string | null }).emitente_id;
-  if (emitenteNotaId) usadosQuery = usadosQuery.eq('emitente_id', emitenteNotaId);
-  else usadosQuery = usadosQuery.is('emitente_id', null);
-  const { data: usados } = await usadosQuery;
-  const maiorUsado = (usados ?? []).reduce((max, row) => {
-    const n = Number((row as { numero?: number }).numero) || 0;
-    return n > max ? n : max;
-  }, Number(nota.numero) || 0);
-
-  let novoNumero: number;
-  if (emitente) {
-    novoNumero = Math.max(maiorUsado + 1, Number(emitente.proximo_numero) || 0);
-  } else {
-    const config = await ensureNfeConfig(userId);
-    novoNumero = Math.max(maiorUsado + 1, Number(config.proximo_numero) || 0);
-    emitente = {
-      id: '',
-      user_id: userId,
-      nome: '',
-      documento: '',
-      razao_social: '',
-      logradouro: '',
-      numero: '',
-      complemento: '',
-      bairro: '',
-      cidade: '',
-      uf: '',
-      cep: '',
-      serie: config.serie,
-      proximo_numero: config.proximo_numero,
-      ambiente: config.ambiente,
-      inscricao_estadual: '',
-      regime_tributario: 1,
-      codigo_ibge_emitente: config.codigo_ibge_emitente,
-      inscricao_municipal: '',
-      ncm_servico: '',
-      cfop_padrao: '',
-      cst_icms: '',
-      csosn: '',
-      descricao_servico_padrao: '',
-      natureza_operacao: '',
-      codigo_tributacao_nacional: '',
-      codigo_tributacao_municipal: '',
-      codigo_nbs: '',
-      op_simp_nac: 3,
-      reg_esp_trib: 0,
-      trib_issqn: 1,
-      tp_ret_issqn: 1,
-      padrao: true,
-      created_at: '',
-      updated_at: '',
-    };
-  }
-
+  // Preserva motivo L985 na memória do servidor via status processando;
+  // não zera numero — é a chave da DPS no ADN.
   const { error: upErr } = await supabase
     .from('nota_fiscal')
     .update({
-      numero: novoNumero,
-      status: 'rascunho',
-      motivo_rejeicao: null,
-      chave_acesso: null,
-      protocolo_autorizacao: null,
-      codigo_verificacao: null,
-      xml_autorizado: null,
+      status: 'processando',
     })
-    .eq('id', notaFiscalId);
+    .eq('id', notaFiscalId)
+    .eq('user_id', userId);
   if (upErr) throw new Error(upErr.message);
-
-  await bumpProximoNumero(userId, emitente, novoNumero + 1);
 
   return emitirNotaFiscalSefaz(notaFiscalId);
 }
@@ -815,7 +752,7 @@ export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emiti
   }
 
   const rawText = await res.text().catch(() => '');
-  let body = {} as EmitirNfeResult & { error?: string; message?: string };
+  let body = {} as EmitirNfeResult & { error?: string; message?: string; pending?: boolean };
   if (rawText.trim()) {
     try {
       body = JSON.parse(rawText) as typeof body;
@@ -834,6 +771,27 @@ export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emiti
           : res.status === 500
             ? 'Erro interno na API de emissão. Verifique na Vercel: SUPABASE_SERVICE_ROLE_KEY, CERT_ENCRYPTION_KEY (mesma chave do app) e redeploy.'
             : `Emissão falhou (${res.status}).`,
+    };
+  }
+
+  // 202 + pending = fila ADN (L985). Não marcar como rejeitada.
+  if (body.pending || res.status === 202) {
+    await supabase
+      .from('nota_fiscal')
+      .update({
+        status: 'processando',
+        status_sefaz: body.status ?? 'L985',
+        protocolo_autorizacao: body.protocolo_autorizacao ?? null,
+        motivo_rejeicao: body.message ?? 'Aguardando processamento no ADN (L985).',
+      })
+      .eq('id', notaFiscalId);
+    return {
+      success: false,
+      pending: true,
+      status: body.status ?? 'L985',
+      message:
+        body.message ??
+        'NFS-e na fila do ADN. Aguarde alguns minutos e use Reemitir de novo (só consulta, sem novo número).',
     };
   }
 
