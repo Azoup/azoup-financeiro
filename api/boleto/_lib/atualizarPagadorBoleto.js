@@ -1,6 +1,6 @@
 const { loadSicoobCredentials } = require('./sicoobCredentials');
 const {
-  alterarBoletoSicoobApi,
+  alterarPagadorSicoobApi,
   buildPagadorFromCliente,
   cleanupCert,
   consultarBoletoSicoobApi,
@@ -11,10 +11,6 @@ const {
   enriquecerClienteComCep,
   persistirCidadeClienteSeCorrigida,
 } = require('./resolverEnderecoPagador');
-
-function campoJaAplicado(msg) {
-  return /ao menos um campo deve ser alterado/i.test(String(msg ?? ''));
-}
 
 function cidadePagador(cliente) {
   return textoSemAcento(cliente?.cidade, 'Nao informado');
@@ -75,6 +71,35 @@ async function salvarPdfBase64(admin, userId, boletoId, base64) {
   return { pdf_storage_path: path, pdf_url: data?.signedUrl ?? null };
 }
 
+function esperar(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Baixa 2ª via com retry curto — o Sicoob pode demorar a refletir o PUT /pagadores. */
+async function baixarSegundaViaComRetry({ config, certPath, senha, nossoNumero }) {
+  let ultimoErro = null;
+  for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+    if (tentativa > 0) await esperar(1200 * tentativa);
+    try {
+      const via = await obterSegundaViaSicoobApi({
+        config,
+        certPath,
+        senha,
+        nossoNumero,
+      });
+      if (via?.pdf_base64) return via;
+      ultimoErro = new Error('Segunda via sem PDF.');
+    } catch (e) {
+      ultimoErro = e;
+    }
+  }
+  throw ultimoErro || new Error('Não foi possível obter a segunda via do Sicoob.');
+}
+
+/**
+ * Atualiza cidade/endereço do pagador no Sicoob (PUT /pagadores) e regenera o PDF oficial.
+ * Não usa PATCH /boletos — esse endpoint não altera cidade e gerava falso sucesso.
+ */
 async function atualizarPagadorBoletoSicoob(admin, userId, boletoId) {
   const { data: boleto, error } = await admin
     .from('boletos_parcela_venda')
@@ -112,53 +137,30 @@ async function atualizarPagadorBoletoSicoob(admin, userId, boletoId) {
     if (antes.liquidado) throw new Error('Este boleto já está pago no Sicoob. O PDF não foi atualizado.');
 
     const pagador = buildPagadorFromCliente(cliente);
-    const dadosPagador = {
-      endereco: pagador.endereco,
-      bairro: pagador.bairro,
-      cidade: pagador.cidade,
-      cep: pagador.cep,
-      uf: pagador.uf,
-    };
-    const tentativas = [
-      { alteracaoDadosPagador: dadosPagador },
-      { dadosPagador },
-      { pagador: dadosPagador },
-    ];
-    let ultimoErro = null;
-    let aceitou = false;
-    for (const objeto of tentativas) {
-      try {
-        await alterarBoletoSicoobApi({
-          config: creds.config,
-          certPath: creds.certPath,
-          senha: creds.senha,
-          nossoNumero: boleto.nosso_numero_banco,
-          objeto,
-        });
-        aceitou = true;
-        break;
-      } catch (e) {
-        if (campoJaAplicado(e.message)) {
-          aceitou = true;
-          break;
-        }
-        ultimoErro = e;
-      }
-    }
-    if (!aceitou && ultimoErro) throw ultimoErro;
+    await alterarPagadorSicoobApi({
+      config: creds.config,
+      certPath: creds.certPath,
+      senha: creds.senha,
+      pagador,
+    });
 
-    const extras = { ...campos };
-    let pdfAtualizado = false;
-    const via = await obterSegundaViaSicoobApi({
+    const via = await baixarSegundaViaComRetry({
       config: creds.config,
       certPath: creds.certPath,
       senha: creds.senha,
       nossoNumero: boleto.nosso_numero_banco,
     });
+
+    const extras = { ...campos };
     if (via.linha_digitavel) extras.linha_digitavel = via.linha_digitavel;
     if (via.codigo_barras) extras.codigo_barras = via.codigo_barras;
     Object.assign(extras, await salvarPdfBase64(admin, userId, boleto.id, via.pdf_base64));
-    pdfAtualizado = Boolean(extras.pdf_url);
+    const pdfAtualizado = Boolean(extras.pdf_url);
+    if (!pdfAtualizado) {
+      throw new Error(
+        `Sicoob aceitou a cidade ${cidade}, mas o PDF novo não foi gravado. Tente de novo em alguns segundos.`,
+      );
+    }
 
     const { error: upErr } = await admin.from('boletos_parcela_venda').update(extras).eq('id', boleto.id);
     if (upErr) throw new Error(upErr.message);
@@ -168,7 +170,7 @@ async function atualizarPagadorBoletoSicoob(admin, userId, boletoId) {
         boleto_id: boleto.id,
         acao: 'ATUALIZAR_PAGADOR_SICOOB',
         usuario_id: userId,
-        detalhes: `Cidade do pagador atualizada para ${cidade}.`,
+        detalhes: `Pagador atualizado via PUT /pagadores para ${cidade}.`,
       });
     } catch {
       /* histórico não impede a correção */
@@ -177,10 +179,8 @@ async function atualizarPagadorBoletoSicoob(admin, userId, boletoId) {
     return {
       success: true,
       cidade,
-      pdfAtualizado,
-      message: pdfAtualizado
-        ? `PDF oficial atualizado com ${cidade}. Pode enviar para o cliente.`
-        : `O Sicoob aceitou ${cidade}, mas o PDF novo ainda não veio. Abra o boleto daqui a alguns minutos.`,
+      pdfAtualizado: true,
+      message: `PDF oficial atualizado com ${cidade}. Pode enviar para o cliente.`,
     };
   } finally {
     cleanupCert(creds.certPath);

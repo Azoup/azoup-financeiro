@@ -428,6 +428,61 @@ async function alterarBoletoSicoobApi({ config, certPath, senha, nossoNumero, ob
   return { success: true, status: res.status, raw: res.json ?? res.raw };
 }
 
+/**
+ * Atualiza dados mestres do pagador (cidade/endereço).
+ * Cobrança V3: PUT /pagadores — PATCH /boletos NÃO altera cidade.
+ * HTTP 204 = sucesso.
+ */
+async function alterarPagadorSicoobApi({ config, certPath, senha, pagador }) {
+  const doc = onlyDigits(pagador?.numeroCpfCnpj);
+  if (doc.length !== 11 && doc.length !== 14) {
+    throw new Error('CPF/CNPJ do pagador inválido para atualizar no Sicoob.');
+  }
+  const cidade = String(pagador?.cidade ?? '').trim();
+  if (!cidade) throw new Error('Cidade do pagador vazia — não atualizei no Sicoob.');
+
+  const token = await getSicoobAccessToken({ config, certPath, senha });
+  const agent = createMtlsAgent(certPath, senha);
+  const payload = {
+    numeroCliente: Number(config.numero_cliente),
+    numeroCpfCnpj: doc,
+    nome: String(pagador.nome ?? '').trim().slice(0, 50) || 'Pagador',
+    endereco: String(pagador.endereco ?? '').trim() || 'Nao informado',
+    bairro: String(pagador.bairro ?? '').trim() || 'Centro',
+    cidade,
+    cep: onlyDigits(pagador.cep).padStart(8, '0').slice(0, 8),
+    uf: String(pagador.uf ?? 'SP')
+      .trim()
+      .toUpperCase()
+      .slice(0, 2),
+  };
+  if (pagador.email) payload.email = String(pagador.email).trim();
+
+  const body = JSON.stringify(payload);
+  const res = await httpsRequest(`${apiBaseUrl(config.ambiente)}/pagadores`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      client_id: config.client_id,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+    },
+    body,
+    agent,
+  });
+  if (res.status !== 204 && (res.status < 200 || res.status >= 300)) {
+    const msg =
+      res.json?.mensagens?.map((m) => m.mensagem).join(' · ') ??
+      res.json?.message ??
+      res.json?.error_description ??
+      res.raw ??
+      `Sicoob rejeitou a atualização do pagador (${res.status}).`;
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+  return { success: true, status: res.status, raw: res.json ?? res.raw };
+}
+
 /** Segunda via com PDF. A linha digitável nova só aparece depois que o Sicoob processa a alteração. */
 async function obterSegundaViaSicoobApi({ config, certPath, senha, nossoNumero }) {
   const nn = nossoNumeroParaApi(nossoNumero);
@@ -622,6 +677,7 @@ module.exports = {
   authUrl,
   baixarBoletoSicoobApi,
   alterarBoletoSicoobApi,
+  alterarPagadorSicoobApi,
   obterSegundaViaSicoobApi,
   buildPagadorFromCliente,
   buildSicoobPayload,
