@@ -22,6 +22,120 @@ function extrairXml(ret) {
   return null;
 }
 
+function esperar(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** L985/AL986: ADN aceitou o lote mas processa em fila (não é rejeição fiscal). */
+function isFilaProcessamentoAdn(message) {
+  return /L985|AL986|fila de processamento no ADN|aguardando processamento no ADN/i.test(
+    String(message ?? ''),
+  );
+}
+
+function extrairProtocoloFila(message) {
+  const m = String(message ?? '').match(/protocolo[:\s]+(\d{6,})/i);
+  return m?.[1] ?? null;
+}
+
+/**
+ * Id da DPS (45 chars): DPS + IBGE(7) + tpInsc(1) + insc(14) + série(5) + nDPS(15).
+ * Mesma regra do @nfewizard/nfse (CNPJ=2, CPF=1).
+ */
+function buildIdDps(layout, perfil) {
+  const inf = layout?.DPS?.infDps ?? {};
+  if (inf.Id && String(inf.Id).length >= 45) return String(inf.Id);
+  const cLocEmi = String(inf.cLocEmi ?? '')
+    .replace(/\D/g, '')
+    .padStart(7, '0')
+    .slice(0, 7);
+  const prest = inf.prest ?? {};
+  let tipoInscricao;
+  let inscricaoFederal;
+  if (prest.CNPJ) {
+    tipoInscricao = '2';
+    inscricaoFederal = String(prest.CNPJ).replace(/\D/g, '').padStart(14, '0').slice(0, 14);
+  } else if (prest.CPF) {
+    tipoInscricao = '1';
+    inscricaoFederal = String(prest.CPF).replace(/\D/g, '').padStart(14, '0').slice(0, 14);
+  } else {
+    const doc = String(perfil?.documento ?? '').replace(/\D/g, '');
+    tipoInscricao = doc.length <= 11 ? '1' : '2';
+    inscricaoFederal = doc.padStart(14, '0').slice(0, 14);
+  }
+  const serie = String(inf.serie ?? '1')
+    .replace(/\D/g, '')
+    .padStart(5, '0')
+    .slice(0, 5);
+  const nDPS = String(inf.nDPS ?? '')
+    .replace(/\D/g, '')
+    .padStart(15, '0')
+    .slice(0, 15);
+  return `DPS${cLocEmi}${tipoInscricao}${inscricaoFederal}${serie}${nDPS}`;
+}
+
+/**
+ * Após L985: consulta a DPS até o ADN devolver a chave (ou esgota o tempo).
+ */
+async function aguardarAutorizacaoFilaAdn(wizard, layout, perfil, protocoloHint) {
+  const idDps = buildIdDps(layout, perfil);
+  console.info('[nfse] L985 fila ADN — consultando DPS', idDps, protocoloHint || '');
+
+  let ultimaMsg = 'NFS-e ainda na fila do ADN.';
+  for (let i = 0; i < 10; i += 1) {
+    if (i > 0) await esperar(2500);
+    try {
+      const cons = await wizard.ConsultaDPS({ id: idDps });
+      const chave =
+        cons?.chaveAcesso ??
+        cons?.response?.chaveAcesso ??
+        cons?.chNFSe ??
+        cons?.response?.chNFSe ??
+        null;
+      if (!chave) {
+        ultimaMsg = extrairMensagemAdn(cons, ultimaMsg);
+        continue;
+      }
+
+      let xmlProc = extrairXml(cons);
+      let codigoVerificacao =
+        cons?.codigoVerificacao ?? cons?.response?.codigoVerificacao ?? null;
+      try {
+        const nfse = await wizard.Consulta({ chaveAcesso: chave });
+        xmlProc = extrairXml(nfse) || xmlProc;
+        codigoVerificacao =
+          nfse?.codigoVerificacao ?? nfse?.response?.codigoVerificacao ?? codigoVerificacao;
+      } catch (e) {
+        console.warn('[nfse] Consulta NFSe após DPS:', e?.message || e);
+      }
+
+      return {
+        success: true,
+        status: '100',
+        chave_acesso: chave,
+        protocolo_autorizacao: protocoloHint || null,
+        codigo_verificacao: codigoVerificacao,
+        xml_autorizado: xmlProc,
+        message: 'Autorizada (fila ADN)',
+      };
+    } catch (e) {
+      ultimaMsg = e?.message || String(e);
+      console.warn('[nfse] ConsultaDPS tentativa', i + 1, ultimaMsg.slice(0, 200));
+    }
+  }
+
+  return {
+    success: false,
+    pending: true,
+    status: 'L985',
+    protocolo_autorizacao: protocoloHint || null,
+    message:
+      `L985/AL986 — DPS enviada à fila do ADN (protocolo ${protocoloHint || '—'}). ` +
+      'Ainda não autorizou neste ciclo; a nota ficou em processamento. Abra Notas fiscais e use Reemitir/consultar em alguns minutos. ' +
+      `(DPS ${idDps})`,
+  };
+}
+
 /** Junta código + complemento do ADN (quando a lib só devolve "E1235"). */
 function extrairMensagemAdn(ret, fallback) {
   const r = ret?.response ?? ret ?? {};
@@ -284,13 +398,57 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
         Boolean(chave);
 
       if (!ok) {
-        console.warn('[nfse] ADN rejeitou', status, message.slice(0, 300));
-        return {
-          success: false,
-          status,
-          message: humanizeNfseRejection(message, config.codigo_ibge_emitente),
-        };
+        // L985/AL986 = fila assíncrona do ADN (comum sob carga / CNPJ novo), não rejeição.
+        if (isFilaProcessamentoAdn(message) || isFilaProcessamentoAdn(status)) {
+          const protocoloFila = protocolo || extrairProtocoloFila(message);
+          const fila = await aguardarAutorizacaoFilaAdn(wizard, layout, perfil, protocoloFila);
+          if (fila.success) {
+            // Segue o fluxo normal de DANFSe abaixo com estes dados.
+            ret = {
+              success: true,
+              status: '100',
+              response: {
+                chaveAcesso: fila.chave_acesso,
+                nProt: fila.protocolo_autorizacao,
+                codigoVerificacao: fila.codigo_verificacao,
+                xml: fila.xml_autorizado,
+              },
+            };
+          } else {
+            return {
+              success: false,
+              pending: true,
+              status: fila.status || 'L985',
+              protocolo_autorizacao: fila.protocolo_autorizacao,
+              message: humanizeNfseRejection(fila.message, config.codigo_ibge_emitente),
+            };
+          }
+        } else {
+          console.warn('[nfse] ADN rejeitou', status, message.slice(0, 300));
+          return {
+            success: false,
+            status,
+            message: humanizeNfseRejection(message, config.codigo_ibge_emitente),
+          };
+        }
       }
+
+      const chaveFinal =
+        ret?.response?.chaveAcesso ??
+        ret?.response?.chNFSe ??
+        ret?.chaveAcesso ??
+        ret?.chNFSe ??
+        chave;
+      const protocoloFinal =
+        ret?.response?.nProt ??
+        ret?.response?.protocolo ??
+        ret?.nProt ??
+        ret?.protocolo ??
+        protocolo;
+      const codigoVerificacaoFinal =
+        ret?.response?.codigoVerificacao ?? ret?.codigoVerificacao ?? codigoVerificacao;
+      const statusFinal = String(ret?.status ?? ret?.response?.status ?? ret?.cStat ?? (status || '100'));
+      const messageFinal = extrairMensagemAdn(ret, message || 'Autorizada');
 
       const xmlProc = extrairXml(ret);
 
@@ -298,7 +456,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
       // da Vercel (nota ficava presa em "processando").
       let danfeUrl = null;
       let danfePath = null;
-      if (xmlProc && chave) {
+      if (xmlProc && chaveFinal) {
         try {
           const danfeMod = await import('@nfewizard/danfe');
           const gerar = danfeMod.NFSE_GerarDanfe ?? danfeMod.default?.NFSE_GerarDanfe;
@@ -310,7 +468,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
             const gerarComTimeout = Promise.race([
               gerar({
                 data: ret?.response ?? ret,
-                chave,
+                chave: chaveFinal,
                 outputPath: tmpPdf,
               }),
               new Promise((_, reject) =>
@@ -319,7 +477,7 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
             ]);
             await gerarComTimeout;
             const pdfBuffer = fs.readFileSync(tmpPdf);
-            danfePath = `${nota.user_id}/${chave}.pdf`;
+            danfePath = `${nota.user_id}/${chaveFinal}.pdf`;
             const { error: upErr } = await admin.storage
               .from('nota_fiscal_danfe')
               .upload(danfePath, pdfBuffer, { contentType: 'application/pdf', upsert: true });
@@ -340,14 +498,17 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
 
       return {
         success: true,
-        status: status || '100',
-        chave_acesso: chave,
-        protocolo_autorizacao: protocolo,
-        codigo_verificacao: codigoVerificacao,
+        status: statusFinal,
+        chave_acesso: chaveFinal,
+        protocolo_autorizacao: protocoloFinal,
+        codigo_verificacao: codigoVerificacaoFinal,
         xml_autorizado: xmlProc,
         danfe_url: danfeUrl,
         danfe_storage_path: danfePath,
-        message: typeof message === 'string' && message && message !== 'Autorizada' ? message : 'Autorizada',
+        message:
+          typeof messageFinal === 'string' && messageFinal && messageFinal !== 'Autorizada'
+            ? messageFinal
+            : 'Autorizada',
       };
     } finally {
       cleanupCert(certPath);

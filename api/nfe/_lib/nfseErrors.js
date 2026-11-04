@@ -146,6 +146,17 @@ function humanizeNfseRejection(message, ibge) {
     ].join(' ');
   }
 
+  if (/L985|AL986|fila de processamento no ADN|aguardando processamento no ADN/i.test(raw)) {
+    return [
+      'L985/AL986 — O ADN recebeu a DPS e processou em fila (não é rejeição fiscal).',
+      'O Azoup consulta a DPS automaticamente; se ainda estiver pendente, a nota fica em Processando.',
+      'Aguarde alguns minutos e abra Notas fiscais / Reemitir para buscar a autorização.',
+      raw.length < 280 ? raw : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+
   if (isRpsChaveDuplicadaAdn(raw)) {
     return [
       'L1260/L1268 — Este RPS/chave já existe no Ambiente Nacional (ADN).',

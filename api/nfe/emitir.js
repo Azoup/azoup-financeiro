@@ -186,6 +186,24 @@ module.exports = async function handler(req, res) {
     }
 
     if (!result.success) {
+      // L985/AL986: lote na fila do ADN — não marcar como rejeitada.
+      if (result.pending) {
+        await admin
+          .from('nota_fiscal')
+          .update({
+            status: 'processando',
+            status_sefaz: result.status ?? 'L985',
+            protocolo_autorizacao: result.protocolo_autorizacao ?? null,
+            motivo_rejeicao: result.message ?? 'Aguardando processamento no ADN (L985).',
+          })
+          .eq('id', notaFiscalId);
+        return res.status(202).json({
+          ...result,
+          message:
+            result.message ||
+            'NFS-e na fila do ADN (L985). Aguarde e consulte em Notas fiscais.',
+        });
+      }
       await admin
         .from('nota_fiscal')
         .update({
