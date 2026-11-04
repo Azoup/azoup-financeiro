@@ -54,9 +54,9 @@ export function formatWhatsAppDisplay(raw: string): string {
 }
 
 /**
- * WhatsApp (pedido do negócio):
- * - Vencido → texto amigável de pendência (“Olá! Tudo bem?…”).
- * - Em aberto → “Segue o boleto…” com cliente, empresa, valor, vencimento, documento e linha digitável.
+ * WhatsApp:
+ * - Não atrasado → texto amigável (“Olá! Tudo bem?…”).
+ * - Atrasado → “Segue o boleto…” com valor original, multa, juros e valor hoje.
  */
 export function buildMensagemCobrancaWhatsapp(
   row: Pick<
@@ -74,12 +74,12 @@ export function buildMensagemCobrancaWhatsapp(
 ): string {
   const encargos = calcularEncargosBoleto(row.valor_documento, row.data_vencimento);
 
-  // Vencido: só a mensagem de pendência (sem detalhar multa aqui).
-  if (encargos.vencido) {
+  // Ainda no prazo: mensagem amigável.
+  if (!encargos.vencido) {
     return mensagemPendenciaBoleto(row.data_vencimento);
   }
 
-  // Em aberto: cobrança com os campos do boleto.
+  // Atrasado: cobrança com multa/juros (texto enviado pelo negócio).
   const venc = formatBRDate(parseISODate(row.data_vencimento)) || row.data_vencimento;
   const cliente = safeTrim(row.nome_cliente) || 'cliente';
   const beneficiario =
@@ -89,7 +89,10 @@ export function buildMensagemCobrancaWhatsapp(
     `Aqui é da ${beneficiario}.`,
     'Segue o boleto para pagamento:',
     safeTrim(row.referencia_label) || 'Mensalidade recorrente',
-    `Valor: ${formatBRL(row.valor_documento)}`,
+    `Valor original: ${formatBRL(row.valor_documento)}`,
+    `Multa (2%): ${formatBRL(encargos.multa)}`,
+    `Juros (0,033% ao dia × ${encargos.dias} dia(s)): ${formatBRL(encargos.juros)}`,
+    `Valor para pagamento hoje: ${formatBRL(encargos.total)}`,
     `Vencimento: ${venc}`,
     row.numero_documento ? `Documento: ${safeTrim(row.numero_documento)}` : null,
     row.linha_digitavel ? `\nLinha digitável do boleto:\n${safeTrim(row.linha_digitavel)}` : null,
