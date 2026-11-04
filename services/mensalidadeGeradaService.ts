@@ -43,38 +43,53 @@ type MensalidadeInsertRow = {
   parcela_total?: number | null;
 };
 
+function descontoCent(m: Pick<MensalidadeGerada, 'desconto'>) {
+  return cents(m.desconto ?? 0);
+}
+
+/** Saldo em aberto considerando desconto já concedido. */
+export function saldoMensalidadeCent(
+  m: Pick<MensalidadeGerada, 'valor' | 'valor_pago' | 'desconto'>,
+): number {
+  return Math.max(0, cents(m.valor) - cents(m.valor_pago) - descontoCent(m));
+}
+
 export function mensalidadeGeradaStatusVisual(
-  m: Pick<MensalidadeGerada, 'status' | 'data_vencimento' | 'valor' | 'valor_pago'>,
+  m: Pick<MensalidadeGerada, 'status' | 'data_vencimento' | 'valor' | 'valor_pago' | 'desconto'>,
 ): MensalidadeGeradaStatusDb {
   if (m.status === 'cancelado') return 'cancelado';
-  if (cents(m.valor_pago) >= cents(m.valor)) return 'pago';
-  if (cents(m.valor_pago) > 0 && cents(m.valor_pago) < cents(m.valor)) return 'parcial';
+  if (saldoMensalidadeCent(m) <= 0) return 'pago';
+  if (cents(m.valor_pago) > 0 || descontoCent(m) > 0) return 'parcial';
   const hoje = toISODate(new Date());
   if (m.data_vencimento < hoje) return 'atrasado';
   return 'pendente';
 }
 
 export function podeRegistrarPagamentoMensalidadeGerada(
-  m: Pick<MensalidadeGerada, 'status' | 'data_vencimento' | 'valor' | 'valor_pago'>,
+  m: Pick<MensalidadeGerada, 'status' | 'data_vencimento' | 'valor' | 'valor_pago' | 'desconto'>,
 ): boolean {
   if (m.status === 'cancelado' || m.status === 'pago') return false;
-  if (cents(m.valor_pago) >= cents(m.valor)) return false;
+  if (saldoMensalidadeCent(m) <= 0) return false;
   const vis = mensalidadeGeradaStatusVisual(m);
   return vis === 'pendente' || vis === 'parcial' || vis === 'atrasado';
 }
 
 /** Mensalidade em aberto, sem pagamento — pode cancelar o mês (não vira pago). */
 export function podeCancelarMensalidadeGerada(
-  m: Pick<MensalidadeGerada, 'status' | 'valor' | 'valor_pago'>,
+  m: Pick<MensalidadeGerada, 'status' | 'valor' | 'valor_pago' | 'desconto'>,
 ): boolean {
   if (m.status === 'cancelado' || m.status === 'pago') return false;
-  if (cents(m.valor_pago) > 0) return false;
+  if (cents(m.valor_pago) > 0 || descontoCent(m) > 0) return false;
   return true;
 }
 
-function nextDbStatusAfterPay(valor: number, valorPagoNovo: number): MensalidadeGeradaStatusDb {
+function nextDbStatusAfterPay(
+  valor: number,
+  valorPagoNovo: number,
+  descontoNovo = 0,
+): MensalidadeGeradaStatusDb {
   const vc = cents(valor);
-  const pc = cents(valorPagoNovo);
+  const pc = cents(valorPagoNovo) + cents(descontoNovo);
   if (pc >= vc) return 'pago';
   if (pc > 0) return 'parcial';
   return 'pendente';
@@ -794,7 +809,9 @@ export async function registrarPagamentoMensalidadeGerada(
   input: RegistrarPagamentoMensalidadeGeradaInput,
 ): Promise<void> {
   const payCent = cents(input.valor_pago);
-  if (payCent <= 0) throw new Error('Informe um valor pago válido.');
+  const descCent = cents(input.desconto ?? 0);
+  if (payCent < 0 || descCent < 0) throw new Error('Valores inválidos.');
+  if (payCent <= 0 && descCent <= 0) throw new Error('Informe o valor pago e/ou o desconto.');
 
   const { data: b, error: e0 } = await supabase
     .from('mensalidades')
@@ -805,32 +822,43 @@ export async function registrarPagamentoMensalidadeGerada(
   if (e0 || !b) throw new Error(e0?.message ?? 'Mensalidade não encontrada.');
   const row = b as MensalidadeGerada;
   if (row.status === 'cancelado') throw new Error('Mensalidade cancelada.');
-  if (row.status === 'pago' || cents(row.valor_pago) >= cents(row.valor)) throw new Error('Mensalidade já quitada.');
+  if (row.status === 'pago' || saldoMensalidadeCent(row) <= 0) throw new Error('Mensalidade já quitada.');
 
-  const restanteCent = cents(row.valor) - cents(row.valor_pago);
-  if (payCent > restanteCent) throw new Error('Valor pago ultrapassa o saldo em aberto da mensalidade.');
+  const restanteCent = saldoMensalidadeCent(row);
+  if (payCent + descCent > restanteCent) {
+    throw new Error('Valor pago + desconto ultrapassa o saldo em aberto da mensalidade.');
+  }
 
-  const { error: e1 } = await supabase.from('pagamentos_mensalidades').insert({
-    mensalidade_id: mensalidadeId,
-    valor_pago: input.valor_pago,
-    data_pagamento: input.data_pagamento,
-    forma_pagamento: input.forma_pagamento.trim(),
-    observacao: input.observacao.trim() || null,
-    usuario_id: userId,
-  });
-  if (e1) throw new Error(e1.message);
+  const obsParts = [input.observacao.trim()].filter(Boolean);
+  if (descCent > 0) {
+    obsParts.push(`Desconto na baixa: R$ ${(descCent / 100).toFixed(2).replace('.', ',')}`);
+  }
+  const obsFinal = obsParts.join(' · ') || null;
 
-  const novoPago = cents(row.valor_pago) + payCent;
-  const novoPagoReais = novoPago / 100;
-  const st = nextDbStatusAfterPay(row.valor, novoPagoReais);
+  if (payCent > 0) {
+    const { error: e1 } = await supabase.from('pagamentos_mensalidades').insert({
+      mensalidade_id: mensalidadeId,
+      valor_pago: input.valor_pago,
+      data_pagamento: input.data_pagamento,
+      forma_pagamento: input.forma_pagamento.trim(),
+      observacao: obsFinal,
+      usuario_id: userId,
+    });
+    if (e1) throw new Error(e1.message);
+  }
+
+  const novoPagoReais = (cents(row.valor_pago) + payCent) / 100;
+  const novoDescontoReais = (descontoCent(row) + descCent) / 100;
+  const st = nextDbStatusAfterPay(row.valor, novoPagoReais, novoDescontoReais);
 
   const { error: e2 } = await supabase
     .from('mensalidades')
     .update({
       valor_pago: novoPagoReais,
+      desconto: novoDescontoReais,
       data_pagamento: input.data_pagamento,
       forma_pagamento: input.forma_pagamento.trim(),
-      observacao_pagamento: input.observacao.trim() || null,
+      observacao_pagamento: obsFinal,
       status: st,
     })
     .eq('id', mensalidadeId)
@@ -839,12 +867,14 @@ export async function registrarPagamentoMensalidadeGerada(
 
   // Inclui 'erro': baixa manual não pode deixar o carnê em "Erro Sicoob" com mensalidade paga
   // (senão Contas a receber ainda oferece "Cancelar" e cai no bloqueio de pagamento).
-  await supabase
-    .from('boletos_parcela_venda')
-    .update({ status_registro: 'pago', data_liquidacao_sicoob: input.data_pagamento })
-    .eq('mensalidade_id', mensalidadeId)
-    .eq('user_id', userId)
-    .in('status_registro', ['registrado', 'pendente', 'informativo', 'erro']);
+  if (st === 'pago') {
+    await supabase
+      .from('boletos_parcela_venda')
+      .update({ status_registro: 'pago', data_liquidacao_sicoob: input.data_pagamento })
+      .eq('mensalidade_id', mensalidadeId)
+      .eq('user_id', userId)
+      .in('status_registro', ['registrado', 'pendente', 'informativo', 'erro']);
+  }
 }
 
 /**
@@ -861,7 +891,7 @@ export async function cancelarMensalidadeGerada(userId: string, mensalidadeId: s
   if (e0 || !b) throw new Error(e0?.message ?? 'Mensalidade não encontrada.');
   const row = b as MensalidadeGerada;
   if (row.status === 'cancelado') throw new Error('Mensalidade já está cancelada.');
-  if (row.status === 'pago' || cents(row.valor_pago) > 0) {
+  if (row.status === 'pago' || cents(row.valor_pago) > 0 || descontoCent(row) > 0) {
     throw new Error('Não é possível cancelar mensalidade com pagamento registrado. Estorne o pagamento antes.');
   }
 
@@ -935,7 +965,7 @@ export async function reativarMensalidadeGerada(userId: string, mensalidadeId: s
   if (e0 || !b) throw new Error(e0?.message ?? 'Mensalidade não encontrada.');
   const row = b as MensalidadeGerada;
   if (row.status !== 'cancelado') throw new Error('Mensalidade não está cancelada.');
-  if (cents(row.valor_pago) > 0) {
+  if (cents(row.valor_pago) > 0 || descontoCent(row) > 0) {
     throw new Error('Mensalidade tem pagamento — não reative por este fluxo.');
   }
 
@@ -985,16 +1015,19 @@ export async function fetchResumoMensalidadesGeradasDashboard(userId: string): P
 }> {
   const { data, error } = await supabase
     .from('mensalidades')
-    .select('valor, valor_pago, data_vencimento, status')
+    .select('valor, valor_pago, desconto, data_vencimento, status')
     .eq('user_id', userId)
     .neq('status', 'cancelado');
   if (error) throw new Error(error.message);
-  const rows = (data ?? []) as Pick<MensalidadeGerada, 'valor' | 'valor_pago' | 'data_vencimento' | 'status'>[];
+  const rows = (data ?? []) as Pick<
+    MensalidadeGerada,
+    'valor' | 'valor_pago' | 'desconto' | 'data_vencimento' | 'status'
+  >[];
   let valorPendenteMensalidadesGeradas = 0;
   let qtdMensalidadesGeradasAtrasadas = 0;
   const hoje = toISODate(new Date());
   for (const r of rows) {
-    const open = Math.max(0, cents(r.valor) - cents(r.valor_pago)) / 100;
+    const open = saldoMensalidadeCent(r) / 100;
     valorPendenteMensalidadesGeradas += open;
     if (open > 0.001 && r.data_vencimento < hoje) qtdMensalidadesGeradasAtrasadas += 1;
   }

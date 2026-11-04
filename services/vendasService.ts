@@ -306,13 +306,14 @@ export async function fetchVendasPage(params: {
   if (ids.length) {
     const { data: parcs, error: ePar } = await supabase
       .from('parcelas_venda')
-      .select('venda_id, valor, valor_pago, forma_pagamento_id')
+      .select('venda_id, valor, valor_pago, desconto, forma_pagamento_id')
       .in('venda_id', ids);
     if (!ePar && parcs) {
       for (const p of parcs as {
         venda_id: string;
         valor: number;
         valor_pago: number;
+        desconto?: number;
         forma_pagamento_id: string;
       }[]) {
         const cur = parcelasAgg.get(p.venda_id) ?? {
@@ -323,7 +324,10 @@ export async function fetchVendasPage(params: {
         };
         cur.qtd += 1;
         cur.pago += Number(p.valor_pago) || 0;
-        cur.pendente += Math.max(0, (Number(p.valor) || 0) - (Number(p.valor_pago) || 0));
+        cur.pendente += Math.max(
+          0,
+          (Number(p.valor) || 0) - (Number(p.valor_pago) || 0) - (Number(p.desconto) || 0),
+        );
         cur.formaIds.add(p.forma_pagamento_id);
         parcelasAgg.set(p.venda_id, cur);
       }
@@ -468,9 +472,26 @@ export async function fetchVendaParaNotaFiscal(
   };
 }
 
-function nextParcelaDbStatus(valor: number, valorPago: number): ParcelaVendaStatus {
+function parcelaDescontoCent(p: { desconto?: number }) {
+  return reaisParaCentavos(p.desconto ?? 0);
+}
+
+export function saldoParcelaAbertoCent(
+  p: Pick<ParcelaVenda, 'valor' | 'valor_pago' | 'desconto'>,
+): number {
+  return Math.max(
+    0,
+    reaisParaCentavos(p.valor) - reaisParaCentavos(p.valor_pago) - parcelaDescontoCent(p),
+  );
+}
+
+function nextParcelaDbStatus(
+  valor: number,
+  valorPago: number,
+  desconto = 0,
+): ParcelaVendaStatus {
   const vc = reaisParaCentavos(valor);
-  const pc = reaisParaCentavos(valorPago);
+  const pc = reaisParaCentavos(valorPago) + reaisParaCentavos(desconto);
   if (pc <= 0) return 'pendente';
   if (pc >= vc) return 'pago';
   return 'parcial';
@@ -479,13 +500,22 @@ function nextParcelaDbStatus(valor: number, valorPago: number): ParcelaVendaStat
 async function atualizarStatusVenda(vendaId: string, userId: string) {
   const { data: ps, error } = await supabase
     .from('parcelas_venda')
-    .select('valor, valor_pago, status')
+    .select('valor, valor_pago, desconto, status')
     .eq('venda_id', vendaId);
   if (error) return;
-  const rows = (ps ?? []) as { valor: number; valor_pago: number; status: string }[];
+  const rows = (ps ?? []) as {
+    valor: number;
+    valor_pago: number;
+    desconto?: number;
+    status: string;
+  }[];
   if (!rows.length) return;
-  const allPaid = rows.every((r) => reaisParaCentavos(r.valor_pago) >= reaisParaCentavos(r.valor));
-  const anyPaid = rows.some((r) => reaisParaCentavos(r.valor_pago) > 0);
+  const allPaid = rows.every(
+    (r) => r.status === 'cancelado' || saldoParcelaAbertoCent(r) <= 0,
+  );
+  const anyPaid = rows.some(
+    (r) => reaisParaCentavos(r.valor_pago) > 0 || parcelaDescontoCent(r) > 0,
+  );
   const allCancelled = rows.every((r) => r.status === 'cancelado');
   let status: VendaStatus = 'pendente';
   if (allCancelled) status = 'cancelada';
@@ -501,7 +531,9 @@ export async function registrarPagamentoVenda(
   input: RegistrarPagamentoInput,
 ): Promise<void> {
   const valorCent = reaisParaCentavos(input.valor_pago);
-  if (valorCent <= 0) throw new Error('Informe um valor de pagamento válido.');
+  const descCent = reaisParaCentavos(input.desconto ?? 0);
+  if (valorCent < 0 || descCent < 0) throw new Error('Valores inválidos.');
+  if (valorCent <= 0 && descCent <= 0) throw new Error('Informe o valor pago e/ou o desconto.');
 
   const { data: parcelas, error: e0 } = await supabase
     .from('parcelas_venda')
@@ -511,9 +543,7 @@ export async function registrarPagamentoVenda(
   if (e0) throw new Error(e0.message);
   const plist = (parcelas as ParcelaVenda[] | null) ?? [];
 
-  const abertas = plist.filter(
-    (p) => p.status !== 'cancelado' && reaisParaCentavos(p.valor_pago) < reaisParaCentavos(p.valor),
-  );
+  const abertas = plist.filter((p) => p.status !== 'cancelado' && saldoParcelaAbertoCent(p) > 0);
 
   const aloc: { parcela_id: string; centavos: number }[] = [];
   if (input.alocacao_manual?.length) {
@@ -524,53 +554,105 @@ export async function registrarPagamentoVenda(
       aloc.push({ parcela_id: a.parcela_id, centavos: c });
       sum += c;
     }
-    if (sum !== valorCent) throw new Error('A soma da alocação manual deve ser igual ao valor pago.');
+    if (valorCent > 0 && sum !== valorCent) {
+      throw new Error('A soma da alocação manual deve ser igual ao valor pago.');
+    }
+    if (valorCent <= 0 && descCent > 0 && aloc.length === 0) {
+      // Só desconto: aloca na parcela informada com valor 0 (só para identificar alvo).
+      for (const a of input.alocacao_manual) {
+        aloc.push({ parcela_id: a.parcela_id, centavos: 0 });
+        break;
+      }
+    }
   } else {
     let rest = valorCent;
     for (const p of abertas) {
       if (rest <= 0) break;
-      const open = reaisParaCentavos(p.valor) - reaisParaCentavos(p.valor_pago);
+      const open = saldoParcelaAbertoCent(p);
       if (open <= 0) continue;
       const apply = Math.min(open, rest);
       aloc.push({ parcela_id: p.id, centavos: apply });
       rest -= apply;
     }
     if (rest > 0) throw new Error('Valor excede o saldo em aberto das parcelas.');
+    if (valorCent <= 0 && descCent > 0 && abertas[0]) {
+      aloc.push({ parcela_id: abertas[0].id, centavos: 0 });
+    }
   }
 
-  const { data: payIns, error: e1 } = await supabase
-    .from('pagamentos_venda')
-    .insert({
-      venda_id: vendaId,
-      user_id: userId,
-      data_pagamento: input.data_pagamento,
-      valor_pago: input.valor_pago,
-      observacao: input.observacao.trim() || null,
-    })
-    .select('id')
-    .single();
-  if (e1 || !payIns) throw new Error(e1?.message ?? 'Erro ao registrar pagamento.');
-  const pagamentoId = payIns.id as string;
+  if (!aloc.length) throw new Error('Nenhuma parcela para aplicar a baixa.');
 
-  const ppRows = aloc.map((a) => ({
-    pagamento_id: pagamentoId,
-    parcela_id: a.parcela_id,
-    valor_aplicado: centavosParaReais(a.centavos),
-  }));
-  const { error: e2 } = await supabase.from('pagamento_parcelas').insert(ppRows);
-  if (e2) {
-    await supabase.from('pagamentos_venda').delete().eq('id', pagamentoId);
-    throw new Error(e2.message);
+  // Desconto desta baixa vai para a primeira parcela da alocação (fluxo de contas a receber = 1 parcela).
+  const descPorParcela = new Map<string, number>();
+  if (descCent > 0) {
+    descPorParcela.set(aloc[0].parcela_id, descCent);
   }
 
   for (const a of aloc) {
     const p = plist.find((x) => x.id === a.parcela_id);
+    if (!p) throw new Error('Parcela não encontrada na alocação.');
+    const open = saldoParcelaAbertoCent(p);
+    const d = descPorParcela.get(a.parcela_id) ?? 0;
+    if (a.centavos + d > open) {
+      throw new Error('Valor pago + desconto ultrapassa o saldo em aberto da parcela.');
+    }
+  }
+
+  const obsParts = [input.observacao.trim()].filter(Boolean);
+  if (descCent > 0) {
+    obsParts.push(`Desconto na baixa: R$ ${(descCent / 100).toFixed(2).replace('.', ',')}`);
+  }
+  const obsFinal = obsParts.join(' · ') || null;
+
+  let pagamentoId: string | null = null;
+  if (valorCent > 0) {
+    const { data: payIns, error: e1 } = await supabase
+      .from('pagamentos_venda')
+      .insert({
+        venda_id: vendaId,
+        user_id: userId,
+        data_pagamento: input.data_pagamento,
+        valor_pago: input.valor_pago,
+        observacao: obsFinal,
+      })
+      .select('id')
+      .single();
+    if (e1 || !payIns) throw new Error(e1?.message ?? 'Erro ao registrar pagamento.');
+    pagamentoId = payIns.id as string;
+
+    const ppRows = aloc
+      .filter((a) => a.centavos > 0)
+      .map((a) => ({
+        pagamento_id: pagamentoId!,
+        parcela_id: a.parcela_id,
+        valor_aplicado: centavosParaReais(a.centavos),
+      }));
+    if (ppRows.length) {
+      const { error: e2 } = await supabase.from('pagamento_parcelas').insert(ppRows);
+      if (e2) {
+        await supabase.from('pagamentos_venda').delete().eq('id', pagamentoId);
+        throw new Error(e2.message);
+      }
+    }
+  }
+
+  const touched = new Map<string, { payAdd: number; descAdd: number }>();
+  for (const a of aloc) {
+    const cur = touched.get(a.parcela_id) ?? { payAdd: 0, descAdd: 0 };
+    cur.payAdd += a.centavos;
+    cur.descAdd += descPorParcela.get(a.parcela_id) ?? 0;
+    touched.set(a.parcela_id, cur);
+  }
+
+  for (const [parcelaId, delta] of touched) {
+    const p = plist.find((x) => x.id === parcelaId);
     if (!p) continue;
-    const novoPago = centavosParaReais(reaisParaCentavos(p.valor_pago) + a.centavos);
-    const st = nextParcelaDbStatus(p.valor, novoPago);
+    const novoPago = centavosParaReais(reaisParaCentavos(p.valor_pago) + delta.payAdd);
+    const novoDesc = centavosParaReais(parcelaDescontoCent(p) + delta.descAdd);
+    const st = nextParcelaDbStatus(p.valor, novoPago, novoDesc);
     const { error: eu } = await supabase
       .from('parcelas_venda')
-      .update({ valor_pago: novoPago, status: st })
+      .update({ valor_pago: novoPago, desconto: novoDesc, status: st })
       .eq('id', p.id)
       .eq('venda_id', vendaId);
     if (eu) throw new Error(eu.message);
@@ -590,7 +672,12 @@ export async function registrarPagamentoVenda(
     venda_id: vendaId,
     user_id: userId,
     tipo: 'pagamento_registrado',
-    detalhe: { pagamento_id: pagamentoId, valor: input.valor_pago, parcelas: aloc },
+    detalhe: {
+      pagamento_id: pagamentoId,
+      valor: input.valor_pago,
+      desconto: input.desconto ?? 0,
+      parcelas: aloc,
+    },
   });
 }
 
@@ -635,25 +722,20 @@ export async function fetchVendaFinanceiroStats(
   if (ids.length) {
     const { data: parcs, error: e2 } = await supabase
       .from('parcelas_venda')
-      .select('valor, valor_pago, data_vencimento, status')
+      .select('valor, valor_pago, desconto, data_vencimento, status')
       .in('venda_id', ids);
     if (!e2 && parcs) {
       for (const p of parcs as {
         valor: number;
         valor_pago: number;
+        desconto?: number;
         data_vencimento: string;
         status: string;
       }[]) {
-        const vc = reaisParaCentavos(p.valor);
-        const pc = reaisParaCentavos(p.valor_pago);
+        const openCent = saldoParcelaAbertoCent(p);
         totalRecebido += Number(p.valor_pago) || 0;
-        totalPendente += Math.max(0, centavosParaReais(vc - pc));
-        if (
-          p.status !== 'cancelado' &&
-          p.status !== 'pago' &&
-          p.data_vencimento < hoje &&
-          pc < vc
-        ) {
+        totalPendente += centavosParaReais(openCent);
+        if (p.status !== 'cancelado' && p.status !== 'pago' && p.data_vencimento < hoje && openCent > 0) {
           parcelasAtrasadas += 1;
         }
       }
@@ -714,11 +796,17 @@ export async function cancelarVenda(userId: string, vendaId: string): Promise<vo
 export async function cancelarParcelaVenda(userId: string, parcelaId: string): Promise<void> {
   const { data: p, error: e0 } = await supabase
     .from('parcelas_venda')
-    .select('id, venda_id, valor_pago, status')
+    .select('id, venda_id, valor_pago, desconto, status')
     .eq('id', parcelaId)
     .maybeSingle();
   if (e0 || !p) throw new Error(e0?.message ?? 'Parcela não encontrada.');
-  const parc = p as { id: string; venda_id: string; valor_pago: number; status: string };
+  const parc = p as {
+    id: string;
+    venda_id: string;
+    valor_pago: number;
+    desconto?: number;
+    status: string;
+  };
 
   const { data: v, error: eV } = await supabase
     .from('vendas')
@@ -729,7 +817,11 @@ export async function cancelarParcelaVenda(userId: string, parcelaId: string): P
   if (eV || !v) throw new Error('Venda não encontrada ou sem permissão.');
 
   if (parc.status === 'cancelado') throw new Error('Parcela já está cancelada.');
-  if (parc.status === 'pago' || reaisParaCentavos(parc.valor_pago) > 0) {
+  if (
+    parc.status === 'pago' ||
+    reaisParaCentavos(parc.valor_pago) > 0 ||
+    reaisParaCentavos(parc.desconto ?? 0) > 0
+  ) {
     throw new Error('Não é possível cancelar parcela com pagamento registrado.');
   }
 
@@ -796,11 +888,17 @@ export async function cancelarParcelaVenda(userId: string, parcelaId: string): P
 export async function reativarParcelaVenda(userId: string, parcelaId: string): Promise<void> {
   const { data: p, error: e0 } = await supabase
     .from('parcelas_venda')
-    .select('id, venda_id, valor_pago, status')
+    .select('id, venda_id, valor_pago, desconto, status')
     .eq('id', parcelaId)
     .maybeSingle();
   if (e0 || !p) throw new Error(e0?.message ?? 'Parcela não encontrada.');
-  const parc = p as { id: string; venda_id: string; valor_pago: number; status: string };
+  const parc = p as {
+    id: string;
+    venda_id: string;
+    valor_pago: number;
+    desconto?: number;
+    status: string;
+  };
 
   const { data: v, error: eV } = await supabase
     .from('vendas')
@@ -811,7 +909,7 @@ export async function reativarParcelaVenda(userId: string, parcelaId: string): P
   if (eV || !v) throw new Error('Venda não encontrada ou sem permissão.');
 
   if (parc.status !== 'cancelado') throw new Error('Parcela não está cancelada.');
-  if (reaisParaCentavos(parc.valor_pago) > 0) {
+  if (reaisParaCentavos(parc.valor_pago) > 0 || reaisParaCentavos(parc.desconto ?? 0) > 0) {
     throw new Error('Parcela tem pagamento — não reative por este fluxo.');
   }
 
@@ -858,8 +956,9 @@ export async function reativarParcelaVenda(userId: string, parcelaId: string): P
 
 export function parcelaStatusVisual(p: ParcelaVenda): ParcelaVendaStatus {
   if (p.status === 'cancelado' || p.status === 'pago') return p.status;
+  if (saldoParcelaAbertoCent(p) <= 0) return 'pago';
   const hoje = toISODate(new Date());
-  if (p.data_vencimento < hoje && reaisParaCentavos(p.valor_pago) < reaisParaCentavos(p.valor)) {
+  if (p.data_vencimento < hoje && saldoParcelaAbertoCent(p) > 0) {
     return 'atrasado';
   }
   return p.status;

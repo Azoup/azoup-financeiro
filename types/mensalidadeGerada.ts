@@ -11,6 +11,8 @@ export interface MensalidadeGerada {
   cliente_id: string;
   valor: number;
   valor_pago: number;
+  /** Abatimento acumulado na baixa (quita com valor_pago + desconto >= valor). */
+  desconto?: number;
   data_vencimento: string;
   competencia: string | null;
   status: MensalidadeGeradaStatusDb;
@@ -52,6 +54,8 @@ export interface PagamentoMensalidadeGerada {
 export interface RegistrarPagamentoMensalidadeGeradaInput {
   data_pagamento: string;
   valor_pago: number;
+  /** Desconto concedido nesta baixa (opcional). */
+  desconto?: number;
   forma_pagamento: string;
   observacao: string;
 }

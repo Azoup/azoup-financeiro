@@ -36,6 +36,8 @@ export interface ParcelaVenda {
   numero_parcela: number;
   valor: number;
   valor_pago: number;
+  /** Abatimento acumulado na baixa (quita com valor_pago + desconto >= valor). */
+  desconto?: number;
   data_vencimento: string;
   status: ParcelaVendaStatus;
   forma_pagamento_id: string;
@@ -118,6 +120,8 @@ export interface VendaFinanceiroStats {
 export interface RegistrarPagamentoInput {
   data_pagamento: string;
   valor_pago: number;
+  /** Desconto concedido nesta baixa (opcional; aplicado nas parcelas alocadas). */
+  desconto?: number;
   observacao: string;
   alocacao_manual?: { parcela_id: string; valor: number }[];
 }

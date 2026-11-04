@@ -777,7 +777,12 @@ export default function ContasReceberScreen() {
           Toast.show({ type: 'error', text1: 'Parcela não encontrada.' });
           return;
         }
-        const saldoCent = Math.max(0, reaisParaCentavos(p.valor) - reaisParaCentavos(p.valor_pago));
+        const saldoCent = Math.max(
+          0,
+          reaisParaCentavos(p.valor) -
+            reaisParaCentavos(p.valor_pago) -
+            reaisParaCentavos(p.desconto ?? 0),
+        );
         if (saldoCent <= 0) {
           Toast.show({ type: 'info', text1: 'Esta parcela já está quitada.' });
           await refreshLista();
@@ -800,6 +805,7 @@ export default function ContasReceberScreen() {
   const confirmarPagamentoMensalidade = async (payload: {
     data_pagamento: string;
     valor_pago: number;
+    desconto?: number;
     forma_pagamento: string;
     observacao: string;
   }) => {
@@ -817,12 +823,18 @@ export default function ContasReceberScreen() {
   const confirmarPagamentoVenda = async (payload: {
     data_pagamento: string;
     valor_pago: number;
+    desconto?: number;
     observacao: string;
   }) => {
     if (!user?.id || !payVendaCtx) return;
     await registrarPagamentoVenda(user.id, payVendaCtx.vendaId, {
       ...payload,
-      alocacao_manual: [{ parcela_id: payVendaCtx.parcelaId, valor: payload.valor_pago }],
+      alocacao_manual: [
+        {
+          parcela_id: payVendaCtx.parcelaId,
+          valor: payload.valor_pago > 0 ? payload.valor_pago : 0,
+        },
+      ],
     });
     setPayVendaCtx(null);
     await refreshLista();

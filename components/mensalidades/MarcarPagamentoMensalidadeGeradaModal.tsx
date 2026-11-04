@@ -20,6 +20,7 @@ type Props = {
   onConfirm: (payload: {
     data_pagamento: string;
     valor_pago: number;
+    desconto?: number;
     forma_pagamento: string;
     observacao: string;
   }) => Promise<void>;
@@ -29,6 +30,7 @@ export function MarcarPagamentoMensalidadeGeradaModal({ visible, registro, onClo
   const [step, setStep] = useState<1 | 2>(1);
   const [dataPag, setDataPag] = useState<Date | null>(() => new Date());
   const [valorMask, setValorMask] = useState('');
+  const [descontoMask, setDescontoMask] = useState('');
   const [formaNome, setFormaNome] = useState('');
   const [obs, setObs] = useState('');
   const [formas, setFormas] = useState<FormaPagamento[]>([]);
@@ -38,6 +40,7 @@ export function MarcarPagamentoMensalidadeGeradaModal({ visible, registro, onClo
     setStep(1);
     setDataPag(new Date());
     setValorMask('');
+    setDescontoMask('');
     setFormaNome('');
     setObs('');
   }, []);
@@ -55,15 +58,37 @@ export function MarcarPagamentoMensalidadeGeradaModal({ visible, registro, onClo
   const saldo =
     registro == null
       ? 0
-      : Math.max(0, reaisParaCentavos(registro.valor) - reaisParaCentavos(registro.valor_pago)) / 100;
+      : Math.max(
+          0,
+          reaisParaCentavos(registro.valor) -
+            reaisParaCentavos(registro.valor_pago) -
+            reaisParaCentavos(registro.desconto ?? 0),
+        ) / 100;
 
   const valorNum = parseBRLMasked(valorMask) ?? 0;
-  const valorOk = valorNum > 0 && reaisParaCentavos(valorNum) <= reaisParaCentavos(saldo);
+  const descontoNum = parseBRLMasked(descontoMask) ?? 0;
+  const somaCent = reaisParaCentavos(valorNum) + reaisParaCentavos(descontoNum);
+  const saldoCent = reaisParaCentavos(saldo);
+  const valorOk =
+    somaCent > 0 &&
+    reaisParaCentavos(descontoNum) >= 0 &&
+    reaisParaCentavos(valorNum) >= 0 &&
+    somaCent <= saldoCent;
   const formaOk = formaNome.trim().length > 0;
+
+  const onChangeDesconto = (mask: string) => {
+    setDescontoMask(mask);
+    const dCent = reaisParaCentavos(parseBRLMasked(mask) ?? 0);
+    const sugerido = Math.max(0, saldoCent - Math.min(dCent, saldoCent)) / 100;
+    setValorMask(sugerido > 0 ? formatBRL(sugerido) : '');
+  };
 
   const avançar = () => {
     if (!valorOk || !formaOk) {
-      Toast.show({ type: 'error', text1: 'Preencha valor e forma de pagamento corretamente.' });
+      Toast.show({
+        type: 'error',
+        text1: 'Preencha valor/desconto e forma de pagamento corretamente.',
+      });
       return;
     }
     setStep(2);
@@ -76,6 +101,7 @@ export function MarcarPagamentoMensalidadeGeradaModal({ visible, registro, onClo
       await onConfirm({
         data_pagamento: toISODate(dataPag),
         valor_pago: valorNum,
+        desconto: descontoNum > 0 ? descontoNum : undefined,
         forma_pagamento: formaNome.trim(),
         observacao: obs,
       });
@@ -108,6 +134,16 @@ export function MarcarPagamentoMensalidadeGeradaModal({ visible, registro, onClo
           {step === 1 ? (
             <ScrollView keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false}>
               <DatePickerField label="Data do pagamento" value={dataPag} onChange={setDataPag} />
+              <Text style={styles.label}>Desconto (opcional)</Text>
+              <MaskInput
+                style={styles.input}
+                value={descontoMask}
+                onChangeText={onChangeDesconto}
+                mask={Masks.BRL_CURRENCY}
+                keyboardType="numeric"
+                placeholder="R$ 0,00"
+                placeholderTextColor={colors.gray400}
+              />
               <Text style={styles.label}>Valor pago</Text>
               <MaskInput
                 style={styles.input}
@@ -118,6 +154,11 @@ export function MarcarPagamentoMensalidadeGeradaModal({ visible, registro, onClo
                 placeholder={formatBRL(saldo)}
                 placeholderTextColor={colors.gray400}
               />
+              {descontoNum > 0 ? (
+                <Text style={styles.hintLiq}>
+                  Líquido desta baixa: {formatBRL(valorNum)} · abate {formatBRL(descontoNum)} do saldo
+                </Text>
+              ) : null}
               <Text style={styles.label}>Forma de pagamento</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
                 {formas.map((f) => {
@@ -157,12 +198,20 @@ export function MarcarPagamentoMensalidadeGeradaModal({ visible, registro, onClo
             <View>
               <Text style={styles.revTitle}>Confirme os dados</Text>
               <View style={styles.revRow}>
-                <Text style={styles.revLab}>Valor</Text>
+                <Text style={styles.revLab}>Valor pago</Text>
                 <Text style={styles.revVal}>{formatBRL(valorNum)}</Text>
               </View>
+              {descontoNum > 0 ? (
+                <View style={styles.revRow}>
+                  <Text style={styles.revLab}>Desconto</Text>
+                  <Text style={styles.revVal}>{formatBRL(descontoNum)}</Text>
+                </View>
+              ) : null}
               <View style={styles.revRow}>
                 <Text style={styles.revLab}>Data</Text>
-                <Text style={styles.revVal}>{dataPag ? toISODate(dataPag).split('-').reverse().join('/') : '—'}</Text>
+                <Text style={styles.revVal}>
+                  {dataPag ? toISODate(dataPag).split('-').reverse().join('/') : '—'}
+                </Text>
               </View>
               <View style={styles.revRow}>
                 <Text style={styles.revLab}>Forma</Text>
@@ -224,6 +273,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     marginBottom: 4,
   },
+  hintLiq: { fontSize: 12, color: colors.gray600, marginTop: 6 },
   input: {
     borderWidth: 1,
     borderColor: colors.gray100,

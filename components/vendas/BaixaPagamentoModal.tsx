@@ -25,7 +25,10 @@ type Props = {
 };
 
 function saldoParcelaCent(p: ParcelaVenda): number {
-  return Math.max(0, reaisParaCentavos(p.valor) - reaisParaCentavos(p.valor_pago));
+  return Math.max(
+    0,
+    reaisParaCentavos(p.valor) - reaisParaCentavos(p.valor_pago) - reaisParaCentavos(p.desconto ?? 0),
+  );
 }
 
 export function BaixaPagamentoModal({

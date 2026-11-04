@@ -1,7 +1,5 @@
 import { DatePickerField } from '@/components/DatePickerField';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { fetchFormasPagamentoAtivas } from '@/services/formasPagamentoService';
-import type { FormaPagamento } from '@/types/vendas';
 import { colors, radius, spacing } from '@/theme/colors';
 import { formatBRL, parseBRLMasked } from '@/utils/currency';
 import { toISODate } from '@/utils/date';
@@ -20,6 +18,7 @@ type Props = {
   onConfirm: (payload: {
     data_pagamento: string;
     valor_pago: number;
+    desconto?: number;
     observacao: string;
   }) => Promise<void>;
 };
@@ -34,6 +33,7 @@ export function ContaReceberPagarParcelaVendaModal({
   const [step, setStep] = useState<1 | 2>(1);
   const [dataPag, setDataPag] = useState<Date | null>(() => new Date());
   const [valorMask, setValorMask] = useState('');
+  const [descontoMask, setDescontoMask] = useState('');
   const [obs, setObs] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -41,6 +41,7 @@ export function ContaReceberPagarParcelaVendaModal({
     setStep(1);
     setDataPag(new Date());
     setValorMask('');
+    setDescontoMask('');
     setObs('');
   }, []);
 
@@ -49,11 +50,28 @@ export function ContaReceberPagarParcelaVendaModal({
   }, [visible, reset]);
 
   const valorNum = parseBRLMasked(valorMask) ?? 0;
-  const valorOk = valorNum > 0 && reaisParaCentavos(valorNum) <= reaisParaCentavos(saldoMax);
+  const descontoNum = parseBRLMasked(descontoMask) ?? 0;
+  const saldoCent = reaisParaCentavos(saldoMax);
+  const somaCent = reaisParaCentavos(valorNum) + reaisParaCentavos(descontoNum);
+  const valorOk =
+    somaCent > 0 &&
+    reaisParaCentavos(valorNum) >= 0 &&
+    reaisParaCentavos(descontoNum) >= 0 &&
+    somaCent <= saldoCent;
+
+  const onChangeDesconto = (mask: string) => {
+    setDescontoMask(mask);
+    const dCent = reaisParaCentavos(parseBRLMasked(mask) ?? 0);
+    const sugerido = Math.max(0, saldoCent - Math.min(dCent, saldoCent)) / 100;
+    setValorMask(sugerido > 0 ? formatBRL(sugerido) : '');
+  };
 
   const avançar = () => {
     if (!valorOk) {
-      Toast.show({ type: 'error', text1: 'Informe um valor válido dentro do saldo em aberto.' });
+      Toast.show({
+        type: 'error',
+        text1: 'Informe valor e/ou desconto dentro do saldo em aberto.',
+      });
       return;
     }
     setStep(2);
@@ -66,6 +84,7 @@ export function ContaReceberPagarParcelaVendaModal({
       await onConfirm({
         data_pagamento: toISODate(dataPag),
         valor_pago: valorNum,
+        desconto: descontoNum > 0 ? descontoNum : undefined,
         observacao: obs,
       });
       Toast.show({ type: 'success', text1: 'Pagamento registrado.' });
@@ -98,6 +117,16 @@ export function ContaReceberPagarParcelaVendaModal({
           {step === 1 ? (
             <ScrollView keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false}>
               <DatePickerField label="Data do pagamento" value={dataPag} onChange={setDataPag} />
+              <Text style={styles.label}>Desconto (opcional)</Text>
+              <MaskInput
+                style={styles.input}
+                value={descontoMask}
+                onChangeText={onChangeDesconto}
+                mask={Masks.BRL_CURRENCY}
+                keyboardType="numeric"
+                placeholder="R$ 0,00"
+                placeholderTextColor={colors.gray400}
+              />
               <Text style={styles.label}>Valor pago</Text>
               <MaskInput
                 style={styles.input}
@@ -108,6 +137,11 @@ export function ContaReceberPagarParcelaVendaModal({
                 placeholder={formatBRL(saldoMax)}
                 placeholderTextColor={colors.gray400}
               />
+              {descontoNum > 0 ? (
+                <Text style={styles.hintLiq}>
+                  Líquido desta baixa: {formatBRL(valorNum)} · abate {formatBRL(descontoNum)} do saldo
+                </Text>
+              ) : null}
               <Text style={styles.label}>Observação (opcional)</Text>
               <TextInput
                 style={[styles.input, styles.area]}
@@ -123,9 +157,15 @@ export function ContaReceberPagarParcelaVendaModal({
             <View>
               <Text style={styles.revTitle}>Confirme os dados</Text>
               <View style={styles.revRow}>
-                <Text style={styles.revLab}>Valor</Text>
+                <Text style={styles.revLab}>Valor pago</Text>
                 <Text style={styles.revVal}>{formatBRL(valorNum)}</Text>
               </View>
+              {descontoNum > 0 ? (
+                <View style={styles.revRow}>
+                  <Text style={styles.revLab}>Desconto</Text>
+                  <Text style={styles.revVal}>{formatBRL(descontoNum)}</Text>
+                </View>
+              ) : null}
               <View style={styles.revRow}>
                 <Text style={styles.revLab}>Data</Text>
                 <Text style={styles.revVal}>
@@ -188,6 +228,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     marginBottom: 4,
   },
+  hintLiq: { fontSize: 12, color: colors.gray600, marginTop: 6 },
   input: {
     borderWidth: 1,
     borderColor: colors.gray100,
