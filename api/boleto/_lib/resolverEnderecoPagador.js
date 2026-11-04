@@ -1,6 +1,7 @@
 /**
- * Corrige cidade/UF do pagador pelo CEP (ViaCEP).
- * Evita boleto com CEP de uma cidade e nome de outra (ex.: CEP 13458-430 + Goiânia).
+ * Corrige cidade/UF do pagador pelo CEP.
+ * ViaCEP primeiro; BrasilAPI como fallback (Vercel às vezes falha no ViaCEP).
+ * Evita boleto com CEP de uma cidade e nome de outra (ex.: CEP 13456-664 + Goiânia).
  */
 
 function onlyDigits(s) {
@@ -16,36 +17,77 @@ function textoNorm(s) {
     .replace(/\s+/g, ' ');
 }
 
+async function fetchJsonCep(url) {
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+function fromViaCep(data) {
+  if (!data || data.erro) return null;
+  const localidade = String(data.localidade ?? data.city ?? '').trim();
+  const uf = String(data.uf ?? data.state ?? '')
+    .trim()
+    .toUpperCase()
+    .slice(0, 2);
+  if (!localidade) return null;
+  return {
+    localidade,
+    uf,
+    bairro: String(data.bairro ?? '').trim(),
+    logradouro: String(data.logradouro ?? '').trim(),
+  };
+}
+
+function fromBrasilApi(data) {
+  if (!data || data.message || data.errors) return null;
+  const localidade = String(data.city ?? '').trim();
+  const uf = String(data.state ?? '')
+    .trim()
+    .toUpperCase()
+    .slice(0, 2);
+  if (!localidade) return null;
+  return {
+    localidade,
+    uf,
+    bairro: String(data.neighborhood ?? '').trim(),
+    logradouro: String(data.street ?? '').trim(),
+  };
+}
+
+/** Consulta CEP: ViaCEP → BrasilAPI → nova tentativa ViaCEP. */
 async function consultarViaCep(cepDigits) {
-  const cep = onlyDigits(cepDigits);
+  const cep = onlyDigits(cepDigits).padStart(8, '0').slice(0, 8);
   if (cep.length !== 8) return null;
+
   try {
-    const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`, {
-      headers: { Accept: 'application/json' },
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data || data.erro) return null;
-    const localidade = String(data.localidade ?? '').trim();
-    const uf = String(data.uf ?? '')
-      .trim()
-      .toUpperCase()
-      .slice(0, 2);
-    if (!localidade) return null;
-    return {
-      localidade,
-      uf,
-      bairro: String(data.bairro ?? '').trim(),
-      logradouro: String(data.logradouro ?? '').trim(),
-    };
+    const via = fromViaCep(await fetchJsonCep(`https://viacep.com.br/ws/${cep}/json/`));
+    if (via) return via;
+  } catch {
+    /* tenta BrasilAPI */
+  }
+
+  try {
+    const br = fromBrasilApi(await fetchJsonCep(`https://brasilapi.com.br/api/cep/v2/${cep}`));
+    if (br) return br;
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    await new Promise((r) => setTimeout(r, 400));
+    return fromViaCep(await fetchJsonCep(`https://viacep.com.br/ws/${cep}/json/`));
   } catch {
     return null;
   }
 }
 
 /**
- * Se o CEP existir no ViaCEP e a cidade do cadastro divergir, usa a do CEP.
- * Também preenche cidade/UF vazios.
+ * Se o CEP resolver e a cidade/UF do cadastro divergirem (ou estiverem vazias), usa a do CEP.
+ * Assim o Sicoob recebe "Santa Bárbara d'Oeste" mesmo se o cadastro ainda tiver "Goiânia".
  */
 async function enriquecerClienteComCep(cliente) {
   if (!cliente || typeof cliente !== 'object') return { cliente, corrigiu: false, viaCep: null };
@@ -73,6 +115,10 @@ async function enriquecerClienteComCep(cliente) {
     estado: via.uf || cliente.estado || cliente.uf || 'SP',
     uf: via.uf || cliente.uf || cliente.estado || 'SP',
   };
+  // Bairro/logradouro do CEP só se o cadastro estiver vazio (não apaga o número do imóvel).
+  if (!String(next.bairro ?? '').trim() && via.bairro) next.bairro = via.bairro;
+  if (!String(next.logradouro ?? '').trim() && via.logradouro) next.logradouro = via.logradouro;
+
   return { cliente: next, corrigiu: true, viaCep: via };
 }
 
