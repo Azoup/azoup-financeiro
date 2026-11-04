@@ -48,7 +48,7 @@ function money2(n) {
 
 /**
  * IBGE do município a partir do CEP.
- * ViaCEP primeiro; BrasilAPI como fallback (Vercel às vezes falha no ViaCEP).
+ * ViaCEP → BrasilAPI → OpenCEP (Vercel às vezes falha em um deles).
  */
 async function fetchJsonCep(url) {
   const res = await fetch(url, {
@@ -59,63 +59,77 @@ async function fetchJsonCep(url) {
   return res.json();
 }
 
+function normalizeCepResult({ ibge, logradouro, bairro, localidade, uf }) {
+  const code = onlyDigits(ibge).slice(0, 7);
+  if (code.length !== 7) return null;
+  return {
+    ibge: code,
+    logradouro: String(logradouro ?? '').trim(),
+    bairro: String(bairro ?? '').trim(),
+    localidade: String(localidade ?? '').trim(),
+    uf: String(uf ?? '')
+      .trim()
+      .toUpperCase()
+      .slice(0, 2),
+  };
+}
+
 async function resolveIbgeMunicipioPorCep(cep) {
   const digits = onlyDigits(cep).padStart(8, '0').slice(0, 8);
   if (digits.length !== 8) return null;
 
   const fromVia = (data) => {
     if (!data || data.erro) return null;
-    const ibge = onlyDigits(data.ibge).slice(0, 7);
-    if (ibge.length !== 7) return null;
-    return {
-      ibge,
-      logradouro: String(data.logradouro ?? '').trim(),
-      bairro: String(data.bairro ?? '').trim(),
-      localidade: String(data.localidade ?? data.city ?? '').trim(),
-      uf: String(data.uf ?? data.state ?? '')
-        .trim()
-        .toUpperCase()
-        .slice(0, 2),
-    };
+    return normalizeCepResult({
+      ibge: data.ibge,
+      logradouro: data.logradouro,
+      bairro: data.bairro,
+      localidade: data.localidade ?? data.city,
+      uf: data.uf ?? data.state,
+    });
   };
 
   const fromBrasil = (data) => {
     if (!data || data.message || data.errors) return null;
-    const ibge = onlyDigits(data.ibge?.city ?? data.ibge).slice(0, 7);
-    if (ibge.length !== 7) return null;
-    return {
-      ibge,
-      logradouro: String(data.street ?? '').trim(),
-      bairro: String(data.neighborhood ?? '').trim(),
-      localidade: String(data.city ?? '').trim(),
-      uf: String(data.state ?? '')
-        .trim()
-        .toUpperCase()
-        .slice(0, 2),
-    };
+    return normalizeCepResult({
+      ibge: data.ibge?.city ?? data.ibge,
+      logradouro: data.street,
+      bairro: data.neighborhood,
+      localidade: data.city,
+      uf: data.state,
+    });
   };
 
-  try {
-    const via = fromVia(await fetchJsonCep(`https://viacep.com.br/ws/${digits}/json/`));
-    if (via) return via;
-  } catch {
-    /* tenta BrasilAPI */
-  }
+  const fromOpenCep = (data) => {
+    if (!data || data.error || data.erro) return null;
+    return normalizeCepResult({
+      ibge: data.ibge,
+      logradouro: data.logradouro ?? data.street,
+      bairro: data.bairro ?? data.neighborhood,
+      localidade: data.localidade ?? data.city,
+      uf: data.uf ?? data.state,
+    });
+  };
 
-  try {
-    const br = fromBrasil(await fetchJsonCep(`https://brasilapi.com.br/api/cep/v2/${digits}`));
-    if (br) return br;
-  } catch {
-    /* ignore */
-  }
+  const tentativas = [
+    () => fetchJsonCep(`https://viacep.com.br/ws/${digits}/json/`).then(fromVia),
+    () => fetchJsonCep(`https://brasilapi.com.br/api/cep/v2/${digits}`).then(fromBrasil),
+    () => fetchJsonCep(`https://opencep.com/v1/${digits}`).then(fromOpenCep),
+    async () => {
+      await new Promise((r) => setTimeout(r, 400));
+      return fromVia(await fetchJsonCep(`https://viacep.com.br/ws/${digits}/json/`));
+    },
+  ];
 
-  // Segunda tentativa ViaCEP (rede intermitente na Vercel).
-  try {
-    await new Promise((r) => setTimeout(r, 400));
-    return fromVia(await fetchJsonCep(`https://viacep.com.br/ws/${digits}/json/`));
-  } catch {
-    return null;
+  for (const tentar of tentativas) {
+    try {
+      const hit = await tentar();
+      if (hit?.ibge) return hit;
+    } catch {
+      /* próxima fonte */
+    }
   }
+  return null;
 }
 
 /**
@@ -173,15 +187,16 @@ async function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
     cTribMun = '001';
   }
 
-  // E0240: cMun do tomador DEVE ser o município do CEP enviado — nunca o IBGE do prestador.
+  // E0240: cMun do tomador DEVE ser o município do CEP — sem fallback de cadastro
+  // (cadastro antigo com Goiânia + CEP de SP gerava exatamente esse erro).
   const viaCep = await resolveIbgeMunicipioPorCep(cepTomador);
-  const cMunCadastro = onlyDigits(cliente.codigo_ibge || cliente.cMun || cliente.codigo_municipio).slice(0, 7);
-  const cMunToma = viaCep?.ibge || (cMunCadastro.length === 7 ? cMunCadastro : '');
+  const cMunToma = viaCep?.ibge || '';
   if (cMunToma.length !== 7) {
     throw new Error(
-      `CEP ${cepTomador.slice(0, 5)}-${cepTomador.slice(5)} do cliente "${nomeCliente(cliente)}" não retornou município (IBGE). Confira o CEP no cadastro.`,
+      `CEP ${cepTomador.slice(0, 5)}-${cepTomador.slice(5)} do cliente "${nomeCliente(cliente)}" não retornou município (IBGE). Confira o CEP no cadastro e tente de novo.`,
     );
   }
+  const cepDps = onlyDigits(cepTomador).padStart(8, '0').slice(0, 8);
 
   const opSimpNac = Number(config.op_simp_nac ?? 1);
   // xml2js preserva ordem das chaves; TCRegTrib exige regApTribSN antes de regEspTrib (DPS_v1.01).
@@ -217,11 +232,11 @@ async function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
             // TCEnderNac (DPS_v1.01): cMun antes de CEP.
             endNac: {
               cMun: cMunToma,
-              CEP: cepTomador.padStart(8, '0').slice(0, 8),
+              CEP: cepDps,
             },
-            xLgr: cliente.logradouro || viaCep?.logradouro || 'Nao informado',
+            xLgr: cliente.logradouro || viaCep.logradouro || 'Nao informado',
             nro: cliente.numero || 'S/N',
-            xBairro: cliente.bairro || viaCep?.bairro || 'Centro',
+            xBairro: cliente.bairro || viaCep.bairro || 'Centro',
           },
         },
         serv: {
@@ -254,4 +269,4 @@ async function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   };
 }
 
-module.exports = { buildNFSeLayout };
+module.exports = { buildNFSeLayout, resolveIbgeMunicipioPorCep };

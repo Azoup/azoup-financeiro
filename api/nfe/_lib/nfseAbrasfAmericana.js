@@ -8,6 +8,8 @@ const fs = require('fs');
 const https = require('https');
 const forge = require('node-forge');
 const { SignedXml } = require('xml-crypto');
+const { resolveIbgeMunicipioPorCep } = require('./buildNFSeFromDb');
+const { resolveIbgeMunicipioPorCep } = require('./buildNFSeFromDb');
 
 const NS_ABRASF = 'http://www.abrasf.org.br/nfse.xsd';
 const NS_SOAP_OP = 'http://nfse.abrasf.org.br/';
@@ -185,8 +187,9 @@ function buildCabecalho() {
 
 /**
  * Monta EnviarLoteRpsSincronoEnvio idêntico ao layout Delphi que autoriza.
+ * CodigoMunicipio do tomador = IBGE do CEP (nunca o IBGE do prestador) — evita E0240.
  */
-function buildEnviarLoteRpsSincronoXml({
+async function buildEnviarLoteRpsSincronoXml({
   nota,
   itens,
   perfil,
@@ -276,7 +279,19 @@ function buildEnviarLoteRpsSincronoXml({
   const endComp = String(cliente.complemento ?? '').trim();
   const endBai = escapeXml(cliente.bairro || perfil.bairro || 'Centro');
   const endCep = onlyDigits(cliente.cep || perfil.cep).padStart(8, '0').slice(0, 8);
-  const endUf = escapeXml(String(cliente.estado || cliente.uf || perfil.uf || 'SP').slice(0, 2));
+  if (endCep.length !== 8) {
+    throw new Error('Cliente sem CEP válido. Preencha o CEP no cadastro antes de emitir NFS-e.');
+  }
+  const viaCep = await resolveIbgeMunicipioPorCep(endCep);
+  const ibgeTomador = viaCep?.ibge || '';
+  if (ibgeTomador.length !== 7) {
+    throw new Error(
+      `CEP ${endCep.slice(0, 5)}-${endCep.slice(5)} não retornou município (IBGE). Confira o CEP do cliente.`,
+    );
+  }
+  const endUf = escapeXml(
+    String(viaCep.uf || cliente.estado || cliente.uf || perfil.uf || 'SP').slice(0, 2),
+  );
   const email = String(cliente.email ?? '').trim();
 
   return (
@@ -333,7 +348,7 @@ function buildEnviarLoteRpsSincronoXml({
     `<Numero>${endNum}</Numero>` +
     (endComp ? `<Complemento>${escapeXml(endComp)}</Complemento>` : '') +
     `<Bairro>${endBai}</Bairro>` +
-    `<CodigoMunicipio>${ibge}</CodigoMunicipio>` +
+    `<CodigoMunicipio>${ibgeTomador}</CodigoMunicipio>` +
     `<Uf>${endUf}</Uf>` +
     `<Cep>${endCep}</Cep>` +
     `</Endereco>` +
@@ -593,7 +608,7 @@ async function emitirNfseAbrasfAmericana({
   const pfxBuf = fs.readFileSync(certPath);
 
   async function enviarUmaVez(cfg) {
-    let dadosXml = buildEnviarLoteRpsSincronoXml({
+    let dadosXml = await buildEnviarLoteRpsSincronoXml({
       nota,
       itens,
       perfil,
