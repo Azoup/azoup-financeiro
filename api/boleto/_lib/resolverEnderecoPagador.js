@@ -1,7 +1,7 @@
 /**
  * Corrige cidade/UF do pagador pelo CEP.
  * ViaCEP primeiro; BrasilAPI como fallback (Vercel às vezes falha no ViaCEP).
- * Evita boleto com CEP de uma cidade e nome de outra (ex.: CEP 13456-664 + Goiânia).
+ * Evita boleto com CEP de uma cidade e nome de outra (ex.: CEP 13450-350 + Goiânia).
  */
 
 function onlyDigits(s) {
@@ -86,40 +86,44 @@ async function consultarViaCep(cepDigits) {
 }
 
 /**
- * Se o CEP resolver e a cidade/UF do cadastro divergirem (ou estiverem vazias), usa a do CEP.
- * Assim o Sicoob recebe "Santa Bárbara d'Oeste" mesmo se o cadastro ainda tiver "Goiânia".
+ * Sempre alinha cidade/UF ao CEP quando a consulta resolver.
+ * @param {{ obrigatorio?: boolean }} opts — se true e o CEP for válido mas a consulta falhar, lança erro
+ *   (usado na emissão Sicoob para não registrar de novo com Goiânia).
  */
-async function enriquecerClienteComCep(cliente) {
+async function enriquecerClienteComCep(cliente, opts = {}) {
   if (!cliente || typeof cliente !== 'object') return { cliente, corrigiu: false, viaCep: null };
-  const via = await consultarViaCep(cliente.cep);
-  if (!via) return { cliente, corrigiu: false, viaCep: null };
+  const cepDigits = onlyDigits(cliente.cep).padStart(8, '0').slice(0, 8);
+  const via = await consultarViaCep(cepDigits);
+  if (!via) {
+    if (opts.obrigatorio && cepDigits.length === 8) {
+      throw new Error(
+        `Não consegui confirmar a cidade pelo CEP ${cepDigits}. ` +
+          'Confira o CEP no cadastro do cliente e tente emitir de novo.',
+      );
+    }
+    return { cliente, corrigiu: false, viaCep: null };
+  }
 
   const cidadeAtual = String(cliente.cidade ?? '').trim();
   const ufAtual = String(cliente.estado ?? cliente.uf ?? '')
     .trim()
     .toUpperCase()
     .slice(0, 2);
-  const cidadeDivergente =
-    Boolean(cidadeAtual) && textoNorm(cidadeAtual) !== textoNorm(via.localidade);
-  const cidadeVazia = !cidadeAtual;
-  const ufDivergente = Boolean(via.uf) && Boolean(ufAtual) && ufAtual !== via.uf;
-  const ufVazia = !ufAtual;
-
-  if (!cidadeDivergente && !cidadeVazia && !ufDivergente && !ufVazia) {
-    return { cliente, corrigiu: false, viaCep: via };
-  }
+  const cidadeMudou = textoNorm(cidadeAtual) !== textoNorm(via.localidade);
+  const ufMudou = Boolean(via.uf) && ufAtual !== via.uf;
+  const corrigiu = cidadeMudou || ufMudou || !cidadeAtual || !ufAtual;
 
   const next = {
     ...cliente,
+    // Sempre a cidade/UF do CEP — nunca confiar em Goiânia (ou outro município) divergente no cadastro.
     cidade: via.localidade,
     estado: via.uf || cliente.estado || cliente.uf || 'SP',
     uf: via.uf || cliente.uf || cliente.estado || 'SP',
   };
-  // Bairro/logradouro do CEP só se o cadastro estiver vazio (não apaga o número do imóvel).
   if (!String(next.bairro ?? '').trim() && via.bairro) next.bairro = via.bairro;
   if (!String(next.logradouro ?? '').trim() && via.logradouro) next.logradouro = via.logradouro;
 
-  return { cliente: next, corrigiu: true, viaCep: via };
+  return { cliente: next, corrigiu, viaCep: via };
 }
 
 /** Persiste cidade/UF corrigidas no cadastro do cliente (não sobrescreve o resto). */

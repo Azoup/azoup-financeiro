@@ -195,7 +195,7 @@ async function emitirUmBoletoC6(admin, userId, boletoId, emitenteIdHint, opts = 
 
   const { data: clienteRaw, error: cliErr } = await admin.from('clientes').select('*').eq('id', clienteId).single();
   if (cliErr || !clienteRaw) throw new Error(cliErr?.message ?? 'Cliente não encontrado.');
-  const { cliente, corrigiu } = await enriquecerClienteComCep(clienteRaw);
+  const { cliente, corrigiu } = await enriquecerClienteComCep(clienteRaw, { obrigatorio: true });
   await persistirCidadeClienteSeCorrigida(admin, clienteId, clienteRaw, cliente, corrigiu);
   await sincronizarPagadorNoBoleto(admin, boletoId, cliente);
 

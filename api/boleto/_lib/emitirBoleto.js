@@ -2,6 +2,8 @@ const { getAdmin, getUserFromBearer } = require('../../nfe/_lib/supabaseAdmin');
 const { decryptCertPassword } = require('../../nfe/_lib/crypto');
 const { resolveCertificadoAtivo } = require('./sicoobCredentials');
 const {
+  alterarPagadorSicoobApi,
+  buildPagadorFromCliente,
   buildSicoobPayload,
   cleanupCert,
   downloadCertToTemp,
@@ -304,7 +306,8 @@ async function emitirUmBoleto(admin, userId, boletoId) {
 
   const { data: clienteRaw, error: cliErr } = await admin.from('clientes').select('*').eq('id', clienteId).single();
   if (cliErr || !clienteRaw) throw new Error(cliErr?.message ?? 'Cliente não encontrado.');
-  const { cliente, corrigiu } = await enriquecerClienteComCep(clienteRaw);
+  // Cidade SEMPRE pelo CEP (obrigatório) — evita PDF Sicoob com Goiânia e CEP de SP.
+  const { cliente, corrigiu } = await enriquecerClienteComCep(clienteRaw, { obrigatorio: true });
   await persistirCidadeClienteSeCorrigida(admin, clienteId, clienteRaw, cliente, corrigiu);
   await sincronizarPagadorNoBoleto(admin, boletoId, cliente);
 
@@ -326,6 +329,18 @@ async function emitirUmBoleto(admin, userId, boletoId) {
 
   const certPath = await downloadCertToTemp(admin, cert.storage_path);
   const senha = await decryptCertPassword(admin, sec.senha_criptografada);
+
+  // Alinha cadastro mestre do pagador no Sicoob ANTES do POST (PDF usa dados do banco).
+  try {
+    await alterarPagadorSicoobApi({
+      config,
+      certPath,
+      senha,
+      pagador: buildPagadorFromCliente(cliente),
+    });
+  } catch (e) {
+    console.warn('[emitir-sicoob] PUT /pagadores:', e?.message || e);
+  }
 
   const adotar = async (jaNoBanco, payload, quantidade) => {
     const updateRow = {
