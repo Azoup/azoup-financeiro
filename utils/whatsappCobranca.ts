@@ -55,8 +55,8 @@ export function formatWhatsAppDisplay(raw: string): string {
 
 /**
  * WhatsApp:
- * - Não atrasado → texto amigável (“Olá! Tudo bem?…”).
- * - Atrasado → “Segue o boleto…” com valor original, multa, juros e valor hoje.
+ * - Em aberto (vencimento ainda não passou) → “Segue o boleto…” com os campos do boleto.
+ * - Atrasado → texto amigável de pendência (“Olá! Tudo bem?…”).
  */
 export function buildMensagemCobrancaWhatsapp(
   row: Pick<
@@ -74,12 +74,12 @@ export function buildMensagemCobrancaWhatsapp(
 ): string {
   const encargos = calcularEncargosBoleto(row.valor_documento, row.data_vencimento);
 
-  // Ainda no prazo: mensagem amigável.
-  if (!encargos.vencido) {
+  // Atrasado: texto amigável de pendência.
+  if (encargos.vencido) {
     return mensagemPendenciaBoleto(row.data_vencimento);
   }
 
-  // Atrasado: cobrança com multa/juros (texto enviado pelo negócio).
+  // Em aberto: “Segue o boleto…” com os campos (multa/juros zerados enquanto no prazo).
   const venc = formatBRDate(parseISODate(row.data_vencimento)) || row.data_vencimento;
   const cliente = safeTrim(row.nome_cliente) || 'cliente';
   const beneficiario =
