@@ -516,4 +516,95 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
   });
 }
 
-module.exports = { emitirNfseSefaz };
+/**
+ * Recupera NFS-e já autorizada no ADN sem reenviar DPS (evita duplicar após L985).
+ * Usado em Reemitir / L1260 quando a nota local ainda está rejeitada/processando.
+ */
+async function tentarRecuperarNfseDoAdn({ admin, nota, itens, perfil, cliente, config, cert, senhaEnc }) {
+  try {
+    const ambiente = 1;
+    const optanteSimples = isOptanteSimplesNacional(config);
+    const gateway = resolveNfseGateway(config.codigo_ibge_emitente, ambiente, {
+      config,
+      optanteSimples,
+    });
+    if (gateway.mode !== 'nacional' && gateway.mode !== 'municipal') {
+      return { success: false, message: 'Recuperação ADN só no SEFIN/ADN.' };
+    }
+
+    const layout = await buildNFSeLayout({ nota, itens, perfil, cliente, config });
+    return withHomologTlsRelaxed(async () => {
+      const { wizard, certPath } = await createNfseWizard({
+        admin,
+        cert,
+        senhaEnc,
+        perfil,
+        ambiente,
+        ibge: config.codigo_ibge_emitente,
+        gatewayOpts: { config, optanteSimples },
+      });
+      try {
+        const protocoloHint =
+          String(nota.protocolo_autorizacao || '').replace(/\D/g, '') ||
+          extrairProtocoloFila(nota.motivo_rejeicao) ||
+          null;
+        // Uma tentativa rápida + algumas esperas curtas (nota pode ter acabado de autorizar).
+        const idDps = buildIdDps(layout, perfil);
+        for (let i = 0; i < 4; i += 1) {
+          if (i > 0) await esperar(2000);
+          try {
+            const cons = await wizard.ConsultaDPS({ id: idDps });
+            const chave =
+              cons?.chaveAcesso ??
+              cons?.response?.chaveAcesso ??
+              cons?.chNFSe ??
+              cons?.response?.chNFSe ??
+              null;
+            if (!chave) continue;
+
+            let xmlProc = extrairXml(cons);
+            let codigoVerificacao =
+              cons?.codigoVerificacao ?? cons?.response?.codigoVerificacao ?? null;
+            try {
+              const nfse = await wizard.Consulta({ chaveAcesso: chave });
+              xmlProc = extrairXml(nfse) || xmlProc;
+              codigoVerificacao =
+                nfse?.codigoVerificacao ?? nfse?.response?.codigoVerificacao ?? codigoVerificacao;
+            } catch {
+              /* xml opcional */
+            }
+
+            return {
+              success: true,
+              status: '100',
+              chave_acesso: chave,
+              protocolo_autorizacao: protocoloHint,
+              codigo_verificacao: codigoVerificacao,
+              xml_autorizado: xmlProc,
+              message: 'NFS-e recuperada do ADN (já estava autorizada; não reemitimos).',
+            };
+          } catch (e) {
+            console.warn('[nfse] recuperar ADN', i + 1, e?.message || e);
+          }
+        }
+        return {
+          success: false,
+          message: `DPS ${idDps} ainda não autorizada no ADN.`,
+        };
+      } finally {
+        cleanupCert(certPath);
+      }
+    });
+  } catch (e) {
+    return {
+      success: false,
+      message: e?.message || String(e),
+    };
+  }
+}
+
+module.exports = {
+  emitirNfseSefaz,
+  tentarRecuperarNfseDoAdn,
+  isFilaProcessamentoAdn,
+};

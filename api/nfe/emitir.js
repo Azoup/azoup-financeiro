@@ -1,5 +1,5 @@
 const { getAdmin, getUserFromBearer } = require('./_lib/supabaseAdmin');
-const { emitirNfseSefaz } = require('./_lib/nfseEmit');
+const { emitirNfseSefaz, tentarRecuperarNfseDoAdn, isFilaProcessamentoAdn } = require('./_lib/nfseEmit');
 const { isRpsChaveDuplicadaAdn, humanizeNfseRejection } = require('./_lib/nfseErrors');
 const { prepareServerlessCryptoEnv } = require('./_lib/serverlessEnv');
 const { resolveEmitenteContexto } = require('./_lib/nfseEmitenteResolve');
@@ -136,18 +136,63 @@ module.exports = async function handler(req, res) {
     }
 
     let notaAtual = nota;
-    const emitir = () =>
-      emitirNfseSefaz({
-        admin,
-        nota: notaAtual,
-        itens,
-        pagamentos: pagamentos ?? [],
-        perfil,
-        cliente,
-        config,
-        cert,
-        senhaEnc: sec.senha_criptografada,
-      });
+    const argsEmit = () => ({
+      admin,
+      nota: notaAtual,
+      itens,
+      pagamentos: pagamentos ?? [],
+      perfil,
+      cliente,
+      config,
+      cert,
+      senhaEnc: sec.senha_criptografada,
+    });
+    const emitir = () => emitirNfseSefaz(argsEmit());
+
+    // Antes de reenviar: se L985/fila ou rejeitada sem chave, tenta só consultar o ADN
+    // (evita segunda NFS-e do mesmo serviço).
+    const motivoAntes = String(nota.motivo_rejeicao ?? '');
+    const deveConsultarAntes =
+      !nota.chave_acesso &&
+      (nota.status === 'rejeitada' ||
+        nota.status === 'processando' ||
+        isFilaProcessamentoAdn(motivoAntes));
+    if (deveConsultarAntes) {
+      console.info('[nfse] consultando ADN antes de reemitir', nota.serie, nota.numero);
+      const recuperada = await tentarRecuperarNfseDoAdn(argsEmit());
+      if (recuperada.success) {
+        await admin
+          .from('nota_fiscal')
+          .update({
+            status: 'autorizada',
+            status_sefaz: recuperada.status,
+            chave_acesso: recuperada.chave_acesso,
+            protocolo_autorizacao: recuperada.protocolo_autorizacao,
+            xml_autorizado: recuperada.xml_autorizado,
+            codigo_verificacao: recuperada.codigo_verificacao ?? null,
+            tipo_documento: 'nfse',
+            ambiente: 1,
+            motivo_rejeicao: null,
+            emitente_id: nota.emitente_id || emitCtx.emitente?.id || null,
+          })
+          .eq('id', notaFiscalId);
+        try {
+          recuperada.email = await tentarEnviarEmailDanfe(admin, {
+            nota: {
+              ...notaAtual,
+              codigo_verificacao: recuperada.codigo_verificacao ?? notaAtual.codigo_verificacao,
+            },
+            cliente,
+            danfeStoragePath: null,
+            xml: recuperada.xml_autorizado,
+            danfeUrl: null,
+          });
+        } catch {
+          /* e-mail opcional */
+        }
+        return res.status(200).json(recuperada);
+      }
+    }
 
     let result;
     for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
@@ -167,21 +212,27 @@ module.exports = async function handler(req, res) {
       await esperar(2000 * tentativa);
     }
 
-    // L1260/L1268: o RPS já está no ADN. Reenviar o mesmo número falha de novo.
+    // L1260/L1268: RPS já no ADN — primeiro recupera; só realoca se a consulta falhar.
     if (!result.success && isRpsChaveDuplicadaAdn(result.message)) {
-      console.warn(
-        '[nfse] RPS/chave já existe no ADN — realocando número',
-        notaAtual.serie,
-        notaAtual.numero,
-      );
-      notaAtual = await realocarNumeroRps(admin, {
-        userId: user.id,
-        nota: notaAtual,
-        emitenteId: nota.emitente_id || emitCtx.emitente?.id || null,
-      });
-      result = await emitir();
-      if (result.success) {
-        result.message = `NFS-e autorizada com RPS ${notaAtual.numero} (o número anterior já existia no ADN).`;
+      console.warn('[nfse] RPS/chave já existe — tentando recuperar do ADN', notaAtual.numero);
+      const recuperada = await tentarRecuperarNfseDoAdn(argsEmit());
+      if (recuperada.success) {
+        result = recuperada;
+      } else {
+        console.warn(
+          '[nfse] não achou DPS no ADN — realocando número',
+          notaAtual.serie,
+          notaAtual.numero,
+        );
+        notaAtual = await realocarNumeroRps(admin, {
+          userId: user.id,
+          nota: notaAtual,
+          emitenteId: nota.emitente_id || emitCtx.emitente?.id || null,
+        });
+        result = await emitir();
+        if (result.success) {
+          result.message = `NFS-e autorizada com RPS ${notaAtual.numero} (o número anterior já existia no ADN).`;
+        }
       }
     }
 
