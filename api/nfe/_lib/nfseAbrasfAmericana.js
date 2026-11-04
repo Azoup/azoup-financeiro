@@ -9,7 +9,6 @@ const https = require('https');
 const forge = require('node-forge');
 const { SignedXml } = require('xml-crypto');
 const { resolveIbgeMunicipioPorCep } = require('./buildNFSeFromDb');
-const { resolveIbgeMunicipioPorCep } = require('./buildNFSeFromDb');
 
 const NS_ABRASF = 'http://www.abrasf.org.br/nfse.xsd';
 const NS_SOAP_OP = 'http://nfse.abrasf.org.br/';
