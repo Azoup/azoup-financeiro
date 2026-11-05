@@ -516,10 +516,31 @@ async function emitirNfseSefaz({ admin, nota, itens, perfil, cliente, config, ce
   });
 }
 
+/** Documento do tomador no XML da NFS-e (evita colar chave de outro RPS/cliente). */
+function extrairDocTomadorXml(xml) {
+  const s = String(xml ?? '');
+  if (!s) return null;
+  const bloco =
+    s.match(/<(?:toma|tomador|Tomador)[^>]*>[\s\S]*?<\/(?:toma|tomador|Tomador)>/i)?.[0] || s;
+  const cnpj = bloco.match(/<CNPJ>\s*(\d{14})\s*<\/CNPJ>/i)?.[1];
+  if (cnpj) return cnpj;
+  const cpf = bloco.match(/<CPF>\s*(\d{11})\s*<\/CPF>/i)?.[1];
+  return cpf || null;
+}
+
+function docClienteEsperado(cliente) {
+  const raw = String(
+    cliente?.cnpj || cliente?.cpf_cnpj || cliente?.documento || cliente?.cpf || '',
+  ).replace(/\D/g, '');
+  if (raw.length === 11 || raw.length === 14) return raw;
+  return null;
+}
+
 /**
  * Recupera NFS-e já autorizada no ADN sem reenviar DPS (evita duplicar após L985).
  * Usado em Reemitir / L1260 quando a nota local ainda está rejeitada/processando.
- * Também tenta o RPS anterior (reemit antigo trocava o número e a DPS ficava no n-1).
+ * Tenta o RPS atual e alguns anteriores (reemit antigo trocava o número),
+ * validando o tomador no XML para não vincular nota de outro cliente.
  */
 async function tentarRecuperarNfseDoAdn({ admin, nota, itens, perfil, cliente, config, cert, senhaEnc }) {
   try {
@@ -534,8 +555,11 @@ async function tentarRecuperarNfseDoAdn({ admin, nota, itens, perfil, cliente, c
     }
 
     const nAtual = Number(nota.numero) || 0;
-    const candidatos = [nAtual];
-    if (nAtual > 1) candidatos.push(nAtual - 1);
+    const candidatos = [];
+    for (let n = nAtual; n >= Math.max(1, nAtual - 12); n -= 1) {
+      candidatos.push(n);
+    }
+    const docEsperado = docClienteEsperado(cliente);
 
     return withHomologTlsRelaxed(async () => {
       const { wizard, certPath } = await createNfseWizard({
@@ -565,8 +589,8 @@ async function tentarRecuperarNfseDoAdn({ admin, nota, itens, perfil, cliente, c
           const idDps = buildIdDps(layout, perfil);
           console.info('[nfse] recuperar ADN — DPS', idDps);
 
-          for (let i = 0; i < 3; i += 1) {
-            if (i > 0) await esperar(2000);
+          for (let i = 0; i < 2; i += 1) {
+            if (i > 0) await esperar(1500);
             try {
               const cons = await wizard.ConsultaDPS({ id: idDps });
               const chave =
@@ -589,12 +613,28 @@ async function tentarRecuperarNfseDoAdn({ admin, nota, itens, perfil, cliente, c
                 /* xml opcional */
               }
 
-              // Se achou no RPS anterior, realinha o número local à DPS do ADN.
+              // RPS diferente: só aceita se o tomador do XML bater com o cliente da nota local.
+              if (nCand !== nAtual && docEsperado) {
+                const docXml = extrairDocTomadorXml(xmlProc);
+                if (docXml && docXml !== docEsperado) {
+                  console.warn(
+                    '[nfse] recuperar ADN — RPS',
+                    nCand,
+                    'é de outro tomador; ignorando',
+                    docXml,
+                    '!=',
+                    docEsperado,
+                  );
+                  break;
+                }
+                if (!docXml) {
+                  console.warn('[nfse] recuperar ADN — sem tomador no XML do RPS', nCand, '; ignorando');
+                  break;
+                }
+              }
+
               if (nCand !== nAtual && admin && nota.id) {
-                await admin
-                  .from('nota_fiscal')
-                  .update({ numero: nCand })
-                  .eq('id', nota.id);
+                await admin.from('nota_fiscal').update({ numero: nCand }).eq('id', nota.id);
               }
 
               return {
@@ -616,7 +656,8 @@ async function tentarRecuperarNfseDoAdn({ admin, nota, itens, perfil, cliente, c
         }
         return {
           success: false,
-          message: `DPS ainda não autorizada no ADN (RPS ${candidatos.join(' / ')}).`,
+          pending: true,
+          message: `DPS ainda não autorizada no ADN (RPS ${candidatos.slice(0, 5).join(' / ')}…).`,
         };
       } finally {
         cleanupCert(certPath);

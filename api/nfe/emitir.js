@@ -96,13 +96,10 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // Marca processando no servidor. Em qualquer falha/timeout gravamos rejeitada
-    // para a tela não ficar presa em "Processando".
-    await admin
-      .from('nota_fiscal')
-      .update({ status: 'processando', motivo_rejeicao: null })
-      .eq('id', notaFiscalId)
-      .eq('user_id', user.id);
+    const somenteConsulta =
+      req.body?.somenteConsulta === true ||
+      req.body?.acao === 'consultar' ||
+      String(req.body?.acao || '').toLowerCase() === 'consultar';
 
     const [{ data: itens }, { data: pagamentos }, { data: cliente }, emitCtx] = await Promise.all([
       admin.from('nota_fiscal_item').select('*').eq('nota_fiscal_id', notaFiscalId),
@@ -149,6 +146,82 @@ module.exports = async function handler(req, res) {
     });
     const emitir = () => emitirNfseSefaz(argsEmit());
 
+    const gravarAutorizada = async (recuperada) => {
+      await admin
+        .from('nota_fiscal')
+        .update({
+          status: 'autorizada',
+          status_sefaz: recuperada.status,
+          chave_acesso: recuperada.chave_acesso,
+          protocolo_autorizacao: recuperada.protocolo_autorizacao,
+          xml_autorizado: recuperada.xml_autorizado,
+          codigo_verificacao: recuperada.codigo_verificacao ?? null,
+          tipo_documento: 'nfse',
+          ambiente: 1,
+          motivo_rejeicao: null,
+          emitente_id: nota.emitente_id || emitCtx.emitente?.id || null,
+        })
+        .eq('id', notaFiscalId);
+      try {
+        recuperada.email = await tentarEnviarEmailDanfe(admin, {
+          nota: {
+            ...notaAtual,
+            codigo_verificacao: recuperada.codigo_verificacao ?? notaAtual.codigo_verificacao,
+          },
+          cliente,
+          danfeStoragePath: null,
+          xml: recuperada.xml_autorizado,
+          danfeUrl: null,
+        });
+      } catch {
+        /* e-mail opcional */
+      }
+      return recuperada;
+    };
+
+    // Somente consulta ADN (sem reenviar DPS) — usado para sincronizar L985 já autorizadas.
+    if (somenteConsulta) {
+      console.info('[nfse] somente consulta ADN', nota.serie, nota.numero);
+      const recuperada = await tentarRecuperarNfseDoAdn(argsEmit());
+      if (recuperada.success) {
+        await gravarAutorizada(recuperada);
+        return res.status(200).json(recuperada);
+      }
+      // Corrige status antigo gravado errado como "rejeitada" por L985.
+      if (
+        nota.status === 'rejeitada' &&
+        (isFilaProcessamentoAdn(nota.motivo_rejeicao) || isFilaProcessamentoAdn(nota.status_sefaz))
+      ) {
+        await admin
+          .from('nota_fiscal')
+          .update({
+            status: 'processando',
+            status_sefaz: 'L985',
+            motivo_rejeicao:
+              recuperada.message ||
+              nota.motivo_rejeicao ||
+              'Aguardando processamento no ADN (L985).',
+          })
+          .eq('id', notaFiscalId)
+          .eq('user_id', user.id);
+      }
+      return res.status(202).json({
+        success: false,
+        pending: true,
+        status: 'L985',
+        message:
+          recuperada.message ||
+          'NFS-e ainda não encontrada no ADN. Aguarde e consulte de novo.',
+      });
+    }
+
+    // Marca processando no servidor.
+    await admin
+      .from('nota_fiscal')
+      .update({ status: 'processando', motivo_rejeicao: null })
+      .eq('id', notaFiscalId)
+      .eq('user_id', user.id);
+
     // Antes de reenviar: se L985/fila ou rejeitada sem chave, tenta só consultar o ADN
     // (evita segunda NFS-e do mesmo serviço).
     const motivoAntes = String(nota.motivo_rejeicao ?? '');
@@ -161,35 +234,7 @@ module.exports = async function handler(req, res) {
       console.info('[nfse] consultando ADN antes de reemitir', nota.serie, nota.numero);
       const recuperada = await tentarRecuperarNfseDoAdn(argsEmit());
       if (recuperada.success) {
-        await admin
-          .from('nota_fiscal')
-          .update({
-            status: 'autorizada',
-            status_sefaz: recuperada.status,
-            chave_acesso: recuperada.chave_acesso,
-            protocolo_autorizacao: recuperada.protocolo_autorizacao,
-            xml_autorizado: recuperada.xml_autorizado,
-            codigo_verificacao: recuperada.codigo_verificacao ?? null,
-            tipo_documento: 'nfse',
-            ambiente: 1,
-            motivo_rejeicao: null,
-            emitente_id: nota.emitente_id || emitCtx.emitente?.id || null,
-          })
-          .eq('id', notaFiscalId);
-        try {
-          recuperada.email = await tentarEnviarEmailDanfe(admin, {
-            nota: {
-              ...notaAtual,
-              codigo_verificacao: recuperada.codigo_verificacao ?? notaAtual.codigo_verificacao,
-            },
-            cliente,
-            danfeStoragePath: null,
-            xml: recuperada.xml_autorizado,
-            danfeUrl: null,
-          });
-        } catch {
-          /* e-mail opcional */
-        }
+        await gravarAutorizada(recuperada);
         return res.status(200).json(recuperada);
       }
     }
@@ -313,18 +358,22 @@ module.exports = async function handler(req, res) {
     if (notaFiscalId) {
       try {
         const admin = getAdmin();
+        const fila = isFilaProcessamentoAdn(message) || isFilaProcessamentoAdn(raw);
         await admin
           .from('nota_fiscal')
           .update({
-            status: 'rejeitada',
+            status: fila ? 'processando' : 'rejeitada',
             motivo_rejeicao: message,
-            status_sefaz: 'ERR',
+            status_sefaz: fila ? 'L985' : 'ERR',
           })
           .eq('id', notaFiscalId)
           .eq('status', 'processando');
       } catch (upErr) {
-        console.warn('[nfse] não gravou rejeitada após erro:', upErr?.message ?? upErr);
+        console.warn('[nfse] não gravou status após erro:', upErr?.message ?? upErr);
       }
+    }
+    if (isFilaProcessamentoAdn(message) || isFilaProcessamentoAdn(raw)) {
+      return res.status(202).json({ success: false, pending: true, status: 'L985', message });
     }
     return res.status(500).json({ success: false, message });
   }

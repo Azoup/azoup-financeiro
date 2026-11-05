@@ -16,6 +16,7 @@ import type {
 } from '@/types/notaFiscal';
 import { AMBIENTE_FISCAL_ATUAL } from '@/types/notaFiscal';
 import { CLIENTE_EMBED_SELECT, mapClienteEnderecoFiscal, mapClienteJoinEmbed } from '@/utils/clientesDbMapping';
+import { isFilaProcessamentoAdn } from '@/utils/nfeStatus';
 
 type MensalidadeNfInput = {
   id: string;
@@ -740,15 +741,20 @@ export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emiti
     const aborted =
       (e as { name?: string })?.name === 'AbortError' ||
       /aborted|abort/i.test(String((e as Error).message ?? ''));
+    // Timeout ≠ rejeição: a DPS pode ter ido para a fila do ADN (L985) no servidor.
     const msg = aborted
-      ? 'Tempo esgotado ao emitir NFS-e. A nota saiu de Processando — use Reemitir se ainda não estiver autorizada.'
+      ? 'Tempo esgotado na emissão. A NFS-e pode estar na fila do ADN (L985) — use Consultar ADN / Reemitir em alguns minutos (não gera nota duplicada).'
       : (e as Error).message || 'Falha de rede ao contactar a API de emissão.';
     await supabase
       .from('nota_fiscal')
-      .update({ status: 'rejeitada', motivo_rejeicao: msg })
+      .update({
+        status: 'processando',
+        status_sefaz: aborted ? 'L985' : null,
+        motivo_rejeicao: msg,
+      })
       .eq('id', notaFiscalId)
       .eq('status', 'processando');
-    return { success: false, message: msg };
+    return { success: false, pending: aborted, message: msg };
   }
 
   const rawText = await res.text().catch(() => '');
@@ -811,12 +817,22 @@ export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emiti
         message: 'NFS-e autorizada (resposta tardia da API).',
       };
     }
+    const fila = isFilaProcessamentoAdn(msg) || isFilaProcessamentoAdn(body.status);
     await supabase
       .from('nota_fiscal')
-      .update({ status: 'rejeitada', motivo_rejeicao: msg, status_sefaz: body.status ?? null })
+      .update({
+        status: fila ? 'processando' : 'rejeitada',
+        motivo_rejeicao: msg,
+        status_sefaz: body.status ?? (fila ? 'L985' : null),
+      })
       .eq('id', notaFiscalId)
       .eq('status', 'processando');
-    return { success: false, message: msg, status: body.status };
+    return {
+      success: false,
+      pending: fila || undefined,
+      message: msg,
+      status: body.status,
+    };
   }
 
   // Reforço: se a API autorizou, garante status final no cliente.
@@ -849,6 +865,116 @@ export async function emitirNotaFiscalSefaz(notaFiscalId: string): Promise<Emiti
   }
 
   return body;
+}
+
+/**
+ * Consulta o ADN sem reenviar DPS. Usa para L985 já autorizadas na prefeitura
+ * mas ainda "rejeitada/processando" no Azoup.
+ */
+export async function consultarNotaFiscalAdn(notaFiscalId: string): Promise<EmitirNfeResult> {
+  const { data: session } = await supabase.auth.getSession();
+  const token = session.session?.access_token;
+  if (!token) throw new Error('Sessão expirada. Faça login novamente.');
+
+  const base = nfeApiBaseUrl();
+  if (!base) {
+    throw new Error('URL da API NFS-e não configurada (EXPO_PUBLIC_NFE_API_URL ou origem web).');
+  }
+
+  const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = ac ? setTimeout(() => ac.abort(), 55_000) : null;
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/nfe/emitir`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ notaFiscalId, somenteConsulta: true }),
+      signal: ac?.signal,
+    });
+  } catch (e) {
+    const aborted =
+      (e as { name?: string })?.name === 'AbortError' ||
+      /aborted|abort/i.test(String((e as Error).message ?? ''));
+    return {
+      success: false,
+      pending: true,
+      message: aborted
+        ? 'Consulta ao ADN demorou. Tente de novo em instantes.'
+        : (e as Error).message || 'Falha de rede na consulta ADN.',
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+
+  const rawText = await res.text().catch(() => '');
+  let body = {} as EmitirNfeResult & { error?: string };
+  if (rawText.trim()) {
+    try {
+      body = JSON.parse(rawText) as typeof body;
+    } catch {
+      body = { success: false, message: rawText.slice(0, 400) };
+    }
+  }
+
+  if (body.success && body.chave_acesso) {
+    await supabase
+      .from('nota_fiscal')
+      .update({
+        status: 'autorizada',
+        status_sefaz: body.status ?? '100',
+        chave_acesso: body.chave_acesso,
+        protocolo_autorizacao: body.protocolo_autorizacao ?? null,
+        codigo_verificacao: body.codigo_verificacao ?? null,
+        motivo_rejeicao: null,
+      })
+      .eq('id', notaFiscalId);
+  } else if (body.pending || res.status === 202 || isFilaProcessamentoAdn(body.message)) {
+    await supabase
+      .from('nota_fiscal')
+      .update({
+        status: 'processando',
+        status_sefaz: 'L985',
+        motivo_rejeicao: body.message ?? 'Aguardando processamento no ADN (L985).',
+      })
+      .eq('id', notaFiscalId)
+      .in('status', ['rejeitada', 'processando']);
+  }
+
+  return {
+    success: Boolean(body.success),
+    pending: body.pending || res.status === 202 || undefined,
+    status: body.status,
+    chave_acesso: body.chave_acesso,
+    message: body.message ?? body.error,
+  };
+}
+
+/** Sincroniza notas locais com L985/fila — só consulta ADN, não reemite. */
+export async function sincronizarNotasFilaAdn(
+  notas: { id: string; status: string; motivo_rejeicao?: string | null; status_sefaz?: string | null }[],
+): Promise<{ recuperadas: number; pendentes: number }> {
+  const alvos = notas.filter(
+    (n) =>
+      !['autorizada', 'cancelada'].includes(n.status) &&
+      (n.status === 'processando' ||
+        isFilaProcessamentoAdn(n.motivo_rejeicao) ||
+        isFilaProcessamentoAdn(n.status_sefaz)),
+  );
+  let recuperadas = 0;
+  let pendentes = 0;
+  for (const n of alvos.slice(0, 12)) {
+    try {
+      const res = await consultarNotaFiscalAdn(n.id);
+      if (res.success) recuperadas += 1;
+      else pendentes += 1;
+    } catch {
+      pendentes += 1;
+    }
+  }
+  return { recuperadas, pendentes };
 }
 
 export async function cancelarNotaFiscalSefaz(

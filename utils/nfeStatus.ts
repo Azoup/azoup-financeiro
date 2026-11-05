@@ -1,5 +1,30 @@
 import { safeTrim } from '@/utils/safeTrim';
 
+/** L985/AL986: ADN aceitou o lote em fila — não é rejeição fiscal. */
+export function isFilaProcessamentoAdn(message: string | null | undefined): boolean {
+  return /L985|AL986|fila de processamento no ADN|aguardando processamento no ADN/i.test(
+    String(message ?? ''),
+  );
+}
+
+/**
+ * Status para exibição: notas gravadas como "rejeitada" só com motivo L985
+ * aparecem como Processando (a DPS já foi para o ADN).
+ */
+export function statusExibicaoNotaFiscal(nota: {
+  status: string;
+  motivo_rejeicao?: string | null;
+  status_sefaz?: string | null;
+}): string {
+  if (
+    nota.status === 'rejeitada' &&
+    (isFilaProcessamentoAdn(nota.motivo_rejeicao) || isFilaProcessamentoAdn(nota.status_sefaz))
+  ) {
+    return 'processando';
+  }
+  return nota.status;
+}
+
 /** Rótulos amigáveis do status interno da NF-e. */
 export function labelNotaFiscalStatus(status: string): string {
   switch (status) {

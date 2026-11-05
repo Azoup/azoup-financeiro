@@ -6,8 +6,10 @@ import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import {
   cancelarNotaFiscalSefaz,
+  consultarNotaFiscalAdn,
   fetchNotasFiscaisLista,
   reemitirNotaFiscalSefaz,
+  sincronizarNotasFilaAdn,
 } from '@/services/notaFiscalService';
 import { emitenteNome, ensureEmitentes } from '@/services/nfseEmitenteService';
 import { colors, radius, spacing } from '@/theme/colors';
@@ -19,16 +21,18 @@ import { labelMesAnoBR } from '@/utils/date';
 import { compartilharDanfseComFeedback } from '@/utils/danfseDocumento';
 import {
   corNotaFiscalStatus,
+  isFilaProcessamentoAdn,
   labelNotaFiscalStatus,
   podeBaixarXmlNfse,
   podeCancelarNotaFiscal,
   podeImprimirDanfe,
   podeReemitirNotaFiscal,
+  statusExibicaoNotaFiscal,
 } from '@/utils/nfeStatus';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -107,6 +111,7 @@ export default function NotasFiscaisIndexScreen() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [acoesNota, setAcoesNota] = useState<NotaFiscalListRow | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
+  const syncFilaRef = useRef(false);
 
   const [statusFilter, setStatusFilter] = useState<StatusFiltro>('todos');
   const [mesFilter, setMesFilter] = useState(mesAtualChave);
@@ -122,14 +127,47 @@ export default function NotasFiscaisIndexScreen() {
     ]);
     setRows(list);
     setEmitentes(ems);
+    return list;
   }, [user?.id]);
+
+  const sincronizarFilaSePreciso = useCallback(
+    async (list: NotaFiscalListRow[], forcar = false) => {
+      if (syncFilaRef.current && !forcar) return;
+      const alvos = list.filter(
+        (r) =>
+          r.status !== 'autorizada' &&
+          r.status !== 'cancelada' &&
+          (r.status === 'processando' ||
+            isFilaProcessamentoAdn(r.motivo_rejeicao) ||
+            isFilaProcessamentoAdn(r.status_sefaz)),
+      );
+      if (!alvos.length) return;
+      syncFilaRef.current = true;
+      try {
+        const { recuperadas } = await sincronizarNotasFilaAdn(alvos);
+        if (recuperadas > 0) {
+          await load();
+          showAppToast(
+            'success',
+            recuperadas === 1
+              ? '1 NFS-e sincronizada do ADN.'
+              : `${recuperadas} NFS-e sincronizadas do ADN.`,
+          );
+        }
+      } catch {
+        /* silencioso — usuário pode Consultar ADN manualmente */
+      }
+    },
+    [load],
+  );
 
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true);
       try {
-        await load();
+        const list = await load();
+        if (alive && list) void sincronizarFilaSePreciso(list);
       } catch (e) {
         if (alive) Toast.show({ type: 'error', text1: (e as Error).message });
       } finally {
@@ -139,7 +177,7 @@ export default function NotasFiscaisIndexScreen() {
     return () => {
       alive = false;
     };
-  }, [load]);
+  }, [load, sincronizarFilaSePreciso]);
 
   useFocusEffect(
     useCallback(() => {
@@ -151,20 +189,22 @@ export default function NotasFiscaisIndexScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await load();
+      const list = await load();
+      if (list) await sincronizarFilaSePreciso(list, true);
     } catch (e) {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setRefreshing(false);
     }
-  }, [load]);
+  }, [load, sincronizarFilaSePreciso]);
 
   const filtered = useMemo(() => {
     const term = debouncedCliente.trim().toLowerCase();
     return rows.filter((r) => {
       if (!matchEmpresa(r.emitente_id, r.emitente?.id)) return false;
       if (mesFilter !== 'todos' && mesChaveNota(r) !== mesFilter) return false;
-      if (statusFilter !== 'todos' && r.status !== statusFilter) return false;
+      // L985 gravada como "rejeitada" entra no filtro Processando.
+      if (statusFilter !== 'todos' && statusExibicaoNotaFiscal(r) !== statusFilter) return false;
       if (emitenteFilter !== 'todos') {
         const eid = r.emitente_id ?? r.emitente?.id ?? '';
         if (eid !== emitenteFilter) return false;
@@ -183,7 +223,7 @@ export default function NotasFiscaisIndexScreen() {
     const c: Record<string, number> = { todos: rows.length };
     for (const o of STATUS_OPTS) {
       if (o.id === 'todos') continue;
-      c[o.id] = rows.filter((r) => r.status === o.id).length;
+      c[o.id] = rows.filter((r) => statusExibicaoNotaFiscal(r) === o.id).length;
     }
     return c;
   }, [rows]);
@@ -339,7 +379,7 @@ export default function NotasFiscaisIndexScreen() {
         showAppToast(
           'info',
           'NFS-e na fila do ADN (L985).',
-          'Não é rejeição. Aguarde alguns minutos e use Reemitir de novo — o sistema só consulta, sem gerar nota duplicada.',
+          'Não é rejeição. Aguarde alguns minutos e use Consultar ADN — o sistema só consulta, sem gerar nota duplicada.',
         );
       } else {
         showAppToast(
@@ -356,10 +396,46 @@ export default function NotasFiscaisIndexScreen() {
     }
   };
 
+  const consultarAdn = async (item: NotaFiscalListRow) => {
+    setReemitBusyId(item.id);
+    try {
+      const res = await consultarNotaFiscalAdn(item.id);
+      if (res.success) {
+        showAppToast('success', 'NFS-e encontrada no ADN e marcada como emitida.');
+      } else if (res.pending) {
+        showAppToast(
+          'info',
+          'Ainda na fila do ADN.',
+          res.message ?? 'Aguarde e consulte de novo em alguns minutos.',
+        );
+      } else {
+        showAppToast('error', res.message ?? 'Não encontrada no ADN.');
+      }
+      await load();
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setReemitBusyId(null);
+    }
+  };
+
   const acoesDaNota = (item: NotaFiscalListRow): AcaoMenuItem[] => {
     const podeDanfe = podeImprimirDanfe(item);
     const podeXml = podeBaixarXmlNfse(item);
     const itens: AcaoMenuItem[] = [];
+    const naFilaAdn =
+      item.status === 'processando' ||
+      isFilaProcessamentoAdn(item.motivo_rejeicao) ||
+      isFilaProcessamentoAdn(item.status_sefaz);
+    if (naFilaAdn && item.status !== 'autorizada') {
+      itens.push({
+        key: 'consultar-adn',
+        label: 'Consultar ADN',
+        icon: 'cloud-download-outline',
+        busy: reemitBusyId === item.id,
+        onPress: () => void consultarAdn(item),
+      });
+    }
     if (podeReemitirNotaFiscal(item)) {
       itens.push({
         key: 'reemitir',
@@ -407,7 +483,8 @@ export default function NotasFiscaisIndexScreen() {
   };
 
   const renderItem = ({ item, index }: { item: NotaFiscalListRow; index: number }) => {
-    const st = corNotaFiscalStatus(item.status);
+    const statusExib = statusExibicaoNotaFiscal(item);
+    const st = corNotaFiscalStatus(statusExib);
     const cli = item.cliente?.nome_cliente ?? '—';
     const podeDanfe = podeImprimirDanfe(item);
     const selecionada = selectedIds.includes(item.id);
@@ -440,7 +517,7 @@ export default function NotasFiscaisIndexScreen() {
           <Text style={styles.cli} numberOfLines={1}>
             {cli}
           </Text>
-          {item.motivo_rejeicao ? (
+          {item.motivo_rejeicao && statusExib !== 'autorizada' ? (
             <Text style={styles.rejeicao} numberOfLines={1}>
               {item.motivo_rejeicao}
             </Text>
@@ -449,7 +526,7 @@ export default function NotasFiscaisIndexScreen() {
         <Text style={styles.colVal}>{formatBRL(item.valor_total)}</Text>
         <View style={[styles.badge, { backgroundColor: st.bg }]}>
           <Text style={[styles.badgeTxt, { color: st.fg }]} numberOfLines={1}>
-            {labelNotaFiscalStatus(item.status)}
+            {labelNotaFiscalStatus(statusExib)}
           </Text>
         </View>
         <Pressable
