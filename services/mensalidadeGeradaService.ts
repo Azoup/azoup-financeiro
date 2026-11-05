@@ -877,6 +877,105 @@ export async function registrarPagamentoMensalidadeGerada(
   }
 }
 
+function statusAbertoPorVencimento(dataVencimento: string): MensalidadeGeradaStatusDb {
+  const hoje = toISODate(new Date());
+  return dataVencimento < hoje ? 'atrasado' : 'pendente';
+}
+
+async function reabrirBoletosMensalidadeAposEstorno(userId: string, mensalidadeId: string): Promise<void> {
+  const { data: bols } = await supabase
+    .from('boletos_parcela_venda')
+    .select('id, linha_digitavel, pdf_url, nosso_numero_banco, c6_boleto_id, tipo_emissao, status_registro')
+    .eq('mensalidade_id', mensalidadeId)
+    .eq('user_id', userId);
+
+  for (const bol of (bols ?? []) as {
+    id: string;
+    linha_digitavel: string | null;
+    pdf_url: string | null;
+    nosso_numero_banco: string | null;
+    c6_boleto_id: string | null;
+    tipo_emissao: string | null;
+    status_registro: string;
+  }[]) {
+    if (bol.status_registro !== 'pago') continue;
+    const registrado =
+      Boolean(bol.linha_digitavel || bol.pdf_url || bol.nosso_numero_banco || bol.c6_boleto_id) &&
+      (bol.tipo_emissao === 'sicoob' || bol.tipo_emissao === 'c6');
+    await supabase
+      .from('boletos_parcela_venda')
+      .update({
+        status_registro: registrado ? 'registrado' : 'pendente',
+        data_liquidacao_sicoob: null,
+      })
+      .eq('id', bol.id)
+      .eq('user_id', userId);
+
+    await supabase.from('historico_boleto_sicoob').insert({
+      boleto_id: bol.id,
+      acao: 'ESTORNO_RECEBIMENTO',
+      usuario_id: userId,
+      detalhes:
+        'Recebimento estornado no sistema. O boleto no banco não é alterado por esta ação (se já liquidou lá, trate no banco).',
+      payload_resposta: null,
+    });
+  }
+}
+
+/**
+ * Estorna o recebimento da mensalidade (volta para em aberto).
+ * Remove histórico de pagamentos_mensalidades e reabre o carnê/boleto no sistema.
+ */
+export async function estornarPagamentoMensalidadeGerada(
+  userId: string,
+  mensalidadeId: string,
+): Promise<void> {
+  const { data: b, error: e0 } = await supabase
+    .from('mensalidades')
+    .select('*')
+    .eq('id', mensalidadeId)
+    .eq('user_id', userId)
+    .single();
+  if (e0 || !b) throw new Error(e0?.message ?? 'Mensalidade não encontrada.');
+  const row = b as MensalidadeGerada;
+  if (row.status === 'cancelado') {
+    throw new Error('Mensalidade cancelada — reative a cobrança antes, se for o caso.');
+  }
+  if (cents(row.valor_pago) <= 0 && descontoCent(row) <= 0 && row.status !== 'pago') {
+    throw new Error('Não há recebimento para estornar nesta mensalidade.');
+  }
+
+  const { error: eDel } = await supabase
+    .from('pagamentos_mensalidades')
+    .delete()
+    .eq('mensalidade_id', mensalidadeId);
+  if (eDel) throw new Error(eDel.message);
+
+  const st = statusAbertoPorVencimento(row.data_vencimento);
+  const { error: e2 } = await supabase
+    .from('mensalidades')
+    .update({
+      valor_pago: 0,
+      desconto: 0,
+      data_pagamento: null,
+      forma_pagamento: null,
+      observacao_pagamento: null,
+      status: st,
+    })
+    .eq('id', mensalidadeId)
+    .eq('user_id', userId);
+  if (e2) throw new Error(e2.message);
+
+  await reabrirBoletosMensalidadeAposEstorno(userId, mensalidadeId);
+}
+
+export function podeEstornarPagamentoMensalidadeGerada(
+  m: Pick<MensalidadeGerada, 'status' | 'valor_pago' | 'desconto'>,
+): boolean {
+  if (m.status === 'cancelado') return false;
+  return m.status === 'pago' || cents(m.valor_pago) > 0 || descontoCent(m) > 0;
+}
+
 /**
  * Cancela o mês da mensalidade (status cancelado, não pago) e marca o carnê/boleto como baixado.
  * Se o boleto estiver registrado no banco (Sicoob/C6), baixa/cancela lá antes — senão não altera o sistema.

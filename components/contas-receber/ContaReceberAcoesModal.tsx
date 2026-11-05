@@ -11,6 +11,7 @@ type Props = {
   item: ContaReceberListRow | null;
   onClose: () => void;
   onPagar: () => void;
+  onEstornarRecebimento?: () => void;
   onAlterarVencimento?: () => void;
   onCancelar?: () => void;
   onReativar?: () => void;
@@ -35,6 +36,7 @@ type Props = {
   whatsBusy?: boolean;
   cancelBusy?: boolean;
   reativarBusy?: boolean;
+  estornarBusy?: boolean;
 };
 
 function origemLabel(origem: ContaReceberListRow['origem']): string {
@@ -96,6 +98,7 @@ export function ContaReceberAcoesModal({
   item,
   onClose,
   onPagar,
+  onEstornarRecebimento,
   onAlterarVencimento,
   onCancelar,
   onReativar,
@@ -120,10 +123,12 @@ export function ContaReceberAcoesModal({
   whatsBusy,
   cancelBusy,
   reativarBusy,
+  estornarBusy,
 }: Props) {
   if (!item) return null;
 
   const aberto = item.situacao_cobranca === 'aberto';
+  const pago = item.situacao_cobranca === 'pago';
   const cancelado = item.situacao_cobranca === 'cancelado';
   const temWhats = Boolean(item.whatsapp?.trim());
   const temEmail = Boolean(item.email?.trim());
@@ -147,6 +152,11 @@ export function ContaReceberAcoesModal({
     (item.tipo_emissao === 'sicoob' && Boolean(item.nosso_numero_banco)) ||
     (item.tipo_emissao === 'c6' && Boolean(item.c6_boleto_id));
   const podeReativar = cancelado && Boolean(onReativar);
+  // Pago integral ou parcial com baixa registrada.
+  const podeEstornar =
+    !cancelado &&
+    Boolean(onEstornarRecebimento) &&
+    (pago || Boolean(item.data_pagamento) || item.status_registro === 'pago');
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -177,6 +187,17 @@ export function ContaReceberAcoesModal({
           <View style={styles.actions}>
             {aberto ? (
               <AcaoRow icon="cash-outline" label="Marcar como pago" onPress={onPagar} accent={colors.orange} />
+            ) : null}
+
+            {podeEstornar ? (
+              <AcaoRow
+                icon="arrow-undo-outline"
+                label={estornarBusy ? 'Estornando…' : 'Cancelar recebimento'}
+                sub="Volta a cobrança para em aberto no sistema (não desfaz liquidação no banco)"
+                onPress={onEstornarRecebimento!}
+                disabled={estornarBusy}
+                busy={estornarBusy}
+              />
             ) : null}
 
             {aberto && onAlterarVencimento ? (

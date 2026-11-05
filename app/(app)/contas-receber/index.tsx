@@ -21,6 +21,7 @@ import { ensureEmitentes } from '@/services/nfseEmitenteService';
 import {
   fetchMensalidadeGeradaById,
   cancelarMensalidadeGerada,
+  estornarPagamentoMensalidadeGerada,
   reativarMensalidadeGerada,
   registrarPagamentoMensalidadeGerada,
 } from '@/services/mensalidadeGeradaService';
@@ -34,6 +35,7 @@ import { fetchPerfilCobranca } from '@/services/perfilCobrancaService';
 import { fetchSegmentosCliente } from '@/services/segmentoClienteService';
 import {
   cancelarParcelaVenda,
+  estornarPagamentoParcelaVenda,
   reativarParcelaVenda,
   fetchParcelaVendaById,
   fetchVendaParaNotaFiscal,
@@ -172,6 +174,7 @@ export default function ContasReceberScreen() {
   const [pagadorBusyId, setPagadorBusyId] = useState<string | null>(null);
   const [cancelBusyId, setCancelBusyId] = useState<string | null>(null);
   const [reativarBusyId, setReativarBusyId] = useState<string | null>(null);
+  const [estornarBusyId, setEstornarBusyId] = useState<string | null>(null);
   const [nomeBeneficiario, setNomeBeneficiario] = useState<string | null>(null);
   const [acoesItem, setAcoesItem] = useState<ContaReceberListRow | null>(null);
   const [vencimentoItem, setVencimentoItem] = useState<ContaReceberListRow | null>(null);
@@ -754,6 +757,40 @@ export default function ContasReceberScreen() {
       Toast.show({ type: 'error', text1: (e as Error).message });
     } finally {
       setReativarBusyId(null);
+    }
+  };
+
+  const estornarRecebimento = async (itemOverride?: ContaReceberListRow) => {
+    const item = itemOverride ?? acoesItem;
+    if (!user?.id || !item || item.situacao_cobranca === 'cancelado') return;
+    if (
+      item.situacao_cobranca !== 'pago' &&
+      !item.data_pagamento &&
+      item.status_registro !== 'pago'
+    ) {
+      return;
+    }
+    const ok = await confirmDestructive(
+      'Cancelar recebimento',
+      'A cobrança volta para em aberto no sistema e o valor recebido é desfeito. O boleto no banco não é alterado (se já liquidou lá, trate no banco). Continuar?',
+    );
+    if (!ok) return;
+    fecharAcoes();
+    setEstornarBusyId(item.id);
+    try {
+      if (item.origem === 'mensalidade' && item.mensalidade_id) {
+        await estornarPagamentoMensalidadeGerada(user.id, item.mensalidade_id);
+      } else if (item.origem === 'venda' && item.parcela_id) {
+        await estornarPagamentoParcelaVenda(user.id, item.parcela_id);
+      } else {
+        throw new Error('Não foi possível identificar a cobrança para estornar.');
+      }
+      await refreshLista();
+      Toast.show({ type: 'success', text1: 'Recebimento cancelado. Cobrança em aberto.' });
+    } catch (e) {
+      Toast.show({ type: 'error', text1: (e as Error).message });
+    } finally {
+      setEstornarBusyId(null);
     }
   };
 
@@ -1406,6 +1443,7 @@ export default function ContasReceberScreen() {
         item={acoesItem}
         onClose={fecharAcoes}
         onPagar={() => void iniciarPagamento()}
+        onEstornarRecebimento={() => void estornarRecebimento()}
         onAlterarVencimento={abrirAlterarVencimento}
         onCancelar={() => void cancelarBoleto()}
         onReativar={() => void reativarBoleto()}
@@ -1447,6 +1485,7 @@ export default function ContasReceberScreen() {
         whatsBusy={acoesItem != null && whatsBusyId === acoesItem.id}
         cancelBusy={acoesItem != null && cancelBusyId === acoesItem.id}
         reativarBusy={acoesItem != null && reativarBusyId === acoesItem.id}
+        estornarBusy={acoesItem != null && estornarBusyId === acoesItem.id}
       />
 
       <AlterarVencimentoBoletoModal

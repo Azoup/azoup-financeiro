@@ -681,6 +681,150 @@ export async function registrarPagamentoVenda(
   });
 }
 
+/**
+ * Estorna o recebimento de uma parcela (volta para em aberto no sistema).
+ * Remove alocações em pagamento_parcelas e ajusta/remove pagamentos_venda.
+ */
+export async function estornarPagamentoParcelaVenda(
+  userId: string,
+  parcelaId: string,
+): Promise<void> {
+  const { data: p, error: e0 } = await supabase
+    .from('parcelas_venda')
+    .select('*')
+    .eq('id', parcelaId)
+    .maybeSingle();
+  if (e0 || !p) throw new Error(e0?.message ?? 'Parcela não encontrada.');
+  const parc = p as ParcelaVenda;
+
+  const { data: v, error: eV } = await supabase
+    .from('vendas')
+    .select('id')
+    .eq('id', parc.venda_id)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (eV || !v) throw new Error('Venda não encontrada ou sem permissão.');
+
+  if (parc.status === 'cancelado') {
+    throw new Error('Parcela cancelada — reative a cobrança antes, se for o caso.');
+  }
+  if (
+    reaisParaCentavos(parc.valor_pago) <= 0 &&
+    parcelaDescontoCent(parc) <= 0 &&
+    parc.status !== 'pago'
+  ) {
+    throw new Error('Não há recebimento para estornar nesta parcela.');
+  }
+
+  const { data: alocs, error: eAloc } = await supabase
+    .from('pagamento_parcelas')
+    .select('id, pagamento_id, valor_aplicado')
+    .eq('parcela_id', parcelaId);
+  if (eAloc) throw new Error(eAloc.message);
+
+  const porPagamento = new Map<string, number>();
+  for (const a of (alocs ?? []) as { id: string; pagamento_id: string; valor_aplicado: number }[]) {
+    porPagamento.set(
+      a.pagamento_id,
+      (porPagamento.get(a.pagamento_id) ?? 0) + reaisParaCentavos(a.valor_aplicado),
+    );
+  }
+
+  if (alocs?.length) {
+    const { error: eDelPp } = await supabase
+      .from('pagamento_parcelas')
+      .delete()
+      .eq('parcela_id', parcelaId);
+    if (eDelPp) throw new Error(eDelPp.message);
+  }
+
+  for (const [pagamentoId, centRemovidos] of porPagamento) {
+    const { data: pay, error: ePay } = await supabase
+      .from('pagamentos_venda')
+      .select('id, valor_pago')
+      .eq('id', pagamentoId)
+      .maybeSingle();
+    if (ePay || !pay) continue;
+    const restoCent = Math.max(0, reaisParaCentavos(Number(pay.valor_pago)) - centRemovidos);
+    if (restoCent <= 0) {
+      await supabase.from('pagamentos_venda').delete().eq('id', pagamentoId);
+    } else {
+      await supabase
+        .from('pagamentos_venda')
+        .update({ valor_pago: centavosParaReais(restoCent) })
+        .eq('id', pagamentoId);
+    }
+  }
+
+  const hoje = toISODate(new Date());
+  const stAberto: ParcelaVendaStatus =
+    parc.data_vencimento < hoje ? 'atrasado' : 'pendente';
+
+  const { error: eUp } = await supabase
+    .from('parcelas_venda')
+    .update({ valor_pago: 0, desconto: 0, status: stAberto })
+    .eq('id', parcelaId)
+    .eq('venda_id', parc.venda_id);
+  if (eUp) throw new Error(eUp.message);
+
+  const { data: bols } = await supabase
+    .from('boletos_parcela_venda')
+    .select('id, linha_digitavel, pdf_url, nosso_numero_banco, c6_boleto_id, tipo_emissao, status_registro')
+    .eq('parcela_id', parcelaId)
+    .eq('user_id', userId);
+
+  for (const bol of (bols ?? []) as {
+    id: string;
+    linha_digitavel: string | null;
+    pdf_url: string | null;
+    nosso_numero_banco: string | null;
+    c6_boleto_id: string | null;
+    tipo_emissao: string | null;
+    status_registro: string;
+  }[]) {
+    if (bol.status_registro !== 'pago') continue;
+    const registrado =
+      Boolean(bol.linha_digitavel || bol.pdf_url || bol.nosso_numero_banco || bol.c6_boleto_id) &&
+      (bol.tipo_emissao === 'sicoob' || bol.tipo_emissao === 'c6');
+    await supabase
+      .from('boletos_parcela_venda')
+      .update({
+        status_registro: registrado ? 'registrado' : 'pendente',
+        data_liquidacao_sicoob: null,
+      })
+      .eq('id', bol.id)
+      .eq('user_id', userId);
+
+    await supabase.from('historico_boleto_sicoob').insert({
+      boleto_id: bol.id,
+      acao: 'ESTORNO_RECEBIMENTO',
+      usuario_id: userId,
+      detalhes:
+        'Recebimento estornado no sistema. O boleto no banco não é alterado por esta ação (se já liquidou lá, trate no banco).',
+      payload_resposta: null,
+    });
+  }
+
+  await atualizarStatusVenda(parc.venda_id, userId);
+  await supabase.from('vendas_financeiro_log').insert({
+    venda_id: parc.venda_id,
+    user_id: userId,
+    tipo: 'pagamento_estornado',
+    detalhe: { parcela_id: parcelaId },
+  });
+}
+
+export function podeEstornarPagamentoParcelaVenda(
+  p: Pick<ParcelaVenda, 'status' | 'valor_pago' | 'desconto'>,
+): boolean {
+  if (p.status === 'cancelado') return false;
+  return (
+    p.status === 'pago' ||
+    reaisParaCentavos(p.valor_pago) > 0 ||
+    reaisParaCentavos(p.desconto ?? 0) > 0
+  );
+}
+
 export async function fetchVendaFinanceiroStats(
   userId: string,
   opts?: { empresaId?: string | null },
