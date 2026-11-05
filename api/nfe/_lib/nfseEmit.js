@@ -545,13 +545,18 @@ function docClienteEsperado(cliente) {
 async function tentarRecuperarNfseDoAdn({ admin, nota, itens, perfil, cliente, config, cert, senhaEnc }) {
   try {
     const ambiente = 1;
-    const optanteSimples = isOptanteSimplesNacional(config);
+    // ConsultaDPS é SEFIN/ADN. Em Americana o cadastro pode estar em TipLan (abrasf),
+    // mas notas com L985 foram para o ADN — forçamos o gateway nacional na recuperação.
     const gateway = resolveNfseGateway(config.codigo_ibge_emitente, ambiente, {
       config,
-      optanteSimples,
+      forceNacional: true,
+      optanteSimples: true,
     });
-    if (gateway.mode !== 'nacional' && gateway.mode !== 'municipal') {
-      return { success: false, message: 'Recuperação ADN só no SEFIN/ADN.' };
+    if (gateway.mode === 'paulistana') {
+      return {
+        success: false,
+        message: 'Recuperação automática via ADN não se aplica à Nota Fiscal Paulistana.',
+      };
     }
 
     const nAtual = Number(nota.numero) || 0;
@@ -569,7 +574,7 @@ async function tentarRecuperarNfseDoAdn({ admin, nota, itens, perfil, cliente, c
         perfil,
         ambiente,
         ibge: config.codigo_ibge_emitente,
-        gatewayOpts: { config, optanteSimples },
+        gatewayOpts: { config, forceNacional: true, optanteSimples: true },
       });
       try {
         const protocoloHint =
