@@ -1,5 +1,6 @@
 import { colors, radius, spacing } from '@/theme/colors';
 import type { ContaReceberListRow } from '@/types/contasReceber';
+import { valorExibicaoContaReceber } from '@/utils/contaReceberCobranca';
 import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate } from '@/utils/date';
 import { formatWhatsAppDisplay } from '@/utils/whatsappCobranca';
@@ -172,7 +173,7 @@ export function ContaReceberAcoesModal({
                 {origemLabel(item.origem)} · {item.referencia_label}
               </Text>
               <Text style={styles.sub}>
-                {formatBRL(item.valor_documento)} · Venc. {venc}
+                {formatBRL(valorExibicaoContaReceber(item))} · Venc. {venc}
               </Text>
               <Text style={[styles.status, aberto && item.parcela_status === 'atrasado' && styles.statusAtraso]}>
                 {situacaoLabel(item)}

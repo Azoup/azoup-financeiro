@@ -1133,12 +1133,17 @@ function textoBusca(valor: string | undefined): string {
     .trim();
 }
 
+type TituloFinanceiroRel = {
+  status?: string;
+  cliente_id?: string;
+  data_pagamento?: string | null;
+  valor_pago?: number | null;
+  desconto?: number | null;
+};
+
 type BoletoConsulta = BoletoParcelaVendaRow & {
-  mensalidades?:
-    | { status?: string; cliente_id?: string; data_pagamento?: string | null }
-    | { status?: string; cliente_id?: string; data_pagamento?: string | null }[]
-    | null;
-  parcelas_venda?: { status?: string } | { status?: string }[] | null;
+  mensalidades?: TituloFinanceiroRel | TituloFinanceiroRel[] | null;
+  parcelas_venda?: TituloFinanceiroRel | TituloFinanceiroRel[] | null;
 };
 
 function umRelacionado<T>(valor: T | T[] | null | undefined): T | null {
@@ -1152,6 +1157,8 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
   const stParcela = new Map<string, string>();
   const stMens = new Map<string, string>();
   const dataPagamentoMens = new Map<string, string>();
+  const valorPagoTitulo = new Map<string, number>();
+  const descontoTitulo = new Map<string, number>();
   const clientePorMensalidade = new Map<string, string>();
   const clientePorVenda = new Map<string, string>();
 
@@ -1162,35 +1169,62 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
   for (const b of brutos) {
     const men = umRelacionado(b.mensalidades);
     const parc = umRelacionado(b.parcelas_venda);
-    if (b.mensalidade_id && men?.status) stMens.set(b.mensalidade_id, men.status);
-    else if (b.mensalidade_id) mensalidadeSemStatus.push(b.mensalidade_id);
+    if (b.mensalidade_id && men?.status) {
+      stMens.set(b.mensalidade_id, men.status);
+      valorPagoTitulo.set(b.mensalidade_id, Number(men.valor_pago) || 0);
+      descontoTitulo.set(b.mensalidade_id, Number(men.desconto) || 0);
+    } else if (b.mensalidade_id) mensalidadeSemStatus.push(b.mensalidade_id);
     if (b.mensalidade_id && men?.data_pagamento) {
       dataPagamentoMens.set(b.mensalidade_id, String(men.data_pagamento).slice(0, 10));
     }
     if (men?.cliente_id && b.mensalidade_id) clientePorMensalidade.set(b.mensalidade_id, men.cliente_id);
-    if (b.parcela_id && parc?.status) stParcela.set(b.parcela_id, parc.status);
-    else if (b.parcela_id) parcelaSemStatus.push(b.parcela_id);
+    if (b.parcela_id && parc?.status) {
+      stParcela.set(b.parcela_id, parc.status);
+      valorPagoTitulo.set(b.parcela_id, Number(parc.valor_pago) || 0);
+      descontoTitulo.set(b.parcela_id, Number(parc.desconto) || 0);
+    } else if (b.parcela_id) parcelaSemStatus.push(b.parcela_id);
     if (b.venda_id && !b.mensalidade_id) vendaSemCliente.push(b.venda_id);
   }
 
   const parcs = await selectInChunks(parcelaSemStatus, async (slice) => {
-    const { data, error } = await supabase.from('parcelas_venda').select('id, status').in('id', slice);
+    const { data, error } = await supabase
+      .from('parcelas_venda')
+      .select('id, status, valor_pago, desconto')
+      .in('id', slice);
     if (error) throw new Error(error.message);
-    return (data ?? []) as { id: string; status: string }[];
+    return (data ?? []) as {
+      id: string;
+      status: string;
+      valor_pago?: number;
+      desconto?: number;
+    }[];
   });
-  for (const p of parcs) stParcela.set(p.id, p.status);
+  for (const p of parcs) {
+    stParcela.set(p.id, p.status);
+    valorPagoTitulo.set(p.id, Number(p.valor_pago) || 0);
+    descontoTitulo.set(p.id, Number(p.desconto) || 0);
+  }
 
   const mens = await selectInChunks(mensalidadeSemStatus, async (slice) => {
     const { data, error } = await supabase
       .from('mensalidades')
-      .select('id, status, cliente_id, data_pagamento')
+      .select('id, status, cliente_id, data_pagamento, valor_pago, desconto')
       .in('id', slice);
     if (error) throw new Error(error.message);
-    return (data ?? []) as { id: string; status: string; cliente_id: string; data_pagamento: string | null }[];
+    return (data ?? []) as {
+      id: string;
+      status: string;
+      cliente_id: string;
+      data_pagamento: string | null;
+      valor_pago?: number;
+      desconto?: number;
+    }[];
   });
   for (const m of mens) {
     stMens.set(m.id, m.status);
     clientePorMensalidade.set(m.id, m.cliente_id);
+    valorPagoTitulo.set(m.id, Number(m.valor_pago) || 0);
+    descontoTitulo.set(m.id, Number(m.desconto) || 0);
     if (m.data_pagamento) dataPagamentoMens.set(m.id, String(m.data_pagamento).slice(0, 10));
   }
 
@@ -1315,6 +1349,10 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
       nota_fiscal_id = nfPorVenda.get(boleto.venda_id)?.id ?? null;
     }
 
+    const tituloId = isMen ? boleto.mensalidade_id : boleto.parcela_id;
+    const valorPago = tituloId ? valorPagoTitulo.get(tituloId) ?? 0 : 0;
+    const desconto = tituloId ? descontoTitulo.get(tituloId) ?? 0 : 0;
+
     return {
       ...boleto,
       nota_fiscal_id,
@@ -1336,6 +1374,8 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
       data_pagamento:
         (boleto.data_liquidacao_sicoob ? String(boleto.data_liquidacao_sicoob).slice(0, 10) : null) ||
         (boleto.mensalidade_id ? dataPagamentoMens.get(boleto.mensalidade_id) ?? null : null),
+      valor_pago: valorPago,
+      desconto,
       segmento_codigo: seg?.codigo ?? null,
       segmento_nome: seg?.nome ?? null,
     };
@@ -1373,7 +1413,18 @@ type ChaveLista = {
   pagador_nome?: string | null;
   data_vencimento?: string | null;
   valor_documento?: number | null;
+  mensalidades?: TituloFinanceiroRel | TituloFinanceiroRel[] | null;
+  parcelas_venda?: TituloFinanceiroRel | TituloFinanceiroRel[] | null;
 };
+
+/** Valor efetivamente recebido: valor_pago do título; fallback no valor do documento. */
+function valorRecebidoChave(row: ChaveLista, lado: 'mensalidade' | 'venda'): number {
+  const rel =
+    lado === 'venda' ? umRelacionado(row.parcelas_venda) : umRelacionado(row.mensalidades);
+  const pago = Number(rel?.valor_pago) || 0;
+  if (pago > 0) return pago;
+  return Number(row.valor_documento) || 0;
+}
 
 function ordenarChaves(a: ChaveLista, b: ChaveLista): number {
   const nome = String(a.pagador_nome ?? '').localeCompare(String(b.pagador_nome ?? ''), 'pt-BR');
@@ -1393,10 +1444,10 @@ async function listarChavesPagas(
   const rel = lado === 'venda' ? 'parcelas_venda.status' : 'mensalidades.status';
   const select =
     lado === 'venda'
-      ? `id, pagador_nome, data_vencimento, valor_documento, parcelas_venda!inner(status)${
+      ? `id, pagador_nome, data_vencimento, valor_documento, parcelas_venda!inner(status, valor_pago, desconto)${
           segmento ? ', vendas!inner(clientes!inner(segmento_cliente_codigo))' : ''
         }`
-      : `id, pagador_nome, data_vencimento, valor_documento, mensalidades!inner(status${
+      : `id, pagador_nome, data_vencimento, valor_documento, mensalidades!inner(status, valor_pago, desconto${
           segmento ? ', clientes!inner(segmento_cliente_codigo)' : ''
         })`;
 
@@ -1513,7 +1564,9 @@ async function buscarBoletosPorIds(userId: string, ids: string[]): Promise<Bolet
   if (!ids.length) return [];
   const { data, error } = await supabase
     .from('boletos_parcela_venda')
-    .select('*, mensalidades(status, cliente_id, data_pagamento), parcelas_venda(status)')
+    .select(
+      '*, mensalidades(status, cliente_id, data_pagamento, valor_pago, desconto), parcelas_venda(status, valor_pago, desconto)',
+    )
     .eq('user_id', userId)
     .in('id', ids);
   if (error) throw new Error(error.message);
@@ -1553,7 +1606,7 @@ async function somarRecebido(userId: string, opts: ContasReceberConsulta): Promi
   let soma = 0;
   for (const lado of lados) {
     const chaves = await listarChavesPagas(userId, lado, optsPago);
-    for (const row of chaves) soma += Number(row.valor_documento) || 0;
+    for (const row of chaves) soma += valorRecebidoChave(row, lado);
   }
   return Math.round(soma * 100) / 100;
 }

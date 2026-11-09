@@ -111,6 +111,10 @@ export type ContaReceberListRow = BoletoParcelaVendaRow & {
   email_contato_nome: string | null;
   /** Data em que o pagamento entrou, no banco ou na baixa manual. */
   data_pagamento: string | null;
+  /** Valor efetivamente recebido (após desconto na baixa). */
+  valor_pago: number;
+  /** Desconto concedido na baixa (acumulado). */
+  desconto: number;
   segmento_codigo: string | null;
   segmento_nome: string | null;
 };

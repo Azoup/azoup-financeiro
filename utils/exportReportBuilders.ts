@@ -9,7 +9,7 @@ import { formatBRL } from '@/utils/currency';
 import { formatBRDate, formatDateTimeBRFromISO, parseISODate } from '@/utils/date';
 import { vendaDescricaoResumo } from '@/utils/vendasDescricao';
 import { mensalidadeGeradaStatusVisual } from '@/services/mensalidadeGeradaService';
-import { labelSituacaoCobranca } from '@/utils/contaReceberCobranca';
+import { labelSituacaoCobranca, valorExibicaoContaReceber } from '@/utils/contaReceberCobranca';
 import { parcelaStatusVisual } from '@/services/vendasService';
 import type { Cliente, ContatoCliente } from '@/types/models';
 
@@ -387,7 +387,7 @@ export function buildContasReceberExport(rows: ContaReceberListRow[]): ExportRep
     r.origem === 'mensalidade' ? 'Mensalidade' : 'Venda',
     labelSituacaoCobranca(r.situacao_cobranca),
     r.referencia_label,
-    formatBRL(r.valor_documento),
+    formatBRL(valorExibicaoContaReceber(r)),
     r.data_vencimento.split('-').reverse().join('/'),
     r.data_pagamento ? r.data_pagamento.split('-').reverse().join('/') : '—',
     r.numero_documento,

@@ -18,3 +18,16 @@ export function labelSituacaoCobranca(situacao: ContaReceberSituacao): string {
       return 'Em aberto';
   }
 }
+
+/**
+ * Valor a exibir na lista: se houve baixa, usa o valor pago (já líquido de desconto);
+ * senão o valor do documento.
+ */
+export function valorExibicaoContaReceber(row: {
+  valor_documento: number;
+  valor_pago?: number | null;
+}): number {
+  const pago = Number(row.valor_pago) || 0;
+  if (pago > 0) return pago;
+  return Number(row.valor_documento) || 0;
+}

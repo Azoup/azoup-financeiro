@@ -47,7 +47,7 @@ import { centavosParaReais, reaisParaCentavos } from '@/utils/vendasParcelas';
 import { colors, radius, spacing } from '@/theme/colors';
 import type { ContaReceberListRow, ContaReceberOrigem } from '@/types/contasReceber';
 import { confirmDestructive } from '@/utils/confirmDialog';
-import type { ContaReceberSituacao } from '@/utils/contaReceberCobranca';
+import { valorExibicaoContaReceber, type ContaReceberSituacao } from '@/utils/contaReceberCobranca';
 import { buildContasReceberExport } from '@/utils/exportReportBuilders';
 import { abrirDocumentoBoleto } from '@/utils/openBoletoDocumento';
 import { compartilharBoletoComFeedback, enviarPendenciasEmLotes } from '@/utils/compartilharBoletoEmail';
@@ -1126,7 +1126,7 @@ export default function ContasReceberScreen() {
           </Text>
           <Text style={styles.colVenc}>{venc}</Text>
           <Text style={styles.colPago}>{pagoEm}</Text>
-          <Text style={styles.colValor}>{formatBRL(item.valor_documento)}</Text>
+          <Text style={styles.colValor}>{formatBRL(valorExibicaoContaReceber(item))}</Text>
         </Pressable>
         <View style={styles.colAcoes}>
           {item.situacao_cobranca === 'aberto' ? (
