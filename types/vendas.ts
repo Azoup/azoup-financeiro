@@ -89,6 +89,10 @@ export interface NovaVendaInput {
   descricao_itens: string[];
   valor_total: number;
   parcelas: NovaVendaParcelaInput[];
+  /** false = não cria carnê/boleto em Contas a receber. Padrão: true. */
+  gerar_boleto?: boolean;
+  /** Banco do boleto em Contas a receber (quando gerar_boleto). */
+  banco_cobranca?: 'sicoob' | 'c6' | null;
 }
 
 export interface VendaListFilters {

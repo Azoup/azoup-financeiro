@@ -1,8 +1,13 @@
 /**
- * Após autorizar a NFS-e: envia a DANFE (HTML) e o XML a todos os e-mails do cliente.
+ * Após autorizar a NFS-e: envia a DANFE (PDF) e o XML a todos os e-mails do cliente.
  * Mesmo remetente do boleto (Resend). Falha de e-mail não desfaz a nota.
  */
 const { enviarEmailResend, fetchEmailsClienteAdmin } = require('../../boleto/_lib/enviarEmailBoleto');
+const {
+  buildDanfsePdfBuffer,
+  enriquecerMetaDoXml,
+  extrairXmlNfse,
+} = require('./nfseDanfseArtifacts');
 
 function safeTrim(v) {
   return typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim();
@@ -14,18 +19,64 @@ function formatBRL(n) {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-function htmlSemBotaoImprimir(html) {
-  return String(html).replace(/<p class="noprint"[\s\S]*?<\/p>/gi, '');
+function isPdfBuffer(buf) {
+  if (!buf || buf.length < 4) return false;
+  return buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46; // %PDF
 }
 
-async function baixarHtmlDanfe(admin, storagePath) {
+async function baixarStorageBuffer(admin, storagePath) {
   const path = safeTrim(storagePath);
   if (!path) return null;
   const { data, error } = await admin.storage.from('nota_fiscal_danfe').download(path);
   if (error || !data) return null;
-  const buf = Buffer.from(await data.arrayBuffer());
-  const html = buf.toString('utf8');
-  return html.includes('<html') ? htmlSemBotaoImprimir(html) : null;
+  return Buffer.from(await data.arrayBuffer());
+}
+
+function metaMinimaDaNota(nota) {
+  return {
+    numero:
+      safeTrim(nota?.protocolo_autorizacao)?.replace(/\D/g, '') ||
+      safeTrim(nota?.numero) ||
+      '—',
+    serie: safeTrim(nota?.serie) || '1',
+    rpsNumero: safeTrim(nota?.numero),
+    rpsSerie: safeTrim(nota?.serie) || '1',
+    codigoVerificacao: safeTrim(nota?.codigo_verificacao),
+    chaveAcesso: safeTrim(nota?.chave_acesso),
+    valor: nota?.valor_total,
+    competencia: safeTrim(nota?.competencia),
+    dataEmissao: nota?.data_emissao || String(nota?.data_emissao || '').slice(0, 10),
+    discriminacao: 'Prestação de serviços',
+    prestadorNome: 'Prestador',
+    tomadorNome: 'Tomador',
+  };
+}
+
+/**
+ * Preferência: PDF já no Storage → gera PDF a partir do XML/meta → null.
+ */
+async function obterPdfDanfeAnexo(admin, { nota, danfeStoragePath, xml }) {
+  const path = safeTrim(danfeStoragePath);
+  if (path) {
+    const buf = await baixarStorageBuffer(admin, path);
+    if (buf && isPdfBuffer(buf)) return buf;
+    // Path antigo .html ou conteúdo HTML: regenera PDF
+  }
+
+  const xmlTexto = safeTrim(xml) || (typeof nota?.xml_autorizado === 'string' ? nota.xml_autorizado : '');
+  const xmlLimpo = extrairXmlNfse(xmlTexto) || xmlTexto;
+  try {
+    const meta = enriquecerMetaDoXml(metaMinimaDaNota(nota), xmlLimpo);
+    return buildDanfsePdfBuffer(meta);
+  } catch (e) {
+    console.warn('[email-danfe] pdf fallback:', e?.message || e);
+    try {
+      return buildDanfsePdfBuffer(metaMinimaDaNota(nota));
+    } catch (e2) {
+      console.warn('[email-danfe] pdf minimo:', e2?.message || e2);
+      return null;
+    }
+  }
 }
 
 async function tentarEnviarEmailDanfe(admin, { nota, cliente, danfeStoragePath, xml, danfeUrl }) {
@@ -48,7 +99,7 @@ async function tentarEnviarEmailDanfe(admin, { nota, cliente, danfeStoragePath, 
         ? `• Código de verificação: ${safeTrim(nota.codigo_verificacao)}`
         : null,
       '',
-      'A DANFE segue em anexo.',
+      'A DANFE segue em anexo (PDF).',
       '',
       'Qualquer dúvida, estamos à disposição.',
       'WhatsApp: (19) 98111-1724',
@@ -57,11 +108,11 @@ async function tentarEnviarEmailDanfe(admin, { nota, cliente, danfeStoragePath, 
     ].filter((l) => l != null);
 
     const attachments = [];
-    const html = await baixarHtmlDanfe(admin, danfeStoragePath);
-    if (html) {
+    const pdfBuf = await obterPdfDanfeAnexo(admin, { nota, danfeStoragePath, xml });
+    if (pdfBuf && pdfBuf.length) {
       attachments.push({
-        filename: `DANFSe_${serie}_${numero}.html`,
-        content: Buffer.from(html, 'utf8').toString('base64'),
+        filename: `DANFSe_${serie}_${numero}.pdf`,
+        content: pdfBuf.toString('base64'),
       });
     }
     const xmlTexto = safeTrim(xml);

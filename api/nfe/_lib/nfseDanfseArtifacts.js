@@ -483,7 +483,120 @@ function buildDanfseHtml(metaIn) {
 }
 
 /**
- * Grava XML + DANFSe HTML no Storage e devolve URLs/paths.
+ * DANFSe em PDF (A4) para e-mail e Storage — evita anexo .html.
+ */
+function buildDanfsePdfBuffer(metaIn) {
+  const { jsPDF } = require('jspdf');
+  const m = metaIn || {};
+  const numero = m.numero || '—';
+  const dataHora = formatDataHoraBr(m.dataEmissao);
+  const codVerif = m.codigoVerificacao || '—';
+  const valor = moneyBr(m.valor);
+  const disc = String(m.discriminacao || 'Prestação de serviços');
+  const itemCod = m.itemLista || '01.07';
+  const itemDesc = m.itemListaDescricao || descricaoItemLista(itemCod);
+  const rpsNum = m.rpsNumero || '';
+  const rpsSerie = m.rpsSerie || m.serie || '1';
+  const rpsData = m.rpsDataEmissao ? formatDataHoraBr(m.rpsDataEmissao) : dataHora;
+  const prestEnd = m.prestadorEndereco || formatEndereco(m.prestador || {});
+  const tomEnd = m.tomadorEndereco || formatEndereco(m.tomador || {});
+
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  const pageW = pdf.internal.pageSize.getWidth();
+  const margin = 12;
+  const maxW = pageW - margin * 2;
+  let y = margin;
+
+  const ensureSpace = (need) => {
+    if (y + need > pdf.internal.pageSize.getHeight() - margin) {
+      pdf.addPage();
+      y = margin;
+    }
+  };
+
+  const line = (txt, opts = {}) => {
+    const size = opts.size || 9;
+    const bold = opts.bold ? 'bold' : 'normal';
+    pdf.setFont('helvetica', bold);
+    pdf.setFontSize(size);
+    const lines = pdf.splitTextToSize(String(txt ?? ''), opts.width || maxW);
+    ensureSpace(lines.length * (size * 0.45) + 2);
+    pdf.text(lines, opts.x ?? margin, y);
+    y += lines.length * (size * 0.45) + (opts.gap ?? 2);
+  };
+
+  const section = (title) => {
+    ensureSpace(10);
+    y += 2;
+    pdf.setFillColor(232, 232, 232);
+    pdf.rect(margin, y - 4, maxW, 7, 'F');
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(9);
+    pdf.text(String(title), pageW / 2, y, { align: 'center' });
+    y += 6;
+  };
+
+  line('SECRETARIA MUNICIPAL DE FAZENDA', { size: 8, gap: 1 });
+  line('NOTA FISCAL DE SERVIÇOS ELETRÔNICA - NFS-e', { size: 12, bold: true, gap: 1 });
+  line('- NOTA DA CIDADE - MUNICÍPIO DE AMERICANA', { size: 10, bold: true, gap: 3 });
+  line(`Número da Nota: ${numero}`, { bold: true, gap: 1 });
+  line(`Data e Hora de Emissão: ${dataHora}`, { gap: 1 });
+  line(`Código de Verificação: ${codVerif}`, { gap: 3 });
+
+  section('PRESTADOR DE SERVIÇOS');
+  line(`CPF/CNPJ: ${formatCpfCnpj(m.prestadorDoc)}`, { gap: 1 });
+  line(`Inscrição Municipal: ${m.prestadorIm || '—'}  |  IE: ${m.prestadorIe || '—'}`, { gap: 1 });
+  line(`Nome/Razão Social: ${m.prestadorNome || '—'}`, { bold: true, gap: 1 });
+  line(`Nome Fantasia: ${m.prestadorFantasia || m.prestadorNome || '—'}`, { gap: 1 });
+  line(`Endereço: ${prestEnd}`, { gap: 1 });
+  line(
+    `Município: ${m.prestadorMunicipio || 'AMERICANA'} / ${m.prestadorUf || 'SP'}  |  Tel: ${m.prestadorTel || '—'}`,
+    { gap: 1 },
+  );
+  line(`E-mail: ${m.prestadorEmail || '—'}`, { gap: 2 });
+
+  section('TOMADOR DE SERVIÇOS');
+  line(`CPF/CNPJ: ${formatCpfCnpj(m.tomadorDoc)}`, { gap: 1 });
+  line(`Inscrição Municipal: ${m.tomadorIm || '—'}  |  IE: ${m.tomadorIe || '—'}`, { gap: 1 });
+  line(`Nome/Razão Social: ${m.tomadorNome || '—'}`, { bold: true, gap: 1 });
+  line(`Endereço: ${tomEnd}`, { gap: 1 });
+  line(`Tel: ${m.tomadorTel || '—'}  |  E-mail: ${m.tomadorEmail || '—'}`, { gap: 1 });
+  line(
+    `Município: ${m.tomadorMunicipio || '—'} / ${m.tomadorUf || '—'}`,
+    { gap: 2 },
+  );
+
+  section('DISCRIMINAÇÃO DOS SERVIÇOS');
+  line(disc, { gap: 2 });
+  line(`Líquido a Receber R$ ${valor}`, { bold: true, size: 11, gap: 3 });
+
+  section('CÓDIGO DO SERVIÇO');
+  line(itemDesc, { bold: true, gap: 3 });
+
+  section('OUTRAS INFORMAÇÕES');
+  const outras = [
+    'Esta NFS-e foi emitida com respaldo da Lei nº 4.930/2009 e no Decreto nº 8.250/2009.',
+    ...linhasOutrasInformacoesRegime(m),
+  ];
+  if (rpsNum) {
+    outras.push(`Esta NFS-e substitui o RPS Nº ${rpsNum} Série ${rpsSerie}, emitido em ${rpsData}.`);
+  }
+  if (m.outrasInformacoes) outras.push(String(m.outrasInformacoes));
+  for (const o of outras) line(`- ${o}`, { size: 8, gap: 1 });
+
+  y += 4;
+  line(`VALOR TOTAL DA NOTA = R$ ${valor}`, { bold: true, size: 12, gap: 3 });
+  line(
+    'Autenticidade: nfse.americana.sp.gov.br › Verifique a Autenticidade (CNPJ, número e código de verificação).',
+    { size: 7, gap: 1 },
+  );
+
+  return Buffer.from(pdf.output('arraybuffer'));
+}
+
+/**
+ * Grava XML + DANFSe PDF no Storage e devolve URLs/paths.
+ * Mantém HTML só para preview interno (não é o artefato principal).
  */
 async function salvarArtefatosNfseAbrasf({ admin, userId, chave, xmlRaw, meta }) {
   const xmlLimpo = extrairXmlNfse(xmlRaw);
@@ -507,35 +620,72 @@ async function salvarArtefatosNfseAbrasf({ admin, userId, chave, xmlRaw, meta })
 
   const metaFull = enriquecerMetaDoXml(meta, xmlLimpo || xmlRaw);
   const html = buildDanfseHtml(metaFull);
-  danfePath = `${userId}/${fileKey}.html`;
+  let pdfBuf = null;
+  try {
+    pdfBuf = buildDanfsePdfBuffer(metaFull);
+  } catch (e) {
+    console.warn('[nfse] build danfe pdf:', e?.message || e);
+  }
+
+  danfePath = `${userId}/${fileKey}.pdf`;
+  const legacyHtmlPath = `${userId}/${fileKey}.html`;
   try {
     try {
-      await admin.storage.from('nota_fiscal_danfe').remove([danfePath]);
+      await admin.storage.from('nota_fiscal_danfe').remove([danfePath, legacyHtmlPath]);
     } catch {
       /* ignore */
     }
-    // Sem BOM: alguns clients tratam UTF-8 BOM + HTML como text/plain no Storage público.
-    const { error } = await admin.storage
-      .from('nota_fiscal_danfe')
-      .upload(danfePath, Buffer.from(html, 'utf8'), {
-        contentType: 'text/html;charset=utf-8',
-        upsert: true,
-        cacheControl: '60',
-      });
-    if (!error) {
-      const { data: pub } = admin.storage.from('nota_fiscal_danfe').getPublicUrl(danfePath);
-      danfeUrl = pub?.publicUrl || null;
-      // Cache-bust para o browser não reusar Content-Type antigo
-      if (danfeUrl) {
-        danfeUrl = `${danfeUrl}${danfeUrl.includes('?') ? '&' : '?'}v=${Date.now()}`;
+    if (pdfBuf && pdfBuf.length) {
+      const { error } = await admin.storage
+        .from('nota_fiscal_danfe')
+        .upload(danfePath, pdfBuf, {
+          contentType: 'application/pdf',
+          upsert: true,
+          cacheControl: '60',
+        });
+      if (!error) {
+        const { data: pub } = admin.storage.from('nota_fiscal_danfe').getPublicUrl(danfePath);
+        danfeUrl = pub?.publicUrl || null;
+        if (danfeUrl) {
+          danfeUrl = `${danfeUrl}${danfeUrl.includes('?') ? '&' : '?'}v=${Date.now()}`;
+        }
+      } else {
+        console.warn('[nfse] upload danfe pdf:', error.message);
+        danfePath = null;
       }
     } else {
-      console.warn('[nfse] upload danfe html:', error.message);
       danfePath = null;
     }
   } catch (e) {
-    console.warn('[nfse] upload danfe html:', e?.message || e);
+    console.warn('[nfse] upload danfe pdf:', e?.message || e);
     danfePath = null;
+  }
+
+  // Fallback: se PDF falhar, grava HTML (e-mail ainda tenta gerar PDF na hora do envio).
+  if (!danfePath) {
+    danfePath = legacyHtmlPath;
+    try {
+      const { error } = await admin.storage
+        .from('nota_fiscal_danfe')
+        .upload(danfePath, Buffer.from(html, 'utf8'), {
+          contentType: 'text/html;charset=utf-8',
+          upsert: true,
+          cacheControl: '60',
+        });
+      if (!error) {
+        const { data: pub } = admin.storage.from('nota_fiscal_danfe').getPublicUrl(danfePath);
+        danfeUrl = pub?.publicUrl || null;
+        if (danfeUrl) {
+          danfeUrl = `${danfeUrl}${danfeUrl.includes('?') ? '&' : '?'}v=${Date.now()}`;
+        }
+      } else {
+        console.warn('[nfse] upload danfe html fallback:', error.message);
+        danfePath = null;
+      }
+    } catch (e) {
+      console.warn('[nfse] upload danfe html fallback:', e?.message || e);
+      danfePath = null;
+    }
   }
 
   return {
@@ -544,12 +694,14 @@ async function salvarArtefatosNfseAbrasf({ admin, userId, chave, xmlRaw, meta })
     danfe_storage_path: danfePath,
     xml_storage_path: xmlPath,
     html,
+    pdf: pdfBuf,
   };
 }
 
 module.exports = {
   extrairXmlNfse,
   buildDanfseHtml,
+  buildDanfsePdfBuffer,
   enriquecerMetaDoXml,
   formatCpfCnpj,
   formatEndereco,

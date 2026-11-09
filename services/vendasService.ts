@@ -119,11 +119,25 @@ export async function createVendaWithParcelas(
 
   let avisoBoleto: string | undefined;
   let avisoEmail: string | undefined;
-  try {
-    const boletoRes = await gerarBoletosParaVendaCriada(userId, vendaId, { descricao });
-    avisoEmail = boletoRes.avisoEmail;
-    avisoBoleto = boletoRes.avisoBoleto;
-    if (avisoBoleto) {
+  const gerarBoleto = input.gerar_boleto !== false;
+  if (gerarBoleto) {
+    try {
+      const boletoRes = await gerarBoletosParaVendaCriada(userId, vendaId, {
+        descricao,
+        banco: input.banco_cobranca ?? null,
+      });
+      avisoEmail = boletoRes.avisoEmail;
+      avisoBoleto = boletoRes.avisoBoleto;
+      if (avisoBoleto) {
+        await supabase.from('vendas_financeiro_log').insert({
+          venda_id: vendaId,
+          user_id: userId,
+          tipo: 'aviso_boleto',
+          detalhe: { mensagem: avisoBoleto },
+        });
+      }
+    } catch (eb) {
+      avisoBoleto = (eb as Error).message ?? 'Não foi possível gerar os carnês em A receber.';
       await supabase.from('vendas_financeiro_log').insert({
         venda_id: vendaId,
         user_id: userId,
@@ -131,21 +145,18 @@ export async function createVendaWithParcelas(
         detalhe: { mensagem: avisoBoleto },
       });
     }
-  } catch (eb) {
-    avisoBoleto = (eb as Error).message ?? 'Não foi possível gerar os carnês em A receber.';
-    await supabase.from('vendas_financeiro_log').insert({
-      venda_id: vendaId,
-      user_id: userId,
-      tipo: 'aviso_boleto',
-      detalhe: { mensagem: avisoBoleto },
-    });
   }
 
   await supabase.from('vendas_financeiro_log').insert({
     venda_id: vendaId,
     user_id: userId,
     tipo: 'venda_criada',
-    detalhe: { parcelas: input.parcelas.length, boletos_parcelas: input.parcelas.length },
+    detalhe: {
+      parcelas: input.parcelas.length,
+      boletos_parcelas: gerarBoleto ? input.parcelas.length : 0,
+      gerar_boleto: gerarBoleto,
+      banco_cobranca: gerarBoleto ? input.banco_cobranca ?? null : null,
+    },
   });
 
   return {

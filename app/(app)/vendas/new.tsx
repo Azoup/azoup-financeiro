@@ -106,6 +106,8 @@ export default function NovaVendaScreen() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editMask, setEditMask] = useState('');
   const [saving, setSaving] = useState(false);
+  const [gerarBoleto, setGerarBoleto] = useState(true);
+  const [bancoCobranca, setBancoCobranca] = useState<'sicoob' | 'c6'>('sicoob');
 
   useEffect(() => {
     fetchFormasPagamentoAtivas().then(setFormas);
@@ -241,6 +243,8 @@ export default function NovaVendaScreen() {
         data_vencimento: toISODate(p.vencimento),
         forma_pagamento_id: p.formaPagamentoId,
       })),
+      gerar_boleto: gerarBoleto,
+      banco_cobranca: gerarBoleto ? bancoCobranca : null,
     };
     setSaving(true);
     try {
@@ -253,7 +257,10 @@ export default function NovaVendaScreen() {
           visibilityTime: 10000,
         });
       } else {
-        Toast.show({ type: 'success', text1: 'Venda registrada.' });
+        Toast.show({
+          type: 'success',
+          text1: gerarBoleto ? 'Venda registrada com boleto.' : 'Venda registrada (sem boleto).',
+        });
       }
       if (result.avisoEmail) {
         Toast.show({
@@ -445,6 +452,62 @@ export default function NovaVendaScreen() {
               />
             </View>
           ))}
+        </Card>
+
+        <Card>
+          <Text style={styles.section}>Contas a receber</Text>
+          <Text style={styles.subHint}>
+            Defina se a venda entra em Contas a receber com boleto e em qual banco.
+          </Text>
+          <View style={styles.bancoRow}>
+            <Pressable
+              style={[styles.bancoOpt, gerarBoleto && styles.bancoOptOn]}
+              onPress={() => setGerarBoleto(true)}
+            >
+              <Text style={[styles.bancoOptTxt, gerarBoleto && styles.bancoOptTxtOn]}>
+                Gerar boleto
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.bancoOpt, !gerarBoleto && styles.bancoOptOn]}
+              onPress={() => setGerarBoleto(false)}
+            >
+              <Text style={[styles.bancoOptTxt, !gerarBoleto && styles.bancoOptTxtOn]}>
+                Não gerar boleto
+              </Text>
+            </Pressable>
+          </View>
+          {gerarBoleto ? (
+            <>
+              <Text style={[styles.label, { marginTop: spacing.md }]}>Banco do boleto</Text>
+              <View style={styles.bancoRow}>
+                {(
+                  [
+                    { id: 'sicoob' as const, label: 'Sicoob' },
+                    { id: 'c6' as const, label: 'C6 Bank' },
+                  ] as const
+                ).map((opt) => {
+                  const on = bancoCobranca === opt.id;
+                  return (
+                    <Pressable
+                      key={opt.id}
+                      style={[styles.bancoOpt, on && styles.bancoOptOn]}
+                      onPress={() => setBancoCobranca(opt.id)}
+                    >
+                      <Text style={[styles.bancoOptTxt, on && styles.bancoOptTxtOn]}>{opt.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={styles.bancoHint}>
+                Contas a receber será registrado no {bancoCobranca === 'c6' ? 'C6 Bank' : 'Sicoob'}.
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.hint}>
+              A venda será salva sem carnê em Contas a receber.
+            </Text>
+          )}
         </Card>
 
         {parcelas.length > 0 ? (
@@ -676,4 +739,20 @@ const styles = StyleSheet.create({
   editLinkTxt: { color: colors.orange, fontWeight: '600', fontSize: 14 },
   editBox: { marginTop: spacing.sm },
   editActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  bancoRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
+  bancoOpt: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+  },
+  bancoOptOn: {
+    borderColor: colors.petroleum,
+    backgroundColor: colors.gray50,
+  },
+  bancoOptTxt: { fontSize: 14, fontWeight: '700', color: colors.gray700 },
+  bancoOptTxtOn: { color: colors.petroleum },
+  bancoHint: { fontSize: 12, color: colors.orange, fontWeight: '700', marginTop: spacing.sm },
 });

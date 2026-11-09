@@ -456,7 +456,7 @@ function bancoDoEmitente(emitente: NfseEmitente | null, bancoOverride?: 'sicoob'
 export async function gerarBoletosParaVendaCriada(
   userId: string,
   vendaId: string,
-  opts: { descricao: string },
+  opts: { descricao: string; banco?: 'sicoob' | 'c6' | null },
 ): Promise<{ avisoEmail?: string; avisoBoleto?: string }> {
   const { data: venda, error: e0 } = await supabase
     .from('vendas')
@@ -478,8 +478,12 @@ export async function gerarBoletosParaVendaCriada(
     .eq('id', clienteId)
     .maybeSingle();
   const emitenteNfId = (cliRow as { emitente_nf_id?: string | null } | null)?.emitente_nf_id ?? null;
-  const emitente = await resolveEmitenteCobranca(userId, emitenteNfId, null);
-  const banco = bancoDoEmitente(emitente);
+  const emitente = await resolveEmitenteCobranca(
+    userId,
+    emitenteNfId,
+    opts.banco === 'c6' || opts.banco === 'sicoob' ? opts.banco : null,
+  );
+  const banco = bancoDoEmitente(emitente, opts.banco ?? null);
   const snap = await buildSnapshotBenefPag(userId, clienteId, emitente);
   const perfil = await fetchPerfilCobranca(userId).catch(() => null);
 
