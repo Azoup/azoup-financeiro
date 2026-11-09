@@ -483,14 +483,14 @@ function buildDanfseHtml(metaIn) {
 }
 
 /**
- * DANFSe em PDF (A4) para e-mail e Storage — evita anexo .html.
+ * DANFSe em PDF no layout "Nota da Cidade" (Americana) — mesmo desenho do HTML/foto.
  */
 function buildDanfsePdfBuffer(metaIn) {
   const { jsPDF } = require('jspdf');
   const m = metaIn || {};
-  const numero = m.numero || '—';
+  const numero = String(m.numero || '—');
   const dataHora = formatDataHoraBr(m.dataEmissao);
-  const codVerif = m.codigoVerificacao || '—';
+  const codVerif = String(m.codigoVerificacao || '—');
   const valor = moneyBr(m.valor);
   const disc = String(m.discriminacao || 'Prestação de serviços');
   const itemCod = m.itemLista || '01.07';
@@ -500,80 +500,11 @@ function buildDanfsePdfBuffer(metaIn) {
   const rpsData = m.rpsDataEmissao ? formatDataHoraBr(m.rpsDataEmissao) : dataHora;
   const prestEnd = m.prestadorEndereco || formatEndereco(m.prestador || {});
   const tomEnd = m.tomadorEndereco || formatEndereco(m.tomador || {});
+  const venc =
+    m.vencimento ||
+    (dataHora.includes(' ') ? dataHora.split(' ')[0] : dataHora) ||
+    '—';
 
-  const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-  const pageW = pdf.internal.pageSize.getWidth();
-  const margin = 12;
-  const maxW = pageW - margin * 2;
-  let y = margin;
-
-  const ensureSpace = (need) => {
-    if (y + need > pdf.internal.pageSize.getHeight() - margin) {
-      pdf.addPage();
-      y = margin;
-    }
-  };
-
-  const line = (txt, opts = {}) => {
-    const size = opts.size || 9;
-    const bold = opts.bold ? 'bold' : 'normal';
-    pdf.setFont('helvetica', bold);
-    pdf.setFontSize(size);
-    const lines = pdf.splitTextToSize(String(txt ?? ''), opts.width || maxW);
-    ensureSpace(lines.length * (size * 0.45) + 2);
-    pdf.text(lines, opts.x ?? margin, y);
-    y += lines.length * (size * 0.45) + (opts.gap ?? 2);
-  };
-
-  const section = (title) => {
-    ensureSpace(10);
-    y += 2;
-    pdf.setFillColor(232, 232, 232);
-    pdf.rect(margin, y - 4, maxW, 7, 'F');
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(9);
-    pdf.text(String(title), pageW / 2, y, { align: 'center' });
-    y += 6;
-  };
-
-  line('SECRETARIA MUNICIPAL DE FAZENDA', { size: 8, gap: 1 });
-  line('NOTA FISCAL DE SERVIÇOS ELETRÔNICA - NFS-e', { size: 12, bold: true, gap: 1 });
-  line('- NOTA DA CIDADE - MUNICÍPIO DE AMERICANA', { size: 10, bold: true, gap: 3 });
-  line(`Número da Nota: ${numero}`, { bold: true, gap: 1 });
-  line(`Data e Hora de Emissão: ${dataHora}`, { gap: 1 });
-  line(`Código de Verificação: ${codVerif}`, { gap: 3 });
-
-  section('PRESTADOR DE SERVIÇOS');
-  line(`CPF/CNPJ: ${formatCpfCnpj(m.prestadorDoc)}`, { gap: 1 });
-  line(`Inscrição Municipal: ${m.prestadorIm || '—'}  |  IE: ${m.prestadorIe || '—'}`, { gap: 1 });
-  line(`Nome/Razão Social: ${m.prestadorNome || '—'}`, { bold: true, gap: 1 });
-  line(`Nome Fantasia: ${m.prestadorFantasia || m.prestadorNome || '—'}`, { gap: 1 });
-  line(`Endereço: ${prestEnd}`, { gap: 1 });
-  line(
-    `Município: ${m.prestadorMunicipio || 'AMERICANA'} / ${m.prestadorUf || 'SP'}  |  Tel: ${m.prestadorTel || '—'}`,
-    { gap: 1 },
-  );
-  line(`E-mail: ${m.prestadorEmail || '—'}`, { gap: 2 });
-
-  section('TOMADOR DE SERVIÇOS');
-  line(`CPF/CNPJ: ${formatCpfCnpj(m.tomadorDoc)}`, { gap: 1 });
-  line(`Inscrição Municipal: ${m.tomadorIm || '—'}  |  IE: ${m.tomadorIe || '—'}`, { gap: 1 });
-  line(`Nome/Razão Social: ${m.tomadorNome || '—'}`, { bold: true, gap: 1 });
-  line(`Endereço: ${tomEnd}`, { gap: 1 });
-  line(`Tel: ${m.tomadorTel || '—'}  |  E-mail: ${m.tomadorEmail || '—'}`, { gap: 1 });
-  line(
-    `Município: ${m.tomadorMunicipio || '—'} / ${m.tomadorUf || '—'}`,
-    { gap: 2 },
-  );
-
-  section('DISCRIMINAÇÃO DOS SERVIÇOS');
-  line(disc, { gap: 2 });
-  line(`Líquido a Receber R$ ${valor}`, { bold: true, size: 11, gap: 3 });
-
-  section('CÓDIGO DO SERVIÇO');
-  line(itemDesc, { bold: true, gap: 3 });
-
-  section('OUTRAS INFORMAÇÕES');
   const outras = [
     'Esta NFS-e foi emitida com respaldo da Lei nº 4.930/2009 e no Decreto nº 8.250/2009.',
     ...linhasOutrasInformacoesRegime(m),
@@ -582,14 +513,312 @@ function buildDanfsePdfBuffer(metaIn) {
     outras.push(`Esta NFS-e substitui o RPS Nº ${rpsNum} Série ${rpsSerie}, emitido em ${rpsData}.`);
   }
   if (m.outrasInformacoes) outras.push(String(m.outrasInformacoes));
-  for (const o of outras) line(`- ${o}`, { size: 8, gap: 1 });
+
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  const pageW = pdf.internal.pageSize.getWidth();
+  const pageH = pdf.internal.pageSize.getHeight();
+  const outer = 8;
+  const x0 = outer;
+  const x1 = pageW - outer;
+  const w = x1 - x0;
+  let y = outer;
+
+  const stroke = () => {
+    pdf.setDrawColor(0);
+    pdf.setLineWidth(0.25);
+  };
+  const box = (x, yy, ww, hh, style = 'S') => {
+    stroke();
+    pdf.rect(x, yy, ww, hh, style);
+  };
+  const fillGray = (x, yy, ww, hh) => {
+    pdf.setFillColor(232, 232, 232);
+    stroke();
+    pdf.rect(x, yy, ww, hh, 'FD');
+  };
+  const lbl = (txt, x, yy, maxWidth) => {
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(6.5);
+    pdf.setTextColor(34, 34, 34);
+    const lines = pdf.splitTextToSize(String(txt || '').toUpperCase(), maxWidth);
+    pdf.text(lines, x, yy);
+    return lines.length * 2.2;
+  };
+  const val = (txt, x, yy, maxWidth, opts = {}) => {
+    pdf.setFont('helvetica', opts.bold === false ? 'normal' : 'bold');
+    pdf.setFontSize(opts.size || 9);
+    pdf.setTextColor(0, 0, 0);
+    const lines = pdf.splitTextToSize(String(txt ?? '—'), maxWidth);
+    pdf.text(lines, x, yy);
+    return lines.length * ((opts.size || 9) * 0.4 + 0.6);
+  };
+  const sectionBar = (title) => {
+    const h = 6;
+    fillGray(x0, y, w, h);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(8.5);
+    pdf.setTextColor(0, 0, 0);
+    pdf.text(String(title), pageW / 2, y + 4.1, { align: 'center' });
+    y += h;
+  };
+  const cellPad = 1.6;
+  const fieldCell = (label, value, x, yy, ww, hh) => {
+    box(x, yy, ww, hh);
+    lbl(label, x + cellPad, yy + 3, ww - cellPad * 2);
+    val(value, x + cellPad, yy + 6.2, ww - cellPad * 2, { size: 9 });
+  };
+  const textHeight = (txt, maxWidth, size = 9) => {
+    pdf.setFontSize(size);
+    const lines = pdf.splitTextToSize(String(txt ?? ''), maxWidth);
+    return Math.max(1, lines.length) * (size * 0.4 + 0.6);
+  };
+
+  // —— Cabeçalho ——
+  const headerH = 22;
+  const logoW = 16;
+  let logoOk = false;
+  try {
+    const logoSrc = require('../../../utils/azoupLogoDataUri');
+    if (typeof logoSrc === 'string' && logoSrc.startsWith('data:image')) {
+      const b64 = logoSrc.replace(/^data:image\/\w+;base64,/, '');
+      pdf.addImage(b64, 'PNG', x0 + 1.5, y + 3, 13, 13);
+      logoOk = true;
+    }
+  } catch {
+    /* sem logo */
+  }
+  box(x0, y, logoW, headerH);
+  const midW = w * 0.55;
+  const rightW = w - logoW - midW;
+  box(x0 + logoW, y, midW, headerH);
+  box(x0 + logoW + midW, y, rightW, headerH);
+
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(6.5);
+  pdf.text('SECRETARIA MUNICIPAL DE FAZENDA', x0 + logoW + 2.5, y + 4.5);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(9.5);
+  const titleLines = pdf.splitTextToSize('NOTA FISCAL DE SERVIÇOS ELETRÔNICA - NFS-e', midW - 5);
+  pdf.text(titleLines, x0 + logoW + 2.5, y + 8.5);
+  pdf.setFontSize(8.5);
+  pdf.text('- NOTA DA CIDADE -', x0 + logoW + 2.5, y + 14.5);
+  pdf.setFontSize(8);
+  pdf.text('MUNICÍPIO DE AMERICANA', x0 + logoW + 2.5, y + 18.5);
+
+  const rx = x0 + logoW + midW;
+  const metaRows = [
+    ['NÚMERO DA NOTA', numero],
+    ['DATA E HORA DE EMISSÃO', dataHora],
+    ['CÓDIGO DE VERIFICAÇÃO', codVerif],
+  ];
+  const rh = headerH / 3;
+  metaRows.forEach((row, i) => {
+    const yy = y + i * rh;
+    if (i > 0) {
+      stroke();
+      pdf.line(rx, yy, rx + rightW, yy);
+    }
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(5.8);
+    pdf.text(row[0], rx + 1.5, yy + 2.6);
+    pdf.setFontSize(8);
+    pdf.text(String(row[1]), rx + rightW - 1.5, yy + 5.4, { align: 'right' });
+  });
+  y += headerH;
+
+  // —— Prestador ——
+  sectionBar('PRESTADOR DE SERVIÇOS');
+  const pRow1 = 10;
+  const c1 = w * 0.34;
+  const c2 = w * 0.22;
+  const c3 = w - c1 - c2;
+  fieldCell('CPF/CNPJ', formatCpfCnpj(m.prestadorDoc), x0, y, c1, pRow1);
+  fieldCell('Inscrição Municipal', m.prestadorIm || '—', x0 + c1, y, c2, pRow1);
+  fieldCell('Inscrição Estadual', m.prestadorIe || '—', x0 + c1 + c2, y, c3, pRow1);
+  y += pRow1;
+
+  const pNomeH = Math.max(9, 5 + textHeight(m.prestadorNome || '—', w - 4, 9));
+  box(x0, y, w, pNomeH);
+  lbl('Nome/Razão Social', x0 + cellPad, y + 3, w - 4);
+  val(m.prestadorNome || '—', x0 + cellPad, y + 6.2, w - 4);
+  y += pNomeH;
+
+  const fantW = w * 0.66;
+  const telW = w - fantW;
+  const pFantH = Math.max(9, 5 + textHeight(m.prestadorFantasia || m.prestadorNome || '—', fantW - 4, 9));
+  fieldCell('Nome Fantasia', m.prestadorFantasia || m.prestadorNome || '—', x0, y, fantW, pFantH);
+  fieldCell('Tel.', m.prestadorTel || '—', x0 + fantW, y, telW, pFantH);
+  y += pFantH;
+
+  const pEndH = Math.max(9, 5 + textHeight(prestEnd, w - 4, 9));
+  box(x0, y, w, pEndH);
+  lbl('Endereço', x0 + cellPad, y + 3, w - 4);
+  val(prestEnd, x0 + cellPad, y + 6.2, w - 4);
+  y += pEndH;
+
+  const munW = w * 0.4;
+  const ufW = w * 0.12;
+  const emW = w - munW - ufW;
+  const pMunH = 10;
+  fieldCell('Município', m.prestadorMunicipio || 'AMERICANA', x0, y, munW, pMunH);
+  fieldCell('UF', m.prestadorUf || 'SP', x0 + munW, y, ufW, pMunH);
+  fieldCell('E-mail', m.prestadorEmail || '—', x0 + munW + ufW, y, emW, pMunH);
+  y += pMunH;
+
+  // —— Tomador ——
+  sectionBar('TOMADOR DE SERVIÇOS');
+  fieldCell('CPF/CNPJ', formatCpfCnpj(m.tomadorDoc), x0, y, c1, pRow1);
+  fieldCell('Inscrição Municipal', m.tomadorIm || '—', x0 + c1, y, c2, pRow1);
+  fieldCell('Inscrição Estadual', m.tomadorIe || '—', x0 + c1 + c2, y, c3, pRow1);
+  y += pRow1;
+
+  const tNomeH = Math.max(9, 5 + textHeight(m.tomadorNome || '—', w - 4, 9));
+  box(x0, y, w, tNomeH);
+  lbl('Nome/Razão Social', x0 + cellPad, y + 3, w - 4);
+  val(m.tomadorNome || '—', x0 + cellPad, y + 6.2, w - 4);
+  y += tNomeH;
+
+  const tomEndW = w * 0.72;
+  const tomTelW = w - tomEndW;
+  const tEndH = Math.max(9, 5 + textHeight(tomEnd, tomEndW - 4, 9));
+  box(x0, y, tomEndW, tEndH);
+  lbl('Endereço', x0 + cellPad, y + 3, tomEndW - 4);
+  val(tomEnd, x0 + cellPad, y + 6.2, tomEndW - 4);
+  fieldCell('Tel.', m.tomadorTel || '—', x0 + tomEndW, y, tomTelW, tEndH);
+  y += tEndH;
+
+  fieldCell('Município', m.tomadorMunicipio || '—', x0, y, munW, pMunH);
+  fieldCell('UF', m.tomadorUf || '—', x0 + munW, y, ufW, pMunH);
+  fieldCell('E-mail', m.tomadorEmail || '—', x0 + munW + ufW, y, emW, pMunH);
+  y += pMunH;
+
+  // —— Discriminação ——
+  sectionBar('DISCRIMINAÇÃO DOS SERVIÇOS');
+  const discH = Math.max(14, 6 + textHeight(disc, w - 4, 9));
+  box(x0, y, w, discH);
+  val(disc, x0 + cellPad, y + 4.5, w - 4, { bold: false, size: 9 });
+  y += discH;
+  const liqH = 7;
+  box(x0, y, w, liqH);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(9);
+  pdf.text(`Líquido a Receber R$ ${valor}`, x1 - cellPad, y + 4.6, { align: 'right' });
+  y += liqH;
+
+  // Tabela cobrança
+  const th = 6;
+  const td = 7;
+  const cols = [w * 0.28, w * 0.18, w * 0.27, w * 0.27];
+  const headers = ['Documento', 'Parcela', 'Valor', 'Vencimento'];
+  const values = [
+    String(m.documentoCobranca || rpsNum || numero),
+    '1',
+    `R$ ${valor}`,
+    String(venc),
+  ];
+  let cx = x0;
+  headers.forEach((h, i) => {
+    box(cx, y, cols[i], th);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(6.5);
+    pdf.text(h, cx + cols[i] / 2, y + 4, { align: 'center' });
+    cx += cols[i];
+  });
+  y += th;
+  cx = x0;
+  values.forEach((v, i) => {
+    box(cx, y, cols[i], td);
+    pdf.setFont('helvetica', i === 1 ? 'bold' : 'normal');
+    pdf.setFontSize(8.5);
+    pdf.text(v, cx + cols[i] / 2, y + 4.6, { align: 'center' });
+    cx += cols[i];
+  });
+  y += td;
+
+  const tipH = 6;
+  box(x0, y, w, tipH);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(6);
+  pdf.setTextColor(51, 51, 51);
+  pdf.text(
+    'Valor aproximado dos Tributos — Lei nº 12.741/12 (quando informado pela fonte IBPT).',
+    x0 + cellPad,
+    y + 3.8,
+  );
+  pdf.setTextColor(0, 0, 0);
+  y += tipH;
+
+  // —— Código do serviço ——
+  sectionBar('CÓDIGO DO SERVIÇO');
+  const codH = Math.max(8, 4 + textHeight(itemDesc, w - 4, 8.5));
+  box(x0, y, w, codH);
+  val(itemDesc, x0 + cellPad, y + 4, w - 4, { size: 8.5 });
+  y += codH;
+
+  const taxHeaders = [
+    'Deduções (R$)',
+    'Desconto Incond. (R$)',
+    'Base de Cálculo (R$)',
+    'Alíquota (%)',
+    'Valor do ISS (R$)',
+    'Crédito p/ IPTU (R$)',
+  ];
+  const taxVals = ['0,00', '0,00', '—', '—', '—', '0'];
+  const tw = w / 6;
+  const taxTh = 7;
+  const taxTd = 6.5;
+  cx = x0;
+  taxHeaders.forEach((h, i) => {
+    box(cx, y, tw, taxTh);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(5.5);
+    const hl = pdf.splitTextToSize(h, tw - 1.5);
+    pdf.text(hl, cx + tw / 2, y + (hl.length > 1 ? 2.4 : 4.2), { align: 'center' });
+    cx += tw;
+  });
+  y += taxTh;
+  cx = x0;
+  taxVals.forEach((v) => {
+    box(cx, y, tw, taxTd);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(8);
+    pdf.text(v, cx + tw / 2, y + 4.2, { align: 'center' });
+    cx += tw;
+  });
+  y += taxTd;
+
+  // —— Outras informações ——
+  sectionBar('OUTRAS INFORMAÇÕES');
+  const outrasTxt = outras.map((l) => `- ${l}`).join('\n');
+  const outH = Math.max(16, 5 + textHeight(outrasTxt, w - 4, 7.5));
+  box(x0, y, w, outH);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(7.5);
+  pdf.text(pdf.splitTextToSize(outrasTxt, w - 4), x0 + cellPad, y + 4);
+  y += outH;
+
+  const totH = 8;
+  box(x0, y, w, totH);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(11);
+  pdf.text(`VALOR TOTAL DA NOTA = R$ ${valor}`, x1 - cellPad, y + 5.3, { align: 'right' });
+  y += totH;
+
+  // Moldura externa envolvendo todo o conteúdo
+  stroke();
+  pdf.setLineWidth(0.55);
+  pdf.rect(x0, outer, w, y - outer);
 
   y += 4;
-  line(`VALOR TOTAL DA NOTA = R$ ${valor}`, { bold: true, size: 12, gap: 3 });
-  line(
-    'Autenticidade: nfse.americana.sp.gov.br › Verifique a Autenticidade (CNPJ, número e código de verificação).',
-    { size: 7, gap: 1 },
-  );
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(6.5);
+  pdf.setTextColor(80, 80, 80);
+  const auth =
+    'Autenticidade: nfse.americana.sp.gov.br › Verifique a Autenticidade (CNPJ do prestador, número da NFS-e e código de verificação).';
+  pdf.text(pdf.splitTextToSize(auth, w), pageW / 2, y, { align: 'center' });
+
+  void logoOk;
+  void pageH;
 
   return Buffer.from(pdf.output('arraybuffer'));
 }
