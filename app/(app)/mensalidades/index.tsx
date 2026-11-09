@@ -1,6 +1,7 @@
 import { AcoesMenuModal, type AcaoMenuItem } from '@/components/AcoesMenuModal';
 import { FalhaEmissaoLista } from '@/components/FalhaEmissaoLista';
 import { Card } from '@/components/Card';
+import { DatePickerField } from '@/components/DatePickerField';
 import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmitirNfseModal';
 import { buildMensalidadesExport } from '@/utils/exportReportBuilders';
@@ -42,7 +43,7 @@ import type {
 } from '@/types/mensalidadeGerada';
 import type { ClienteListItem } from '@/types/models';
 import { formatBRL } from '@/utils/currency';
-import { formatBRDate, formatDateTimeBRFromISO, parseISODate } from '@/utils/date';
+import { formatBRDate, formatDateTimeBRFromISO, parseISODate, toISODate } from '@/utils/date';
 import { reaisParaCentavos } from '@/utils/vendasParcelas';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -160,6 +161,8 @@ export default function HistoricoMensalidadesGeradasScreen() {
   const debouncedSearch = useDebounce(search, 300);
   const [statusFilter, setStatusFilter] = useState<StatusFiltro>('todos');
   const [nfFiltro, setNfFiltro] = useState<NfFiltro>('todas');
+  const [vencimentoDe, setVencimentoDe] = useState<string | null>(null);
+  const [vencimentoAte, setVencimentoAte] = useState<string | null>(null);
   const [soNaoGerados, setSoNaoGerados] = useState(true);
   const [verReajustes, setVerReajustes] = useState(false);
   const [clientesReajuste, setClientesReajuste] = useState<ClienteReajusteConsulta[]>([]);
@@ -321,6 +324,12 @@ export default function HistoricoMensalidadesGeradasScreen() {
     if (clienteFiltro) {
       list = list.filter((m) => m.cliente_id === String(clienteFiltro));
     }
+    if (vencimentoDe) {
+      list = list.filter((m) => m.data_vencimento >= vencimentoDe);
+    }
+    if (vencimentoAte) {
+      list = list.filter((m) => m.data_vencimento <= vencimentoAte);
+    }
     const term = debouncedSearch.trim().toLowerCase();
     const hasStatus = statusFilter !== 'todos';
     if (term || hasStatus) {
@@ -350,7 +359,18 @@ export default function HistoricoMensalidadesGeradasScreen() {
       list = list.filter((m) => Boolean(nfEmitidas[m.id]));
     }
     return list;
-  }, [allRows, clienteFiltro, debouncedSearch, statusFilter, nfFiltro, nfEmitidas, matchEmpresa, boletosPorMensalidade]);
+  }, [
+    allRows,
+    clienteFiltro,
+    debouncedSearch,
+    statusFilter,
+    nfFiltro,
+    nfEmitidas,
+    matchEmpresa,
+    boletosPorMensalidade,
+    vencimentoDe,
+    vencimentoAte,
+  ]);
 
   const historicoItems = useMemo(() => groupHistoricoRows(filteredRows), [filteredRows]);
 
@@ -375,7 +395,16 @@ export default function HistoricoMensalidadesGeradasScreen() {
 
   useEffect(() => {
     setPagina(1);
-  }, [clienteFiltro, debouncedSearch, statusFilter, nfFiltro, soNaoGerados, verReajustes]);
+  }, [
+    clienteFiltro,
+    debouncedSearch,
+    statusFilter,
+    nfFiltro,
+    soNaoGerados,
+    verReajustes,
+    vencimentoDe,
+    vencimentoAte,
+  ]);
 
   useEffect(() => {
     setPagina((atual) => Math.min(atual, totalPaginas));
@@ -781,9 +810,16 @@ export default function HistoricoMensalidadesGeradasScreen() {
     setSearch('');
     setStatusFilter('todos');
     setNfFiltro('todas');
+    setVencimentoDe(null);
+    setVencimentoAte(null);
   };
 
-  const temFiltroAtivo = Boolean(search.trim()) || statusFilter !== 'todos' || nfFiltro !== 'todas';
+  const temFiltroAtivo =
+    Boolean(search.trim()) ||
+    statusFilter !== 'todos' ||
+    nfFiltro !== 'todas' ||
+    Boolean(vencimentoDe) ||
+    Boolean(vencimentoAte);
 
   const totalBase = useMemo(() => {
     if (clienteFiltro) {
@@ -1131,6 +1167,29 @@ export default function HistoricoMensalidadesGeradasScreen() {
             );
           })}
         </ScrollView>
+
+        <View style={styles.datasFiltro}>
+          <Text style={styles.filterLabel}>Vencimento</Text>
+          <View style={styles.dataLinha}>
+            <View style={styles.datasCol}>
+              <DatePickerField
+                compact
+                label="De"
+                value={vencimentoDe ? new Date(`${vencimentoDe}T12:00:00`) : null}
+                onChange={(d) => setVencimentoDe(d ? toISODate(d) : null)}
+              />
+            </View>
+            <View style={styles.datasCol}>
+              <DatePickerField
+                compact
+                label="Até"
+                value={vencimentoAte ? new Date(`${vencimentoAte}T12:00:00`) : null}
+                onChange={(d) => setVencimentoAte(d ? toISODate(d) : null)}
+                minimumDate={vencimentoDe ? new Date(`${vencimentoDe}T12:00:00`) : undefined}
+              />
+            </View>
+          </View>
+        </View>
 
         <View style={styles.filterRow}>
           <Text style={styles.filterLabel}>NFS-e</Text>
@@ -1590,6 +1649,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.xs,
   },
+  datasFiltro: {
+    marginBottom: spacing.sm,
+    gap: 2,
+  },
+  dataLinha: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  datasCol: { flex: 1, minWidth: 0 },
   filterLabel: {
     fontSize: 12,
     fontWeight: '600',
