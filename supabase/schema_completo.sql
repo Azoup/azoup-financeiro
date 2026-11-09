@@ -400,6 +400,7 @@ create table if not exists public.pagamentos_venda (
   data_pagamento date not null,
   valor_pago numeric(14, 2) not null check (valor_pago > 0),
   observacao text,
+  banco_recebimento text check (banco_recebimento is null or banco_recebimento in ('sicoob', 'c6')),
   created_at timestamptz not null default now()
 );
 

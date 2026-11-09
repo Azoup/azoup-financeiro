@@ -471,6 +471,11 @@ export default function VendaDetailScreen() {
                   {pay.data_pagamento.split('-').reverse().join('/')} ·{' '}
                   {formatDateTimeBRFromISO(pay.created_at)}
                 </Text>
+                {pay.banco_recebimento === 'c6' || pay.banco_recebimento === 'sicoob' ? (
+                  <Text style={styles.payObs}>
+                    Banco: {pay.banco_recebimento === 'c6' ? 'C6 Bank' : 'Sicoob'}
+                  </Text>
+                ) : null}
                 {pay.observacao ? <Text style={styles.payObs}>{pay.observacao}</Text> : null}
                 {parcLines ? <Text style={styles.payParc}>Parcelas: {parcLines}</Text> : null}
                 <Text style={styles.payUser}>Usuário: {pay.user_id.slice(0, 8)}…</Text>

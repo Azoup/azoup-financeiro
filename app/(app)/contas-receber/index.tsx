@@ -862,6 +862,7 @@ export default function ContasReceberScreen() {
     valor_pago: number;
     desconto?: number;
     observacao: string;
+    banco_recebimento: 'sicoob' | 'c6';
   }) => {
     if (!user?.id || !payVendaCtx) return;
     await registrarPagamentoVenda(user.id, payVendaCtx.vendaId, {

@@ -20,6 +20,7 @@ type Props = {
     data_pagamento: string;
     valor_pago: number;
     observacao: string;
+    banco_recebimento: 'sicoob' | 'c6';
     alocacao_manual?: { parcela_id: string; valor: number }[];
   }) => Promise<void>;
 };
@@ -48,12 +49,14 @@ export function BaixaPagamentoModal({
 
   const [dataPag, setDataPag] = useState<Date | null>(() => new Date());
   const [obs, setObs] = useState('');
+  const [bancoRecebimento, setBancoRecebimento] = useState<'sicoob' | 'c6'>('sicoob');
   const [manualMap, setManualMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
   const reset = useCallback(() => {
     setDataPag(new Date());
     setObs('');
+    setBancoRecebimento('sicoob');
     setManualMap({});
   }, []);
 
@@ -61,6 +64,7 @@ export function BaixaPagamentoModal({
     if (!visible) return;
     setDataPag(new Date());
     setObs('');
+    setBancoRecebimento('sicoob');
     if (parcelaFocoId) {
       const p = abertas.find((x) => x.id === parcelaFocoId);
       if (p) {
@@ -106,6 +110,7 @@ export function BaixaPagamentoModal({
         data_pagamento: toISODate(dataPag ?? new Date()),
         valor_pago: centavosParaReais(somaCent),
         observacao: obs,
+        banco_recebimento: bancoRecebimento,
         alocacao_manual: alocRows.map((r) => ({ parcela_id: r.parcela_id, valor: r.valor })),
       });
       reset();
@@ -139,6 +144,30 @@ export function BaixaPagamentoModal({
           </Text>
 
           <DatePickerField label="Data do pagamento" value={dataPag} onChange={setDataPag} />
+
+          <Text style={styles.label}>Banco do recebimento</Text>
+          <Text style={styles.bancoHint}>
+            Informe onde entrou o PIX/transferência (mesmo sem boleto gerado).
+          </Text>
+          <View style={styles.bancoRow}>
+            {(
+              [
+                { id: 'sicoob' as const, label: 'Sicoob' },
+                { id: 'c6' as const, label: 'C6 Bank' },
+              ] as const
+            ).map((opt) => {
+              const on = bancoRecebimento === opt.id;
+              return (
+                <Pressable
+                  key={opt.id}
+                  style={[styles.bancoOpt, on && styles.bancoOptOn]}
+                  onPress={() => setBancoRecebimento(opt.id)}
+                >
+                  <Text style={[styles.bancoOptTxt, on && styles.bancoOptTxtOn]}>{opt.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
 
           <Text style={styles.label}>Valor em cada parcela</Text>
           <ScrollView style={{ maxHeight: 280 }} keyboardShouldPersistTaps="always">
@@ -253,6 +282,22 @@ const styles = StyleSheet.create({
   },
   manLabel: { fontSize: 12, color: colors.gray600, flex: 1 },
   usarSaldo: { fontSize: 12, fontWeight: '700', color: colors.orange },
+  bancoHint: { fontSize: 12, color: colors.gray600, marginTop: 2, marginBottom: spacing.xs },
+  bancoRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', marginBottom: spacing.xs },
+  bancoOpt: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.gray50,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+  },
+  bancoOptOn: {
+    borderColor: colors.petroleum,
+    backgroundColor: colors.white,
+  },
+  bancoOptTxt: { fontSize: 14, fontWeight: '700', color: colors.gray700 },
+  bancoOptTxtOn: { color: colors.petroleum },
   primary: {
     backgroundColor: colors.orange,
     borderRadius: radius.md,

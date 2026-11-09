@@ -20,6 +20,7 @@ type Props = {
     valor_pago: number;
     desconto?: number;
     observacao: string;
+    banco_recebimento: 'sicoob' | 'c6';
   }) => Promise<void>;
 };
 
@@ -35,6 +36,7 @@ export function ContaReceberPagarParcelaVendaModal({
   const [valorMask, setValorMask] = useState('');
   const [descontoMask, setDescontoMask] = useState('');
   const [obs, setObs] = useState('');
+  const [bancoRecebimento, setBancoRecebimento] = useState<'sicoob' | 'c6'>('sicoob');
   const [loading, setLoading] = useState(false);
 
   const reset = useCallback(() => {
@@ -43,6 +45,7 @@ export function ContaReceberPagarParcelaVendaModal({
     setValorMask('');
     setDescontoMask('');
     setObs('');
+    setBancoRecebimento('sicoob');
   }, []);
 
   useEffect(() => {
@@ -86,6 +89,7 @@ export function ContaReceberPagarParcelaVendaModal({
         valor_pago: valorNum,
         desconto: descontoNum > 0 ? descontoNum : undefined,
         observacao: obs,
+        banco_recebimento: bancoRecebimento,
       });
       Toast.show({ type: 'success', text1: 'Pagamento registrado.' });
       reset();
@@ -117,6 +121,27 @@ export function ContaReceberPagarParcelaVendaModal({
           {step === 1 ? (
             <ScrollView keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false}>
               <DatePickerField label="Data do pagamento" value={dataPag} onChange={setDataPag} />
+              <Text style={styles.label}>Banco do recebimento</Text>
+              <Text style={styles.bancoHint}>Onde entrou o PIX/transferência.</Text>
+              <View style={styles.bancoRow}>
+                {(
+                  [
+                    { id: 'sicoob' as const, label: 'Sicoob' },
+                    { id: 'c6' as const, label: 'C6 Bank' },
+                  ] as const
+                ).map((opt) => {
+                  const on = bancoRecebimento === opt.id;
+                  return (
+                    <Pressable
+                      key={opt.id}
+                      style={[styles.bancoOpt, on && styles.bancoOptOn]}
+                      onPress={() => setBancoRecebimento(opt.id)}
+                    >
+                      <Text style={[styles.bancoOptTxt, on && styles.bancoOptTxtOn]}>{opt.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
               <Text style={styles.label}>Desconto (opcional)</Text>
               <MaskInput
                 style={styles.input}
@@ -170,6 +195,12 @@ export function ContaReceberPagarParcelaVendaModal({
                 <Text style={styles.revLab}>Data</Text>
                 <Text style={styles.revVal}>
                   {dataPag ? toISODate(dataPag).split('-').reverse().join('/') : '—'}
+                </Text>
+              </View>
+              <View style={styles.revRow}>
+                <Text style={styles.revLab}>Banco</Text>
+                <Text style={styles.revVal}>
+                  {bancoRecebimento === 'c6' ? 'C6 Bank' : 'Sicoob'}
                 </Text>
               </View>
               {obs.trim() ? (
@@ -229,6 +260,22 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   hintLiq: { fontSize: 12, color: colors.gray600, marginTop: 6 },
+  bancoHint: { fontSize: 12, color: colors.gray600, marginBottom: spacing.xs },
+  bancoRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', marginBottom: spacing.xs },
+  bancoOpt: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.gray50,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+  },
+  bancoOptOn: {
+    borderColor: colors.petroleum,
+    backgroundColor: colors.white,
+  },
+  bancoOptTxt: { fontSize: 14, fontWeight: '700', color: colors.gray700 },
+  bancoOptTxtOn: { color: colors.petroleum },
   input: {
     borderWidth: 1,
     borderColor: colors.gray100,

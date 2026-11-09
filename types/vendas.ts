@@ -52,6 +52,8 @@ export interface PagamentoVenda {
   data_pagamento: string;
   valor_pago: number;
   observacao: string | null;
+  /** Banco onde o valor foi recebido (PIX etc.), mesmo sem boleto. */
+  banco_recebimento?: 'sicoob' | 'c6' | null;
   created_at: string;
 }
 
@@ -127,5 +129,7 @@ export interface RegistrarPagamentoInput {
   /** Desconto concedido nesta baixa (opcional; aplicado nas parcelas alocadas). */
   desconto?: number;
   observacao: string;
+  /** Banco do recebimento (obrigatório na UI de baixa — PIX/Sicoob/C6). */
+  banco_recebimento?: 'sicoob' | 'c6' | null;
   alocacao_manual?: { parcela_id: string; valor: number }[];
 }

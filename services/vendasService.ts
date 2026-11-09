@@ -609,7 +609,13 @@ export async function registrarPagamentoVenda(
     }
   }
 
+  const bancoRec =
+    input.banco_recebimento === 'c6' || input.banco_recebimento === 'sicoob'
+      ? input.banco_recebimento
+      : null;
+  const bancoLabel = bancoRec === 'c6' ? 'C6 Bank' : bancoRec === 'sicoob' ? 'Sicoob' : null;
   const obsParts = [input.observacao.trim()].filter(Boolean);
+  if (bancoLabel) obsParts.unshift(`Recebido no ${bancoLabel}`);
   if (descCent > 0) {
     obsParts.push(`Desconto na baixa: R$ ${(descCent / 100).toFixed(2).replace('.', ',')}`);
   }
@@ -617,17 +623,35 @@ export async function registrarPagamentoVenda(
 
   let pagamentoId: string | null = null;
   if (valorCent > 0) {
-    const { data: payIns, error: e1 } = await supabase
+    const basePay = {
+      venda_id: vendaId,
+      user_id: userId,
+      data_pagamento: input.data_pagamento,
+      valor_pago: input.valor_pago,
+      observacao: obsFinal,
+    };
+    let payIns: { id: string } | null = null;
+    let e1: { message: string } | null = null;
+    const withBanco = await supabase
       .from('pagamentos_venda')
-      .insert({
-        venda_id: vendaId,
-        user_id: userId,
-        data_pagamento: input.data_pagamento,
-        valor_pago: input.valor_pago,
-        observacao: obsFinal,
-      })
+      .insert({ ...basePay, banco_recebimento: bancoRec })
       .select('id')
       .single();
+    if (
+      withBanco.error &&
+      /banco_recebimento|column|schema cache/i.test(withBanco.error.message)
+    ) {
+      const fallback = await supabase
+        .from('pagamentos_venda')
+        .insert(basePay)
+        .select('id')
+        .single();
+      payIns = fallback.data as { id: string } | null;
+      e1 = fallback.error;
+    } else {
+      payIns = withBanco.data as { id: string } | null;
+      e1 = withBanco.error;
+    }
     if (e1 || !payIns) throw new Error(e1?.message ?? 'Erro ao registrar pagamento.');
     pagamentoId = payIns.id as string;
 
@@ -687,6 +711,7 @@ export async function registrarPagamentoVenda(
       pagamento_id: pagamentoId,
       valor: input.valor_pago,
       desconto: input.desconto ?? 0,
+      banco_recebimento: bancoRec,
       parcelas: aloc,
     },
   });
