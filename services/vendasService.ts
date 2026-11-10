@@ -692,13 +692,21 @@ export async function registrarPagamentoVenda(
       .eq('venda_id', vendaId);
     if (eu) throw new Error(eu.message);
 
+    // Banco escolhido na baixa (PIX etc.) precisa refletir em Contas a receber (tipo_emissao),
+    // senão continua aparecendo o banco do carnê antigo (ex.: C6) mesmo selecionando Sicoob.
+    const boletoPatch: Record<string, string> = {};
+    if (bancoRec) boletoPatch.tipo_emissao = bancoRec;
     if (st === 'pago') {
+      boletoPatch.status_registro = 'pago';
+      boletoPatch.data_liquidacao_sicoob = input.data_pagamento;
+    }
+    if (Object.keys(boletoPatch).length) {
       await supabase
         .from('boletos_parcela_venda')
-        .update({ status_registro: 'pago', data_liquidacao_sicoob: input.data_pagamento })
+        .update(boletoPatch)
         .eq('parcela_id', p.id)
         .eq('user_id', userId)
-        .in('status_registro', ['registrado', 'pendente', 'informativo']);
+        .in('status_registro', ['registrado', 'pendente', 'informativo', 'erro']);
     }
   }
 

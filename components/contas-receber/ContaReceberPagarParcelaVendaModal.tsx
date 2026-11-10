@@ -82,6 +82,7 @@ export function ContaReceberPagarParcelaVendaModal({
 
   const enviar = async () => {
     if (!dataPag) return;
+    const bancoEscolhido: 'sicoob' | 'c6' = bancoRecebimento === 'c6' ? 'c6' : 'sicoob';
     setLoading(true);
     try {
       await onConfirm({
@@ -89,7 +90,7 @@ export function ContaReceberPagarParcelaVendaModal({
         valor_pago: valorNum,
         desconto: descontoNum > 0 ? descontoNum : undefined,
         observacao: obs,
-        banco_recebimento: bancoRecebimento,
+        banco_recebimento: bancoEscolhido,
       });
       Toast.show({ type: 'success', text1: 'Pagamento registrado.' });
       reset();

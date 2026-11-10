@@ -104,13 +104,14 @@ export function BaixaPagamentoModal({
 
   const handleSubmit = async () => {
     if (!valorOk) return;
+    const bancoEscolhido: 'sicoob' | 'c6' = bancoRecebimento === 'c6' ? 'c6' : 'sicoob';
     setLoading(true);
     try {
       await onSubmit({
         data_pagamento: toISODate(dataPag ?? new Date()),
         valor_pago: centavosParaReais(somaCent),
         observacao: obs,
-        banco_recebimento: bancoRecebimento,
+        banco_recebimento: bancoEscolhido,
         alocacao_manual: alocRows.map((r) => ({ parcela_id: r.parcela_id, valor: r.valor })),
       });
       reset();
@@ -208,12 +209,19 @@ export function BaixaPagamentoModal({
             multiline
           />
 
+          <Text style={styles.bancoConfirm}>
+            Recebimento em: {bancoRecebimento === 'c6' ? 'C6 Bank' : 'Sicoob'}
+          </Text>
           <Pressable
             style={[styles.primary, (!valorOk || loading) && styles.primaryDisabled]}
             disabled={!valorOk || loading}
             onPress={() => void handleSubmit()}
           >
-            <Text style={styles.primaryTxt}>{loading ? 'Salvando…' : 'Confirmar baixa'}</Text>
+            <Text style={styles.primaryTxt}>
+              {loading
+                ? 'Salvando…'
+                : `Confirmar baixa · ${bancoRecebimento === 'c6' ? 'C6' : 'Sicoob'}`}
+            </Text>
           </Pressable>
         </Pressable>
       </Pressable>
@@ -298,6 +306,13 @@ const styles = StyleSheet.create({
   },
   bancoOptTxt: { fontSize: 14, fontWeight: '700', color: colors.gray700 },
   bancoOptTxtOn: { color: colors.petroleum },
+  bancoConfirm: {
+    marginTop: spacing.md,
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.orange,
+    textAlign: 'center',
+  },
   primary: {
     backgroundColor: colors.orange,
     borderRadius: radius.md,
