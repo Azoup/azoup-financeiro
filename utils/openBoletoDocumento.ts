@@ -61,11 +61,23 @@ function boletoComEncargos(row: BoletoParcelaVendaRow): boolean {
   return calcularEncargosBoleto(row.valor_documento, row.data_vencimento).vencido;
 }
 
+function baixarBlobWeb(blob: Blob, filename: string): void {
+  if (typeof document === 'undefined') return;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 /**
- * Abre PDF oficial do banco ou carnê HTML.
- * No web, NÃO usa Print.printToFileAsync (imprime a tela do app).
- * Boleto vencido em aberto: o carnê soma multa e juros, como o aplicativo do banco.
- * Boleto C6 sem registro: não abre carnê HTML (não é boleto bancário pagável).
+ * Abre PDF oficial do banco ou carnê com multa/juros.
+ * Boleto vencido em aberto: gera PDF com valor atualizado (não o PDF oficial de face).
+ * Boleto C6 sem registro: não abre carnê (não é boleto bancário pagável).
  */
 export async function abrirDocumentoBoleto(row: BoletoParcelaVendaRow): Promise<void> {
   const comEncargos = boletoComEncargos(row);
@@ -90,6 +102,33 @@ export async function abrirDocumentoBoleto(row: BoletoParcelaVendaRow): Promise<
 
   const pagadorAtual = await enderecoPagadorAtualDoBoleto(row).catch(() => null);
   const html = buildBoletoCobrancaHtml(pagadorAtual ? { ...row, ...pagadorAtual } : row);
+  const filename = `boleto_${(row.numero_documento || row.id || 'cobranca').toString().replace(/[^\w.-]+/g, '_')}.pdf`;
+
+  // Atrasado: sempre PDF com mora/juros (evita baixar o oficial sem encargos).
+  if (comEncargos) {
+    try {
+      const { uri } = await Print.printToFileAsync({ html });
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const res = await fetch(uri);
+        const blob = await res.blob();
+        const pdfBlob =
+          blob.type === 'application/pdf'
+            ? blob
+            : new Blob([await blob.arrayBuffer()], { type: 'application/pdf' });
+        baixarBlobWeb(pdfBlob, filename);
+        openHtmlInNewTabWeb(html);
+        return;
+      }
+      await openExternalUrl(uri);
+      return;
+    } catch {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        openHtmlInNewTabWeb(html);
+        return;
+      }
+      throw new Error('Não foi possível gerar o PDF com juros do atraso.');
+    }
+  }
 
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     openHtmlInNewTabWeb(html);

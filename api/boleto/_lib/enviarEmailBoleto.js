@@ -307,11 +307,6 @@ async function tentarEnviarEmailAposEmissao(admin, userId, emitResult) {
       }
     }
 
-    const pdfBuffer = await baixarPdfBytes(admin, boleto);
-    if (!pdfBuffer?.length) {
-      return { skipped: true, reason: 'sem_pdf', to: to.join(', ') };
-    }
-
     const nomeCliente = safeTrim(cliente?.nome) || safeTrim(cliente?.nome_fantasia) || 'cliente';
 
     const referencia =
@@ -322,6 +317,24 @@ async function tentarEnviarEmailAposEmissao(admin, userId, emitResult) {
       boleto.status_registro === 'pago' || boleto.status_registro === 'baixado'
         ? null
         : calcularEncargosBoleto(boleto.valor_documento, boleto.data_vencimento);
+
+    // Atrasado: PDF com multa/juros atualizados (o oficial do banco só traz valor de face).
+    let pdfBuffer = null;
+    if (encargos?.vencido) {
+      try {
+        const { buildBoletoCobrancaPdfBuffer } = require('./boletoCobrancaPdf');
+        pdfBuffer = buildBoletoCobrancaPdfBuffer(boleto);
+      } catch (e) {
+        console.warn('[email-boleto] pdf com encargos:', e?.message || e);
+      }
+    }
+    if (!pdfBuffer?.length) {
+      pdfBuffer = await baixarPdfBytes(admin, boleto);
+    }
+    if (!pdfBuffer?.length) {
+      return { skipped: true, reason: 'sem_pdf', to: to.join(', ') };
+    }
+
     const text = buildCorpo({
       nomeCliente,
       referencia,

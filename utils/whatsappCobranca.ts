@@ -228,7 +228,16 @@ async function obterPdfBoleto(
     );
   }
 
-  // Vencimento editado no sistema pode deixar o PDF do Storage com a data antiga.
+  const encargos = calcularEncargosBoleto(row.valor_documento, row.data_vencimento);
+  // Atrasado: PDF com multa/juros (oficial do banco só tem valor de face).
+  if (encargos.vencido) {
+    const html = buildBoletoCobrancaHtml(row);
+    const { blob, uri } = await htmlParaPdf(html);
+    const published = await publicarPdfTemporario(row, blob);
+    return { blob, uri, pdfUrl: published };
+  }
+
+  // Em dia: PDF oficial do banco (vencimento editado pode exigir refresh).
   let rowPdf = row;
   if (
     (row.tipo_emissao === 'sicoob' && row.nosso_numero_banco) ||
