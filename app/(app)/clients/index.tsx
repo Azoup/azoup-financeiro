@@ -4,6 +4,7 @@ import { ImportClientsModal } from '@/components/ImportClientsModal';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
 import {
+  fetchClientsExportAll,
   fetchClientsPage,
   PAGE_SIZE,
   type ClienteSituacaoFiltro,
@@ -276,13 +277,21 @@ export default function ClientsListScreen() {
         </View>
         <ExportReportButtons
           disabled={!user?.id || loading}
-          getReport={() => {
+          getReport={async () => {
             if (!user?.id) throw new Error('Usuário não autenticado.');
-            return buildClientsListExport(items, {
+            const todos = await fetchClientsExportAll({
+              userId: user.id,
+              search: debounced,
+              sortField,
+              sortOrder,
+              situacao,
+              emitenteNfId: empresaId === 'todos' ? null : empresaId,
+            });
+            return buildClientsListExport(todos, {
               search: debounced,
               situacao,
               sortLabel,
-              rangeLabel,
+              rangeLabel: `Todos os filtrados (${todos.length})`,
             });
           }}
         />

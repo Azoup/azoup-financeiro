@@ -1,4 +1,5 @@
 import { Card } from '@/components/Card';
+import { ExportReportButtons } from '@/components/ExportReportButtons';
 import { ConfirmarEmitirNfseModal } from '@/components/mensalidades/ConfirmarEmitirNfseModal';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresaFiltro } from '@/context/EmpresaFiltroContext';
@@ -10,6 +11,7 @@ import { fonts } from '@/theme/typography';
 import type { AzoupClienteResumo, AzoupDashboardData, AzoupStatusGrupo } from '@/types/azoupAdmin';
 import { formatBRL } from '@/utils/currency';
 import { formatDateTimeBRFromISO } from '@/utils/date';
+import { buildAzoupClientesExport } from '@/utils/exportReportBuilders';
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -407,6 +409,15 @@ export default function AzoupDashboardScreen() {
           <Text style={styles.sectionHint}>
             {filteredClientes.length} de {data.clientes.length} na lista
           </Text>
+          <ExportReportButtons
+            disabled={filteredClientes.length === 0}
+            getReport={() =>
+              buildAzoupClientesExport(filteredClientes, {
+                search: debouncedSearch,
+                status: statusFilter,
+              })
+            }
+          />
 
           <View style={styles.searchWrap}>
             <Ionicons name="search" size={16} color={colors.gray400} />

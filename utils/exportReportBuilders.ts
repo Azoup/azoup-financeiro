@@ -5,6 +5,7 @@ import type { ClienteFormValues, ClienteListItem, SegmentoClienteRow } from '@/t
 import type { PerfilCobrancaInput } from '@/types/contasReceber';
 import type { VendaDetail, VendaFinanceiroStats, VendaListRow } from '@/types/vendas';
 import type { ClienteSituacaoFiltro } from '@/services/clientsService';
+import type { AzoupClienteResumo } from '@/types/azoupAdmin';
 import { formatBRL } from '@/utils/currency';
 import { formatBRDate, formatDateTimeBRFromISO, parseISODate } from '@/utils/date';
 import { vendaDescricaoResumo } from '@/utils/vendasDescricao';
@@ -40,7 +41,7 @@ export function buildClientsListExport(
     'Contatos',
     'Cadastro',
   ];
-  const rows = items.map((c) => [
+  const pdfRows = items.map((c) => [
     c.nome_cliente,
     c.nome_empresa ?? '',
     c.documento,
@@ -51,12 +52,24 @@ export function buildClientsListExport(
     String(c.contatos_count ?? 0),
     formatDateTimeBRFromISO(c.created_at) || '',
   ]);
+  // Excel: mensalidade e contatos como número (não texto formatado).
+  const excelRows = items.map((c) => [
+    c.nome_cliente,
+    c.nome_empresa ?? '',
+    c.documento,
+    c.cnpj?.trim() ?? '',
+    c.segmento_cliente?.nome ?? c.segmento_cliente_codigo ?? '',
+    Number(c.valor_mensalidade) || 0,
+    c.cancelado ? 'Cancelado' : 'Ativo',
+    Number(c.contatos_count) || 0,
+    formatDateTimeBRFromISO(c.created_at) || '',
+  ]);
 
   return {
     title: 'Clientes',
     subtitle: [
       `Filtros: busca "${opts.search || '—'}" · situação ${opts.situacao} · ordenação ${opts.sortLabel}`,
-      opts.rangeLabel ? opts.rangeLabel : null,
+      opts.rangeLabel ? opts.rangeLabel : `Todos os filtrados (${items.length})`,
     ]
       .filter(Boolean)
       .join(' · '),
@@ -66,9 +79,78 @@ export function buildClientsListExport(
         { label: 'Ativos', value: String(items.filter((c) => !c.cancelado).length) },
         { label: 'Cancelados', value: String(items.filter((c) => c.cancelado).length) },
       ]),
-      tableSection('Lista de clientes', columns, rows),
+      tableSection('Lista de clientes', columns, pdfRows),
     ],
-    sheets: [sheetFromTable('Clientes', columns, rows)],
+    sheets: [{ name: 'Clientes', columns, rows: excelRows }],
+  };
+}
+
+export function buildAzoupClientesExport(
+  clientes: AzoupClienteResumo[],
+  opts?: { search?: string; status?: string },
+): ExportReportPayload {
+  const columns = [
+    'Cliente',
+    'E-mail',
+    'Telefone',
+    'Plano',
+    'Status',
+    'Valor líquido',
+    'Valor cheio',
+    'Desconto',
+    'Empresa matriz',
+    'CNPJ matriz',
+    'Cadastro',
+  ];
+  const pdfRows = clientes.map((c) => [
+    c.nome,
+    c.email ?? '',
+    c.telefone ?? '',
+    c.plano_nome ?? '',
+    c.status_label,
+    formatBRL((Number(c.valor_centavos) || 0) / 100),
+    formatBRL((Number(c.valor_bruto_centavos) || 0) / 100),
+    formatBRL((Number(c.desconto_centavos) || 0) / 100),
+    c.empresa_matriz_nome ?? '',
+    c.empresa_matriz_cnpj ?? '',
+    c.created_at ? formatDateTimeBRFromISO(c.created_at) || '' : '',
+  ]);
+  const excelRows = clientes.map((c) => [
+    c.nome,
+    c.email ?? '',
+    c.telefone ?? '',
+    c.plano_nome ?? '',
+    c.status_label,
+    Number(((Number(c.valor_centavos) || 0) / 100).toFixed(2)),
+    Number(((Number(c.valor_bruto_centavos) || 0) / 100).toFixed(2)),
+    Number(((Number(c.desconto_centavos) || 0) / 100).toFixed(2)),
+    c.empresa_matriz_nome ?? '',
+    c.empresa_matriz_cnpj ?? '',
+    c.created_at ? formatDateTimeBRFromISO(c.created_at) || '' : '',
+  ]);
+
+  return {
+    title: 'Clientes Azoup',
+    subtitle: [
+      opts?.search ? `Busca: "${opts.search}"` : null,
+      opts?.status && opts.status !== 'todos' ? `Status: ${opts.status}` : null,
+      `${clientes.length} cliente(s) filtrado(s)`,
+    ]
+      .filter(Boolean)
+      .join(' · '),
+    sections: [
+      kvSection('Resumo', [
+        { label: 'Total filtrado', value: String(clientes.length) },
+        {
+          label: 'Soma valor líquido',
+          value: formatBRL(
+            clientes.reduce((s, c) => s + (Number(c.valor_centavos) || 0), 0) / 100,
+          ),
+        },
+      ]),
+      tableSection('Clientes', columns, pdfRows),
+    ],
+    sheets: [{ name: 'Clientes Azoup', columns, rows: excelRows }],
   };
 }
 
