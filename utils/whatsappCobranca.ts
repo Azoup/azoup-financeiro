@@ -3,10 +3,10 @@ import { buildBoletoCobrancaHtml } from '@/utils/boletoCobrancaHtml';
 import { calcularEncargosBoleto } from '@/utils/boletoEncargos';
 import { formatBRL } from '@/utils/currency';
 import { formatBRDate, parseISODate } from '@/utils/date';
+import { htmlParaPdfBlob } from '@/utils/htmlParaPdf';
 import { mensagemPendenciaBoleto } from '@/utils/mensagemPendenciaBoleto';
 import { resolveBoletoPdfUrl } from '@/utils/openBoletoDocumento';
 import { safeTrim } from '@/utils/safeTrim';
-import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Linking, Platform } from 'react-native';
 
@@ -166,25 +166,26 @@ export function abrirWhatsAppCobrancaNaConversa(
   abrirUrlWhatsApp(resolveWhatsAppCobrancaUrl(row, opts));
 }
 
-async function htmlParaPdf(html: string): Promise<{ blob: Blob; uri: string }> {
-  const { uri } = await Print.printToFileAsync({ html });
-  if (isWeb() && typeof fetch !== 'undefined') {
-    const res = await fetch(uri);
-    const blob = await res.blob();
-    const pdfBlob =
-      blob.type === 'application/pdf'
-        ? blob
-        : new Blob([await blob.arrayBuffer()], { type: 'application/pdf' });
-    return { blob: pdfBlob, uri };
+async function htmlParaPdf(html: string): Promise<{ blob: Blob; uri?: string }> {
+  // No web NÃO usa expo-print: abre o diálogo "Imprimir / Guardar como PDF" da tela do app.
+  const blob = await htmlParaPdfBlob(html);
+  if (isWeb()) return { blob };
+
+  try {
+    const FileSystem = await import('expo-file-system/legacy');
+    const path = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}boleto_html_${Date.now()}.pdf`;
+    const buffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const base64 = btoa(binary);
+    await FileSystem.writeAsStringAsync(path, base64, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return { blob, uri: path };
+  } catch {
+    return { blob };
   }
-  const FileSystem = await import('expo-file-system/legacy');
-  const base64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return { blob: new Blob([bytes], { type: 'application/pdf' }), uri };
 }
 
 async function fetchPdfBlob(url: string): Promise<Blob> {

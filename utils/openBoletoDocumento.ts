@@ -3,6 +3,7 @@ import { enderecoPagadorAtualDoBoleto } from '@/services/boletoParcelaService';
 import type { BoletoParcelaVendaRow } from '@/types/contasReceber';
 import { calcularEncargosBoleto } from '@/utils/boletoEncargos';
 import { buildBoletoCobrancaHtml } from '@/utils/boletoCobrancaHtml';
+import { htmlParaPdfBlob } from '@/utils/htmlParaPdf';
 import * as Print from 'expo-print';
 import { Linking, Platform } from 'react-native';
 
@@ -105,20 +106,15 @@ export async function abrirDocumentoBoleto(row: BoletoParcelaVendaRow): Promise<
   const filename = `boleto_${(row.numero_documento || row.id || 'cobranca').toString().replace(/[^\w.-]+/g, '_')}.pdf`;
 
   // Atrasado: sempre PDF com mora/juros (evita baixar o oficial sem encargos).
+  // No web NÃO usa expo-print — abre o diálogo de impressão da tela do app.
   if (comEncargos) {
     try {
-      const { uri } = await Print.printToFileAsync({ html });
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const res = await fetch(uri);
-        const blob = await res.blob();
-        const pdfBlob =
-          blob.type === 'application/pdf'
-            ? blob
-            : new Blob([await blob.arrayBuffer()], { type: 'application/pdf' });
-        baixarBlobWeb(pdfBlob, filename);
-        openHtmlInNewTabWeb(html);
+        const blob = await htmlParaPdfBlob(html);
+        baixarBlobWeb(blob, filename);
         return;
       }
+      const { uri } = await Print.printToFileAsync({ html });
       await openExternalUrl(uri);
       return;
     } catch {
