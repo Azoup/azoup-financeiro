@@ -61,6 +61,8 @@ function parseCompetenciaIso(competencia, fallbackDate) {
   if (m1) return `${m1[2]}-${m1[1]}-01`;
   const m2 = raw.match(/^(\d{4})-(\d{2})$/);
   if (m2) return `${m2[1]}-${m2[2]}-01`;
+  const m3 = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m3) return `${m3[1]}-${m3[2]}-${m3[3]}`;
   return dateYmd(fallbackDate);
 }
 

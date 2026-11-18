@@ -364,8 +364,14 @@ async function listarFaturasAzoup(admin, opts = {}) {
       const vencimento = inv.due_date
         ? new Date(inv.due_date * 1000).toISOString()
         : null;
+      // Preferir pagamento / fim do período: period_start de fatura mensal costuma
+      // cair no mês anterior e gerava E0039 no SEFIN (competência < 11/2026).
       const competencia =
-        competenciaDeTs(inv.period_start) || competenciaDeTs(inv.created) || null;
+        competenciaDeTs(inv.status_transitions?.paid_at) ||
+        competenciaDeTs(inv.period_end) ||
+        competenciaDeTs(inv.period_start) ||
+        competenciaDeTs(inv.created) ||
+        null;
 
       const linha = montarLinha({
         id: inv.id,
@@ -414,8 +420,9 @@ async function listarFaturasAzoup(admin, opts = {}) {
       const dataPagamento = row.data_pagamento ?? null;
       const criadoEm = row.criado_em ?? row.created_at ?? null;
       const competencia =
-        competenciaDeIso(periodoInicio) ||
         competenciaDeIso(dataPagamento) ||
+        competenciaDeIso(periodoFim) ||
+        competenciaDeIso(periodoInicio) ||
         competenciaDeIso(criadoEm);
 
       byInvoice.set(

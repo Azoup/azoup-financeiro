@@ -1,4 +1,5 @@
 const { onlyDigits } = require('./buildNFeFromDb');
+const { isOptanteSimplesNacional, normalizeRegTribSefin } = require('./nfseGateways');
 
 function parseCompetenciaIso(competencia, fallbackDate) {
   const raw = String(competencia ?? '').trim();
@@ -6,10 +7,30 @@ function parseCompetenciaIso(competencia, fallbackDate) {
   if (m1) return `${m1[2]}-${m1[1]}-01`;
   const m2 = raw.match(/^(\d{4})-(\d{2})$/);
   if (m2) return `${m2[1]}-${m2[2]}-01`;
+  // YYYY-MM-DD (ou ISO com hora) — evita cair no fallback e mudar o mês.
+  const m3 = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m3) return `${m3[1]}-${m3[2]}-${m3[3]}`;
   const d = fallbackDate ? new Date(fallbackDate) : new Date();
+  if (Number.isNaN(d.getTime())) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const mo = String(now.getMonth() + 1).padStart(2, '0');
+    return `${y}-${mo}-${String(now.getDate()).padStart(2, '0')}`;
+  }
   const y = d.getFullYear();
   const mo = String(d.getMonth() + 1).padStart(2, '0');
   return `${y}-${mo}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** SEFIN E0039: optante ME/EPP/MEI só com competência ≥ 11/2026. */
+function ensureCompetenciaSefinOptante(dCompet, config) {
+  if (!isOptanteSimplesNacional(config)) return dCompet;
+  const ym = String(dCompet ?? '').slice(0, 7);
+  if (!ym || ym >= '2026-11') return dCompet;
+  const day = String(dCompet).slice(8, 10);
+  const dd = /^\d{2}$/.test(day) && day !== '00' ? day : '01';
+  console.warn('[nfse] competência', ym, '< 2026-11 — ajustando para 2026-11 (E0039 SEFIN)');
+  return `2026-11-${dd}`;
 }
 
 function dhEmiBr(isoDate) {
@@ -198,15 +219,18 @@ async function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
   }
   const cepDps = onlyDigits(cepTomador).padStart(8, '0').slice(0, 8);
 
-  const opSimpNac = Number(config.op_simp_nac ?? 1);
-  // xml2js preserva ordem das chaves; TCRegTrib exige regApTribSN antes de regEspTrib (DPS_v1.01).
+  // xml2js preserva ordem das chaves; TCRegTrib exige opSimpNac → regApTribSN → regEspTrib.
+  const norm = normalizeRegTribSefin(config);
   const regTrib = {
-    opSimpNac,
-    ...(opSimpNac === 2 || opSimpNac === 3
-      ? { regApTribSN: Number(config.reg_ap_trib_sn ?? 1) }
-      : {}),
-    regEspTrib: Number(config.reg_esp_trib ?? 0),
+    opSimpNac: norm.opSimpNac,
+    ...(norm.regApTribSN != null ? { regApTribSN: norm.regApTribSN } : {}),
+    regEspTrib: norm.regEspTrib,
   };
+
+  const dCompet = ensureCompetenciaSefinOptante(
+    parseCompetenciaIso(nota.competencia, nota.data_emissao),
+    config,
+  );
 
   return {
     DPS: {
@@ -216,7 +240,7 @@ async function buildNFSeLayout({ nota, itens, perfil, cliente, config }) {
         verAplic: 'SistemaJessica-1.0',
         serie: String(serieNum),
         nDPS: String(nota.numero),
-        dCompet: parseCompetenciaIso(nota.competencia, nota.data_emissao),
+        dCompet,
         tpEmit: 1,
         cLocEmi: ibge,
         // E0120: no SEFIN nacional a IM do prestador NÃO deve ir na DPS

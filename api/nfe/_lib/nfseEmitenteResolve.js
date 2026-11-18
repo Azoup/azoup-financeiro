@@ -23,6 +23,12 @@ function emitenteToPerfil(e) {
 }
 
 function emitenteToConfig(e) {
+  const regime = Number(e.regime_tributario ?? 0);
+  let opSimp = Number(e.op_simp_nac ?? 0);
+  // Simples sem ME/EPP/MEI no cadastro → força ME/EPP (3) para o ADN (E0039).
+  if ((regime === 1 || regime === 2) && opSimp !== 2 && opSimp !== 3) {
+    opSimp = regime === 2 ? 2 : 3;
+  }
   return {
     user_id: e.user_id,
     serie: e.serie,
@@ -42,7 +48,7 @@ function emitenteToConfig(e) {
     codigo_tributacao_municipal: e.codigo_tributacao_municipal,
     codigo_nbs: e.codigo_nbs,
     codigo_cnae: e.codigo_cnae,
-    op_simp_nac: e.op_simp_nac,
+    op_simp_nac: opSimp || e.op_simp_nac,
     reg_esp_trib: e.reg_esp_trib,
     trib_issqn: e.trib_issqn,
     tp_ret_issqn: e.tp_ret_issqn,

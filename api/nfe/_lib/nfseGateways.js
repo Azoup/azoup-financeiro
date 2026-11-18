@@ -52,6 +52,33 @@ function isOptanteSimplesNacional(config) {
 }
 
 /**
+ * TCRegTrib no SEFIN (E0039): optante precisa opSimpNac=2 (MEI) ou 3 (ME/EPP) + regApTribSN.
+ * Cadastro inconsistente (regime Simples + op_simp_nac=1) gerava DPS sem regApTribSN.
+ */
+function normalizeRegTribSefin(config) {
+  const regime = Number(config?.regime_tributario ?? 0);
+  let opSimpNac = Number(config?.op_simp_nac ?? 0);
+  const optante = isOptanteSimplesNacional(config);
+  if (!optante) {
+    return {
+      opSimpNac: opSimpNac === 2 || opSimpNac === 3 ? opSimpNac : 1,
+      regApTribSN: null,
+      regEspTrib: Number(config?.reg_esp_trib ?? 0),
+    };
+  }
+  // 1=não optante e 4=pendente não bastam no ADN; ME/EPP (3) é o padrão Azoup.
+  if (opSimpNac !== 2 && opSimpNac !== 3) {
+    opSimpNac = regime === 2 ? 2 : 3;
+  }
+  const regAp = Number(config?.reg_ap_trib_sn ?? 1);
+  return {
+    opSimpNac,
+    regApTribSN: Number.isFinite(regAp) && regAp >= 1 ? regAp : 1,
+    regEspTrib: Number(config?.reg_esp_trib ?? 0),
+  };
+}
+
+/**
  * @param {string|number} ibge
  * @param {number} [ambiente]
  * @param {{ forceNacional?: boolean, optanteSimples?: boolean, config?: object }} [opts]
@@ -127,4 +154,5 @@ module.exports = {
   clearNfseGatewayEnv,
   normalizeIbge,
   isOptanteSimplesNacional,
+  normalizeRegTribSefin,
 };
