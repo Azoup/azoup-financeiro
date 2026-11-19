@@ -63,7 +63,7 @@ export function buildCorpoEmailDanfse(item: NotaFiscalListRow): string {
       ? `• Código de verificação: ${safeTrim(item.codigo_verificacao)}`
       : null,
     '',
-    'O documento DANFSe segue em anexo.',
+    'A DANFE (PDF) e o XML da NFS-e seguem em anexo.',
     '',
     'Qualquer dúvida, estamos à disposição.',
     'Atenciosamente.',
@@ -87,6 +87,14 @@ export async function compartilharDanfsePorEmail(item: NotaFiscalListRow): Promi
   const subject = `NFS-e ${serie}/${numero}`;
   const body = buildCorpoEmailDanfse(item);
   const filename = `DANFSe_${serie}_${numero}.pdf`;
+  const xml = typeof item.xml_autorizado === 'string' ? item.xml_autorizado.trim() : '';
+  const xmlAnexo = xml
+    ? {
+        blob: new Blob([xml], { type: 'application/xml;charset=utf-8' }),
+        filename: `NFSe_${serie}_${numero}.xml`,
+        mimeType: 'application/xml',
+      }
+    : null;
 
   try {
     const { blob } = await htmlParaPdfBlob(html);
@@ -99,6 +107,7 @@ export async function compartilharDanfsePorEmail(item: NotaFiscalListRow): Promi
         filename,
         mimeType: 'application/pdf',
       },
+      arquivos: xmlAnexo ? [xmlAnexo] : undefined,
     });
     return { email, resultado };
   } catch {
@@ -113,6 +122,7 @@ export async function compartilharDanfsePorEmail(item: NotaFiscalListRow): Promi
         filename: `DANFSe_${serie}_${numero}.html`,
         mimeType: 'text/html',
       },
+      arquivos: xmlAnexo ? [xmlAnexo] : undefined,
     });
     return { email, resultado };
   }

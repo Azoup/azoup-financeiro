@@ -99,38 +99,57 @@ export async function compartilharComEmail(opts: {
   subject: string;
   body: string;
   arquivo?: { uri?: string; blob?: Blob; filename: string; mimeType: string };
+  /** Anexos extras (ex.: XML da NFS-e junto com a DANFE). */
+  arquivos?: { uri?: string; blob?: Blob; filename: string; mimeType: string }[];
   preferirShareSheet?: boolean;
 }): Promise<CompartilharResultado> {
   const preferirShare = opts.preferirShareSheet !== false;
   const subject = normalizeEmailText(opts.subject);
   const body = normalizeEmailText(opts.body);
+  const extras = Array.isArray(opts.arquivos) ? opts.arquivos.filter((a) => a?.blob || a?.uri) : [];
 
   if (isWeb() && opts.arquivo?.blob && typeof File !== 'undefined') {
-    const file = new File([opts.arquivo.blob], opts.arquivo.filename, {
-      type: opts.arquivo.mimeType,
-    });
-    const shareData: ShareData = { title: subject, text: body, files: [file] };
+    const files = [
+      new File([opts.arquivo.blob], opts.arquivo.filename, {
+        type: opts.arquivo.mimeType,
+      }),
+      ...extras
+        .filter((a): a is { blob: Blob; filename: string; mimeType: string } => Boolean(a.blob))
+        .map((a) => new File([a.blob], a.filename, { type: a.mimeType })),
+    ];
+    const shareData: ShareData = { title: subject, text: body, files };
     if (typeof navigator !== 'undefined' && navigator.share && navigator.canShare?.(shareData)) {
       await navigator.share(shareData);
       return 'compartilhado';
     }
 
-    const contentBase64 = await blobToBase64(opts.arquivo.blob);
+    const attachments = [
+      {
+        filename: opts.arquivo.filename,
+        mimeType: opts.arquivo.mimeType,
+        contentBase64: await blobToBase64(opts.arquivo.blob),
+      },
+    ];
+    for (const extra of extras) {
+      if (!extra.blob) continue;
+      attachments.push({
+        filename: extra.filename,
+        mimeType: extra.mimeType,
+        contentBase64: await blobToBase64(extra.blob),
+      });
+    }
     const eml = buildEmlDraft({
       to: opts.to,
       subject,
       body,
-      attachments: [
-        {
-          filename: opts.arquivo.filename,
-          mimeType: opts.arquivo.mimeType,
-          contentBase64,
-        },
-      ],
+      attachments,
     });
     const emlName = opts.arquivo.filename.replace(/\.[^.]+$/, '') || 'documento';
     downloadEmlFile(`${emlName}.eml`, eml);
     await baixarArquivoWeb(opts.arquivo.blob, opts.arquivo.filename);
+    for (const extra of extras) {
+      if (extra.blob) await baixarArquivoWeb(extra.blob, extra.filename);
+    }
     return 'eml';
   }
 
