@@ -205,6 +205,125 @@ async function enviarEmailResend({ to, subject, text, pdfBuffer, filename, attac
   return { enviado: true, to: destinatarios.join(', '), id: body?.id ?? null };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Baixa PDF oficial C6 (com retries) e grava no boleto. */
+async function tentarBaixarPdfC6ComRetry(admin, userId, boleto, tentativas = 3) {
+  if (!boleto?.c6_boleto_id || !boleto?.emitente_id) return boleto;
+  const { baixarESalvarPdfC6 } = require('./emitirBoletoC6');
+  const { loadC6Credentials } = require('./c6Credentials');
+  const { cleanupTemp } = require('./c6Client');
+  let creds;
+  try {
+    creds = await loadC6Credentials(admin, userId, boleto.emitente_id);
+  } catch (e) {
+    console.warn('[email-boleto] credenciais C6:', e?.message || e);
+    return boleto;
+  }
+  try {
+    for (let i = 0; i < tentativas; i += 1) {
+      if (i > 0) await sleep(1500 * i);
+      try {
+        const pdf = await baixarESalvarPdfC6(
+          admin,
+          userId,
+          boleto.id,
+          creds,
+          boleto.c6_boleto_id,
+          null,
+        );
+        if (pdf?.pdfUrl || pdf?.pdfStoragePath) {
+          boleto.pdf_url = pdf.pdfUrl || boleto.pdf_url;
+          boleto.pdf_storage_path = pdf.pdfStoragePath || boleto.pdf_storage_path;
+          await admin
+            .from('boletos_parcela_venda')
+            .update({
+              pdf_url: boleto.pdf_url,
+              pdf_storage_path: boleto.pdf_storage_path,
+              status_registro:
+                boleto.status_registro === 'pendente' ? 'registrado' : boleto.status_registro,
+            })
+            .eq('id', boleto.id);
+          return boleto;
+        }
+      } catch (e) {
+        console.warn('[email-boleto] PDF C6 tentativa', i + 1, e?.message || e);
+      }
+    }
+  } finally {
+    if (creds && !creds.bundled) {
+      cleanupTemp(creds.certPath);
+      cleanupTemp(creds.keyPath);
+    }
+  }
+  return boleto;
+}
+
+/**
+ * Garante um PDF para o e-mail: oficial do banco → retries C6 → carnê local.
+ * Assim o envio automático não falha no modo rápido sem PDF pronto.
+ */
+async function obterPdfBoletoParaEmail(admin, userId, boleto, emitResult) {
+  const encargos =
+    boleto.status_registro === 'pago' || boleto.status_registro === 'baixado'
+      ? null
+      : calcularEncargosBoleto(boleto.valor_documento, boleto.data_vencimento);
+
+  // Atrasado: carnê com multa/juros (oficial do banco só tem valor de face).
+  if (encargos?.vencido) {
+    try {
+      const { buildBoletoCobrancaPdfBuffer } = require('./boletoCobrancaPdf');
+      const buf = buildBoletoCobrancaPdfBuffer(boleto);
+      if (buf?.length) return { pdfBuffer: buf, encargos, fonte: 'encargos' };
+    } catch (e) {
+      console.warn('[email-boleto] pdf com encargos:', e?.message || e);
+    }
+  }
+
+  if (
+    (boleto.tipo_emissao === 'sicoob' && boleto.nosso_numero_banco) ||
+    (boleto.tipo_emissao === 'c6' && boleto.c6_boleto_id)
+  ) {
+    try {
+      const { refreshPdfOficialBoleto } = require('./refreshPdfOficial');
+      const refreshed = await refreshPdfOficialBoleto(admin, userId, boleto.id);
+      if (refreshed?.pdf_url) {
+        boleto.pdf_url = refreshed.pdf_url;
+        if (refreshed.pdf_storage_path) boleto.pdf_storage_path = refreshed.pdf_storage_path;
+      }
+    } catch (e) {
+      console.warn('[email-boleto] refresh PDF oficial:', e.message);
+    }
+  }
+
+  let pdfBuffer = await baixarPdfBytes(admin, boleto);
+  if (pdfBuffer?.length) return { pdfBuffer, encargos, fonte: 'storage' };
+
+  if (boleto.c6_boleto_id) {
+    await tentarBaixarPdfC6ComRetry(admin, userId, boleto, 3);
+    pdfBuffer = await baixarPdfBytes(admin, boleto);
+    if (pdfBuffer?.length) return { pdfBuffer, encargos, fonte: 'c6' };
+  }
+
+  // Fallback: PDF local com dados do título (linha digitável / Pix quando houver).
+  try {
+    const { buildBoletoCobrancaPdfBuffer } = require('./boletoCobrancaPdf');
+    const boletoEmail = {
+      ...boleto,
+      linha_digitavel: boleto.linha_digitavel || emitResult?.linha_digitavel || null,
+      pix_copia_cola: boleto.pix_copia_cola || emitResult?.pix_copia_cola || null,
+    };
+    const buf = buildBoletoCobrancaPdfBuffer(boletoEmail);
+    if (buf?.length) return { pdfBuffer: buf, encargos, fonte: 'local' };
+  } catch (e) {
+    console.warn('[email-boleto] pdf local fallback:', e?.message || e);
+  }
+
+  return { pdfBuffer: null, encargos, fonte: null };
+}
+
 /**
  * Após emitir boleto com sucesso: envia PDF ao e-mail do cadastro.
  * Não lança — falha de e-mail não desfaz o boleto.
@@ -217,6 +336,7 @@ async function tentarEnviarEmailAposEmissao(admin, userId, emitResult) {
     if (
       emitResult.status_registro &&
       emitResult.status_registro !== 'registrado' &&
+      emitResult.status_registro !== 'pendente' &&
       !emitResult.pdf_url &&
       !emitResult.c6_boleto_id
     ) {
@@ -247,90 +367,13 @@ async function tentarEnviarEmailAposEmissao(admin, userId, emitResult) {
       .eq('id', clienteId)
       .maybeSingle();
 
-    // PDF em Storage pode estar desatualizado (ex.: vencimento editado no DB/banco
-    // sem a segunda via ter sido gravada). Antes do e-mail, tenta alinhar com a data do sistema.
-    if (
-      (boleto.tipo_emissao === 'sicoob' && boleto.nosso_numero_banco) ||
-      (boleto.tipo_emissao === 'c6' && boleto.c6_boleto_id)
-    ) {
-      try {
-        const { refreshPdfOficialBoleto } = require('./refreshPdfOficial');
-        const refreshed = await refreshPdfOficialBoleto(admin, userId, boletoId);
-        if (refreshed?.pdf_url) {
-          boleto.pdf_url = refreshed.pdf_url;
-          if (refreshed.pdf_storage_path) boleto.pdf_storage_path = refreshed.pdf_storage_path;
-        }
-      } catch (e) {
-        console.warn('[email-boleto] refresh PDF oficial:', e.message);
-      }
-    }
-
-    // C6 modo rápido: tenta baixar PDF uma vez antes de enviar.
-    let pdfUrl = boleto.pdf_url;
-    let pdfStoragePath = boleto.pdf_storage_path;
-    if (!pdfUrl && !pdfStoragePath && boleto.c6_boleto_id && boleto.emitente_id) {
-      try {
-        const { baixarESalvarPdfC6 } = require('./emitirBoletoC6');
-        const { loadC6Credentials } = require('./c6Credentials');
-        const { cleanupTemp } = require('./c6Client');
-        const creds = await loadC6Credentials(admin, userId, boleto.emitente_id);
-        try {
-          const pdf = await baixarESalvarPdfC6(
-            admin,
-            userId,
-            boletoId,
-            creds,
-            boleto.c6_boleto_id,
-            null,
-          );
-          if (pdf.pdfUrl || pdf.pdfStoragePath) {
-            pdfUrl = pdf.pdfUrl;
-            pdfStoragePath = pdf.pdfStoragePath;
-            await admin
-              .from('boletos_parcela_venda')
-              .update({
-                pdf_url: pdfUrl,
-                pdf_storage_path: pdfStoragePath,
-              })
-              .eq('id', boletoId);
-            boleto.pdf_url = pdfUrl;
-            boleto.pdf_storage_path = pdfStoragePath;
-          }
-        } finally {
-          if (!creds.bundled) {
-            cleanupTemp(creds.certPath);
-            cleanupTemp(creds.keyPath);
-          }
-        }
-      } catch (e) {
-        console.warn('[email-boleto] PDF C6 indisponível:', e.message);
-      }
-    }
-
     const nomeCliente = safeTrim(cliente?.nome) || safeTrim(cliente?.nome_fantasia) || 'cliente';
-
     const referencia =
       safeTrim(boleto.venda_descricao_resumo)?.split('\n')[0] ||
       (boleto.origem === 'mensalidade' ? 'Mensalidade' : 'Cobrança');
     const subject = `Boleto — ${referencia}`.slice(0, 200);
-    const encargos =
-      boleto.status_registro === 'pago' || boleto.status_registro === 'baixado'
-        ? null
-        : calcularEncargosBoleto(boleto.valor_documento, boleto.data_vencimento);
 
-    // Atrasado: PDF com multa/juros atualizados (o oficial do banco só traz valor de face).
-    let pdfBuffer = null;
-    if (encargos?.vencido) {
-      try {
-        const { buildBoletoCobrancaPdfBuffer } = require('./boletoCobrancaPdf');
-        pdfBuffer = buildBoletoCobrancaPdfBuffer(boleto);
-      } catch (e) {
-        console.warn('[email-boleto] pdf com encargos:', e?.message || e);
-      }
-    }
-    if (!pdfBuffer?.length) {
-      pdfBuffer = await baixarPdfBytes(admin, boleto);
-    }
+    const { pdfBuffer, encargos } = await obterPdfBoletoParaEmail(admin, userId, boleto, emitResult);
     if (!pdfBuffer?.length) {
       return { skipped: true, reason: 'sem_pdf', to: to.join(', ') };
     }
@@ -347,7 +390,9 @@ async function tentarEnviarEmailAposEmissao(admin, userId, emitResult) {
     });
     const filename = `boleto_${safeTrim(boleto.numero_documento) || boletoId}.pdf`;
 
-    return await enviarEmailResend({ to, subject, text, pdfBuffer, filename });
+    const email = await enviarEmailResend({ to, subject, text, pdfBuffer, filename });
+    console.info('[email-boleto]', boletoId, email?.enviado ? 'enviado' : email?.reason || email?.error);
+    return email;
   } catch (e) {
     console.warn('[email-boleto]', e.message);
     return { skipped: false, enviado: false, error: e.message || 'Falha ao enviar e-mail' };

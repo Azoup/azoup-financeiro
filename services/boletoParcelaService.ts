@@ -579,7 +579,10 @@ export async function gerarBoletosParaVendaCriada(
     const { resumoEmailBoletosLote } = await import('@/utils/resumoEmailBoleto');
     try {
       if (banco === 'c6' && emitente?.id) {
-        const lote = await emitirBoletosC6Lote(userId, emitente.id, boletoIds, { modoRapido: true });
+        // Venda: poucas parcelas — baixa PDF oficial para o e-mail automático.
+        const lote = await emitirBoletosC6Lote(userId, emitente.id, boletoIds, {
+          modoRapido: boletoIds.length > 5,
+        });
         avisoEmail = resumoEmailBoletosLote(lote) ?? undefined;
       } else {
         const lote = await emitirBoletosSicoobLote(userId, boletoIds);

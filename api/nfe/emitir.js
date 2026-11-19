@@ -155,6 +155,8 @@ module.exports = async function handler(req, res) {
           chave_acesso: recuperada.chave_acesso,
           protocolo_autorizacao: recuperada.protocolo_autorizacao,
           xml_autorizado: recuperada.xml_autorizado,
+          danfe_url: recuperada.danfe_url ?? null,
+          danfe_storage_path: recuperada.danfe_storage_path ?? null,
           codigo_verificacao: recuperada.codigo_verificacao ?? null,
           tipo_documento: 'nfse',
           ambiente: 1,
@@ -166,15 +168,28 @@ module.exports = async function handler(req, res) {
         recuperada.email = await tentarEnviarEmailDanfe(admin, {
           nota: {
             ...notaAtual,
+            chave_acesso: recuperada.chave_acesso ?? notaAtual.chave_acesso,
             codigo_verificacao: recuperada.codigo_verificacao ?? notaAtual.codigo_verificacao,
+            protocolo_autorizacao:
+              recuperada.protocolo_autorizacao ?? notaAtual.protocolo_autorizacao,
+            xml_autorizado: recuperada.xml_autorizado ?? notaAtual.xml_autorizado,
+            danfe_storage_path: recuperada.danfe_storage_path ?? null,
+            danfe_url: recuperada.danfe_url ?? null,
+            status: 'autorizada',
           },
           cliente,
-          danfeStoragePath: null,
+          danfeStoragePath: recuperada.danfe_storage_path ?? null,
           xml: recuperada.xml_autorizado,
-          danfeUrl: null,
+          danfeUrl: recuperada.danfe_url ?? null,
         });
-      } catch {
-        /* e-mail opcional */
+        console.info(
+          '[nfse] e-mail automático após autorização',
+          notaFiscalId,
+          recuperada.email?.enviado ? 'enviado' : recuperada.email?.reason || recuperada.email?.error,
+        );
+      } catch (emailErr) {
+        console.warn('[nfse] e-mail DANFSe após recuperação ADN:', emailErr?.message ?? emailErr);
+        recuperada.email = { enviado: false, error: String(emailErr?.message ?? emailErr) };
       }
       return recuperada;
     };
@@ -335,13 +350,24 @@ module.exports = async function handler(req, res) {
       result.email = await tentarEnviarEmailDanfe(admin, {
         nota: {
           ...notaAtual,
+          chave_acesso: result.chave_acesso ?? notaAtual.chave_acesso,
           codigo_verificacao: result.codigo_verificacao ?? notaAtual.codigo_verificacao,
+          protocolo_autorizacao: result.protocolo_autorizacao ?? notaAtual.protocolo_autorizacao,
+          xml_autorizado: result.xml_autorizado ?? notaAtual.xml_autorizado,
+          danfe_storage_path: result.danfe_storage_path ?? null,
+          danfe_url: result.danfe_url ?? null,
+          status: 'autorizada',
         },
         cliente,
         danfeStoragePath: result.danfe_storage_path,
         xml: result.xml_autorizado,
         danfeUrl: result.danfe_url,
       });
+      console.info(
+        '[nfse] e-mail automático após autorização',
+        notaFiscalId,
+        result.email?.enviado ? 'enviado' : result.email?.reason || result.email?.error,
+      );
     } catch (emailErr) {
       console.warn('[nfse] e-mail DANFSe após autorização:', emailErr?.message ?? emailErr);
       result.email = { enviado: false, error: String(emailErr?.message ?? emailErr) };

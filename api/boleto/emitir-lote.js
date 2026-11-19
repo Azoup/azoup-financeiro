@@ -257,8 +257,17 @@ module.exports = async function handler(req, res) {
         const result = usarC6
           ? await emitirUmBoletoC6(admin, user.id, boletoId, emitenteId, c6Opts)
           : await emitirUmBoleto(admin, user.id, boletoId);
+        // Sempre envia o PDF por e-mail após registro bem-sucedido (Sicoob/C6).
         if (result.success && result.emitido_agora !== false) {
-          result.email = await tentarEnviarEmailAposEmissao(admin, user.id, result);
+          try {
+            result.email = await tentarEnviarEmailAposEmissao(admin, user.id, result);
+          } catch (emailErr) {
+            console.warn('[boleto] e-mail automático:', emailErr?.message ?? emailErr);
+            result.email = {
+              enviado: false,
+              error: String(emailErr?.message ?? emailErr),
+            };
+          }
         }
         resultados.push(result);
         if (result.status_registro === 'registrado' || result.c6_boleto_id) emitidos += 1;
