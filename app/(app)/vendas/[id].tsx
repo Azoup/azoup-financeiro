@@ -97,7 +97,16 @@ export default function VendaDetailScreen() {
       ]);
       let carne = carneIni;
       let bols = bolsIni;
-      const abertas = d?.parcelas.filter((p) => p.status !== 'cancelado').length ?? 0;
+      // Só parcelas em aberto contam para carnê (não gera de novo o que já foi pago).
+      const abertas =
+        d?.parcelas.filter((p) => {
+          if (p.status === 'cancelado' || p.status === 'pago') return false;
+          const face = Math.round(Number(p.valor) * 100) || 0;
+          const pago = Math.round(Number(p.valor_pago) * 100) || 0;
+          const desc = Math.round(Number(p.desconto ?? 0) * 100) || 0;
+          if (face > 0 && pago + desc >= face) return false;
+          return true;
+        }).length ?? 0;
       // Só recria carnê automático se a venda pediu boleto (gerar_boleto !== false).
       const optouSemBoleto = d?.gerar_boleto === false;
       if (
@@ -334,7 +343,15 @@ export default function VendaDetailScreen() {
 
         <View style={styles.actions}>
           {detail.status !== 'cancelada' &&
-          qtdCarne < detail.parcelas.filter((p) => p.status !== 'cancelado').length ? (
+          qtdCarne <
+            detail.parcelas.filter((p) => {
+              if (p.status === 'cancelado' || p.status === 'pago') return false;
+              const face = Math.round(Number(p.valor) * 100) || 0;
+              const pago = Math.round(Number(p.valor_pago) * 100) || 0;
+              const desc = Math.round(Number(p.desconto ?? 0) * 100) || 0;
+              if (face > 0 && pago + desc >= face) return false;
+              return true;
+            }).length ? (
             <>
               {detail.gerar_boleto === false && qtdCarne === 0 ? (
                 <Text style={styles.meta}>

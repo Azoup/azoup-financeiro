@@ -489,7 +489,7 @@ export async function gerarBoletosParaVendaCriada(
 
   const { data: parcelas, error: e2 } = await supabase
     .from('parcelas_venda')
-    .select('id, numero_parcela, valor, data_vencimento')
+    .select('id, numero_parcela, valor, valor_pago, desconto, data_vencimento, status')
     .eq('venda_id', vendaId)
     .order('numero_parcela', { ascending: true });
 
@@ -498,9 +498,24 @@ export async function gerarBoletosParaVendaCriada(
     id: string;
     numero_parcela: number;
     valor: number;
+    valor_pago?: number;
+    desconto?: number;
     data_vencimento: string;
+    status?: string;
   }[];
   if (!plist.length) throw new Error('Nenhuma parcela para gerar boletos.');
+
+  // Só parcelas em aberto: não gera carnê de parcela já paga/cancelada.
+  const abertas = plist.filter((p) => {
+    const st = String(p.status ?? '');
+    if (st === 'pago' || st === 'cancelado') return false;
+    const face = Math.round(Number(p.valor) * 100) || 0;
+    const pago = Math.round(Number(p.valor_pago ?? 0) * 100) || 0;
+    const desc = Math.round(Number(p.desconto ?? 0) * 100) || 0;
+    if (face > 0 && pago + desc >= face) return false;
+    return true;
+  });
+  if (!abertas.length) return {};
 
   const { data: jaTem, error: eJa } = await supabase
     .from('boletos_parcela_venda')
@@ -513,7 +528,7 @@ export async function gerarBoletosParaVendaCriada(
       .map((b) => b.parcela_id)
       .filter((id): id is string => Boolean(id)),
   );
-  const faltantes = plist.filter((p) => !comBoleto.has(p.id));
+  const faltantes = abertas.filter((p) => !comBoleto.has(p.id));
   if (!faltantes.length) return {};
 
   const ocupados = await chavesBoletoClienteDia(
@@ -1052,10 +1067,23 @@ async function sincronizarCarnesVendasLista(
     const fatia = vendaIds.slice(i, i + 80);
     const { data: parcs, error: e2 } = await supabase
       .from('parcelas_venda')
-      .select('id, venda_id')
+      .select('id, venda_id, status, valor, valor_pago, desconto')
       .in('venda_id', fatia);
     if (e2) throw new Error(e2.message);
-    for (const p of (parcs ?? []) as { id: string; venda_id: string }[]) {
+    for (const p of (parcs ?? []) as {
+      id: string;
+      venda_id: string;
+      status?: string;
+      valor?: number;
+      valor_pago?: number;
+      desconto?: number;
+    }[]) {
+      const st = String(p.status ?? '');
+      if (st === 'pago' || st === 'cancelado') continue;
+      const face = Math.round(Number(p.valor) * 100) || 0;
+      const pago = Math.round(Number(p.valor_pago ?? 0) * 100) || 0;
+      const desc = Math.round(Number(p.desconto ?? 0) * 100) || 0;
+      if (face > 0 && pago + desc >= face) continue;
       const arr = parcPorVenda.get(p.venda_id) ?? [];
       arr.push(p.id);
       parcPorVenda.set(p.venda_id, arr);
