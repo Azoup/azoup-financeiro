@@ -1224,6 +1224,7 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
   const stParcela = new Map<string, string>();
   const stMens = new Map<string, string>();
   const dataPagamentoMens = new Map<string, string>();
+  const dataPagamentoParcela = new Map<string, string>();
   const valorPagoTitulo = new Map<string, number>();
   const descontoTitulo = new Map<string, number>();
   const clientePorMensalidade = new Map<string, string>();
@@ -1270,6 +1271,38 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
     stParcela.set(p.id, p.status);
     valorPagoTitulo.set(p.id, Number(p.valor_pago) || 0);
     descontoTitulo.set(p.id, Number(p.desconto) || 0);
+  }
+
+  // Data de pagamento das parcelas de venda (pagamentos_venda → pagamento_parcelas).
+  const parcelaIdsParaData = [
+    ...new Set(
+      brutos
+        .map((b) => b.parcela_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (parcelaIdsParaData.length) {
+    const ppRows = await selectInChunks(parcelaIdsParaData, async (slice) => {
+      const { data, error } = await supabase
+        .from('pagamento_parcelas')
+        .select('parcela_id, pagamentos_venda(data_pagamento)')
+        .in('parcela_id', slice);
+      if (error) throw new Error(error.message);
+      return (data ?? []) as {
+        parcela_id: string;
+        pagamentos_venda?:
+          | { data_pagamento?: string | null }
+          | { data_pagamento?: string | null }[]
+          | null;
+      }[];
+    });
+    for (const row of ppRows) {
+      const pay = umRelacionado(row.pagamentos_venda);
+      const d = pay?.data_pagamento ? String(pay.data_pagamento).slice(0, 10) : '';
+      if (!d) continue;
+      const atual = dataPagamentoParcela.get(row.parcela_id);
+      if (!atual || d > atual) dataPagamentoParcela.set(row.parcela_id, d);
+    }
   }
 
   const mens = await selectInChunks(mensalidadeSemStatus, async (slice) => {
@@ -1385,7 +1418,8 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
   }
 
   return brutos.map((b) => {
-    const { mensalidades: _m, parcelas_venda: _p, ...boleto } = b;
+    const { mensalidades: _m, parcelas_venda: _p, ...rest } = b;
+    let boleto = rest;
     const isMen = boleto.origem === 'mensalidade' || Boolean(boleto.mensalidade_id);
     const status = isMen
       ? (stMens.get(boleto.mensalidade_id ?? '') ?? '—')
@@ -1419,18 +1453,59 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
     const tituloId = isMen ? boleto.mensalidade_id : boleto.parcela_id;
     const valorPago = tituloId ? valorPagoTitulo.get(tituloId) ?? 0 : 0;
     const desconto = tituloId ? descontoTitulo.get(tituloId) ?? 0 : 0;
+    const tituloPago =
+      boleto.status_registro === 'pago' ||
+      status === 'pago' ||
+      status === 'quitada' ||
+      status === 'quitado' ||
+      (valorPago > 0 &&
+        Number(boleto.valor_documento) > 0 &&
+        valorPago + desconto >= Number(boleto.valor_documento) - 0.009);
+
+    const dataPagamento =
+      (boleto.data_liquidacao_sicoob ? String(boleto.data_liquidacao_sicoob).slice(0, 10) : null) ||
+      (boleto.mensalidade_id ? dataPagamentoMens.get(boleto.mensalidade_id) ?? null : null) ||
+      (boleto.parcela_id ? dataPagamentoParcela.get(boleto.parcela_id) ?? null : null);
+
+    // Corrige carnê inconsistente: título pago no sistema mas boleto "baixado"/sem data.
+    if (
+      tituloPago &&
+      (boleto.status_registro === 'baixado' ||
+        boleto.status_registro === 'registrado' ||
+        boleto.status_registro === 'pendente' ||
+        boleto.status_registro === 'informativo' ||
+        boleto.status_registro === 'erro' ||
+        !boleto.data_liquidacao_sicoob) &&
+      dataPagamento
+    ) {
+      void supabase
+        .from('boletos_parcela_venda')
+        .update({
+          status_registro: 'pago',
+          data_liquidacao_sicoob: dataPagamento,
+        })
+        .eq('id', boleto.id)
+        .eq('user_id', userId)
+        .then(({ error }) => {
+          if (error) console.warn('[contas-receber] heal boleto pago:', error.message);
+        });
+      boleto = {
+        ...boleto,
+        status_registro: 'pago',
+        data_liquidacao_sicoob: dataPagamento,
+      };
+    }
 
     return {
       ...boleto,
       nota_fiscal_id,
       origem: isMen ? 'mensalidade' : 'venda',
-      parcela_status: boleto.status_registro === 'pago' || status === 'pago' ? 'pago' : status,
-      situacao_cobranca:
-        boleto.status_registro === 'pago' || status === 'pago' || status === 'quitada' || status === 'quitado'
-          ? 'pago'
-          : boleto.status_registro === 'baixado'
-            ? 'cancelado'
-            : situacaoCobrancaDeStatus(status),
+      parcela_status: tituloPago ? 'pago' : status,
+      situacao_cobranca: tituloPago
+        ? 'pago'
+        : boleto.status_registro === 'baixado'
+          ? 'cancelado'
+          : situacaoCobrancaDeStatus(status),
       nome_cliente: String(boleto.pagador_nome || '—'),
       referencia_label,
       cliente_id: clienteId == null ? null : String(clienteId),
@@ -1438,9 +1513,7 @@ async function hidratarContasReceber(userId: string, brutos: BoletoConsulta[]): 
       whatsapp_contato_nome: wa?.nome ?? null,
       email: em?.valor ?? null,
       email_contato_nome: em?.nome ?? null,
-      data_pagamento:
-        (boleto.data_liquidacao_sicoob ? String(boleto.data_liquidacao_sicoob).slice(0, 10) : null) ||
-        (boleto.mensalidade_id ? dataPagamentoMens.get(boleto.mensalidade_id) ?? null : null),
+      data_pagamento: dataPagamento,
       valor_pago: valorPago,
       desconto,
       segmento_codigo: seg?.codigo ?? null,
@@ -1676,6 +1749,93 @@ async function somarRecebido(userId: string, opts: ContasReceberConsulta): Promi
     for (const row of chaves) soma += valorRecebidoChave(row, lado);
   }
   return Math.round(soma * 100) / 100;
+}
+
+/**
+ * Alinha carnês pagos no título mas com status "baixado"/sem data de liquidação.
+ * Sem isso, o filtro por data de pagamento (data_liquidacao_sicoob) esconde o título.
+ */
+export async function repararBoletosPagosInconsistentes(userId: string): Promise<number> {
+  let corrigidos = 0;
+
+  // Vendas: parcela paga + carnê sem liquidação/"baixado"
+  const { data: bolsVenda, error: eV } = await supabase
+    .from('boletos_parcela_venda')
+    .select('id, parcela_id, status_registro, data_liquidacao_sicoob, parcelas_venda(status, valor_pago)')
+    .eq('user_id', userId)
+    .eq('origem', 'venda')
+    .not('parcela_id', 'is', null)
+    .neq('status_registro', 'pago');
+  if (eV) throw wrapBoletoDbError(eV);
+
+  const parcelaIds = (bolsVenda ?? [])
+    .map((b) => b.parcela_id as string | null)
+    .filter((id): id is string => Boolean(id));
+  const dataPorParcela = new Map<string, string>();
+  if (parcelaIds.length) {
+    const { data: pps } = await supabase
+      .from('pagamento_parcelas')
+      .select('parcela_id, pagamentos_venda(data_pagamento)')
+      .in('parcela_id', parcelaIds);
+    for (const row of pps ?? []) {
+      const pay = umRelacionado(
+        (row as { pagamentos_venda?: { data_pagamento?: string | null } | { data_pagamento?: string | null }[] })
+          .pagamentos_venda,
+      );
+      const d = pay?.data_pagamento ? String(pay.data_pagamento).slice(0, 10) : '';
+      if (!d) continue;
+      const pid = String((row as { parcela_id: string }).parcela_id);
+      const atual = dataPorParcela.get(pid);
+      if (!atual || d > atual) dataPorParcela.set(pid, d);
+    }
+  }
+
+  for (const b of bolsVenda ?? []) {
+    const parc = umRelacionado(
+      (b as { parcelas_venda?: TituloFinanceiroRel | TituloFinanceiroRel[] }).parcelas_venda,
+    );
+    const pagoTitulo =
+      parc?.status === 'pago' ||
+      (Number(parc?.valor_pago) || 0) > 0;
+    if (!pagoTitulo) continue;
+    const data =
+      dataPorParcela.get(String(b.parcela_id)) ||
+      new Date().toISOString().slice(0, 10);
+    const { error } = await supabase
+      .from('boletos_parcela_venda')
+      .update({ status_registro: 'pago', data_liquidacao_sicoob: data })
+      .eq('id', b.id)
+      .eq('user_id', userId);
+    if (!error) corrigidos += 1;
+  }
+
+  // Mensalidades: status pago + carnê inconsistente
+  const { data: bolsMen, error: eM } = await supabase
+    .from('boletos_parcela_venda')
+    .select('id, mensalidade_id, status_registro, mensalidades(status, data_pagamento, valor_pago)')
+    .eq('user_id', userId)
+    .eq('origem', 'mensalidade')
+    .not('mensalidade_id', 'is', null)
+    .neq('status_registro', 'pago');
+  if (eM) throw wrapBoletoDbError(eM);
+
+  for (const b of bolsMen ?? []) {
+    const men = umRelacionado(
+      (b as { mensalidades?: TituloFinanceiroRel | TituloFinanceiroRel[] }).mensalidades,
+    );
+    if (men?.status !== 'pago' && !(Number(men?.valor_pago) > 0)) continue;
+    const data =
+      (men?.data_pagamento ? String(men.data_pagamento).slice(0, 10) : '') ||
+      new Date().toISOString().slice(0, 10);
+    const { error } = await supabase
+      .from('boletos_parcela_venda')
+      .update({ status_registro: 'pago', data_liquidacao_sicoob: data })
+      .eq('id', b.id)
+      .eq('user_id', userId);
+    if (!error) corrigidos += 1;
+  }
+
+  return corrigidos;
 }
 
 export async function fetchContasReceberPagina(

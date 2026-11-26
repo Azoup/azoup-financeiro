@@ -868,12 +868,13 @@ export async function registrarPagamentoMensalidadeGerada(
   // Inclui 'erro': baixa manual não pode deixar o carnê em "Erro Sicoob" com mensalidade paga
   // (senão Contas a receber ainda oferece "Cancelar" e cai no bloqueio de pagamento).
   if (st === 'pago') {
-    await supabase
+    const { error: eBol } = await supabase
       .from('boletos_parcela_venda')
       .update({ status_registro: 'pago', data_liquidacao_sicoob: input.data_pagamento })
       .eq('mensalidade_id', mensalidadeId)
       .eq('user_id', userId)
-      .in('status_registro', ['registrado', 'pendente', 'informativo', 'erro']);
+      .in('status_registro', ['registrado', 'pendente', 'informativo', 'erro', 'baixado', 'pago']);
+    if (eBol) throw new Error(eBol.message);
   }
 }
 

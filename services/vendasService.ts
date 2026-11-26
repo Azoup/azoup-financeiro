@@ -706,6 +706,7 @@ export async function registrarPagamentoVenda(
 
     // Banco escolhido na baixa (PIX etc.) precisa refletir em Contas a receber (tipo_emissao),
     // senão continua aparecendo o banco do carnê antigo (ex.: C6) mesmo selecionando Sicoob.
+    // Parcela quitada → carnê sempre "pago" + data (inclui baixado), senão some do relatório por data.
     const boletoPatch: Record<string, string> = {};
     if (bancoRec) boletoPatch.tipo_emissao = bancoRec;
     if (st === 'pago') {
@@ -713,12 +714,13 @@ export async function registrarPagamentoVenda(
       boletoPatch.data_liquidacao_sicoob = input.data_pagamento;
     }
     if (Object.keys(boletoPatch).length) {
-      await supabase
+      const { error: eBol } = await supabase
         .from('boletos_parcela_venda')
         .update(boletoPatch)
         .eq('parcela_id', p.id)
         .eq('user_id', userId)
-        .in('status_registro', ['registrado', 'pendente', 'informativo', 'erro']);
+        .in('status_registro', ['registrado', 'pendente', 'informativo', 'erro', 'baixado', 'pago']);
+      if (eBol) throw new Error(eBol.message);
     }
   }
 

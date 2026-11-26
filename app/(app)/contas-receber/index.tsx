@@ -11,6 +11,7 @@ import { useDebounce } from '@/hooks/useDebounce';
 import {
   fetchBoletoParcelaById,
   fetchContasReceberPagina,
+  repararBoletosPagosInconsistentes,
   sincronizarCarnesVendasFaltantes,
 } from '@/services/boletoParcelaService';
 import { alterarVencimentoBoleto } from '@/services/cancelarBoletoBancoService';
@@ -116,8 +117,15 @@ function boletoRegistroLabel(
   situacao?: ContaReceberListRow['situacao_cobranca'],
 ): string {
   const banco = tipo === 'c6' ? 'C6' : tipo === 'sicoob' ? 'Sicoob' : null;
-  // Mensalidade já paga com carnê ainda em "erro" de registro: não assusta com Erro Sicoob.
-  if (situacao === 'pago' && (status === 'erro' || status === 'informativo' || status === 'pendente')) {
+  // Título já quitado no sistema: sempre "Pago", mesmo se o carnê ficou "baixado" sem liquidação.
+  if (
+    situacao === 'pago' &&
+    (status === 'erro' ||
+      status === 'informativo' ||
+      status === 'pendente' ||
+      status === 'baixado' ||
+      status === 'registrado')
+  ) {
     return banco ? `Pago (${banco})` : 'Pago';
   }
   switch (status ?? 'informativo') {
@@ -264,6 +272,11 @@ export default function ContasReceberScreen() {
     useCallback(() => {
       void (async () => {
         if (user?.id) {
+          try {
+            await repararBoletosPagosInconsistentes(user.id);
+          } catch {
+            /* lista segue */
+          }
           try {
             const r = await sincronizarCarnesVendasFaltantes(user.id);
             if (r.gerados > 0) {
