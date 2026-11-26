@@ -974,17 +974,59 @@ export async function sincronizarCarnesMensalidadesFaltantes(
   return { gerados: faltantes.length, falhas: res.falhasBoleto ?? [] };
 }
 
+/** true = venda pediu carnê; false = "Não gerar boleto" (não sincronizar automático). */
+async function vendaDeveGerarCarne(
+  userId: string,
+  vendaId: string,
+  gerarBoletoColuna?: boolean | null,
+): Promise<boolean> {
+  if (gerarBoletoColuna === false) return false;
+  if (gerarBoletoColuna === true) return true;
+
+  const { data: log } = await supabase
+    .from('vendas_financeiro_log')
+    .select('detalhe')
+    .eq('venda_id', vendaId)
+    .eq('user_id', userId)
+    .eq('tipo', 'venda_criada')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const detalhe = log?.detalhe;
+  if (detalhe && typeof detalhe === 'object' && detalhe !== null && 'gerar_boleto' in detalhe) {
+    return (detalhe as { gerar_boleto?: boolean }).gerar_boleto !== false;
+  }
+  return true;
+}
+
 /** Recria carnês em A receber para vendas que foram salvas sem boleto/carnê. */
 export async function sincronizarCarnesVendasFaltantes(
   userId: string,
 ): Promise<{ gerados: number; falhas: string[] }> {
   const { data: vendas, error: e0 } = await supabase
     .from('vendas')
-    .select('id, descricao')
+    .select('id, descricao, gerar_boleto')
     .eq('user_id', userId)
     .neq('status', 'cancelada');
-  if (e0) throw wrapBoletoDbError(e0);
-  const vlist = (vendas ?? []) as { id: string; descricao: string }[];
+  if (e0) {
+    // Coluna gerar_boleto ainda não existe — fallback sem o campo.
+    const { data: fallback, error: eFb } = await supabase
+      .from('vendas')
+      .select('id, descricao')
+      .eq('user_id', userId)
+      .neq('status', 'cancelada');
+    if (eFb) throw wrapBoletoDbError(eFb);
+    const vlistFb = (fallback ?? []) as { id: string; descricao: string; gerar_boleto?: boolean }[];
+    return sincronizarCarnesVendasLista(userId, vlistFb);
+  }
+  const vlist = (vendas ?? []) as { id: string; descricao: string; gerar_boleto?: boolean }[];
+  return sincronizarCarnesVendasLista(userId, vlist);
+}
+
+async function sincronizarCarnesVendasLista(
+  userId: string,
+  vlist: { id: string; descricao: string; gerar_boleto?: boolean }[],
+): Promise<{ gerados: number; falhas: string[] }> {
   if (!vlist.length) return { gerados: 0, falhas: [] };
 
   const boletosPorVenda = new Map<string, Set<string>>();
@@ -1023,6 +1065,8 @@ export async function sincronizarCarnesVendasFaltantes(
   let gerados = 0;
   const falhas: string[] = [];
   for (const v of vlist) {
+    const deveGerar = await vendaDeveGerarCarne(userId, v.id, v.gerar_boleto);
+    if (!deveGerar) continue;
     const todas = parcPorVenda.get(v.id) ?? [];
     if (!todas.length) continue;
     const ja = boletosPorVenda.get(v.id) ?? new Set<string>();
@@ -1067,10 +1111,11 @@ export async function fetchBoletosPorVendaId(
 export async function regenerarCarneVenda(
   userId: string,
   vendaId: string,
+  opts?: { forcar?: boolean },
 ): Promise<{ avisoBoleto?: string }> {
   const { data: venda, error: e0 } = await supabase
     .from('vendas')
-    .select('descricao, status')
+    .select('descricao, status, gerar_boleto')
     .eq('id', vendaId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -1078,6 +1123,21 @@ export async function regenerarCarneVenda(
   if (!venda) throw new Error('Venda não encontrada.');
   if ((venda as { status: string }).status === 'cancelada') {
     throw new Error('Venda cancelada.');
+  }
+
+  const forcar = opts?.forcar === true;
+  if (!forcar) {
+    const deve = await vendaDeveGerarCarne(
+      userId,
+      vendaId,
+      (venda as { gerar_boleto?: boolean }).gerar_boleto,
+    );
+    if (!deve) {
+      return { avisoBoleto: undefined };
+    }
+  } else {
+    // Clique manual em "Gerar carnê": passa a permitir sincronização futura.
+    await supabase.from('vendas').update({ gerar_boleto: true }).eq('id', vendaId).eq('user_id', userId);
   }
 
   return gerarBoletosParaVendaCriada(userId, vendaId, {

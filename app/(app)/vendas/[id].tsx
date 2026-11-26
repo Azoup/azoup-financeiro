@@ -98,7 +98,15 @@ export default function VendaDetailScreen() {
       let carne = carneIni;
       let bols = bolsIni;
       const abertas = d?.parcelas.filter((p) => p.status !== 'cancelado').length ?? 0;
-      if (d && d.status !== 'cancelada' && carne < abertas && !tentouCarne.current) {
+      // Só recria carnê automático se a venda pediu boleto (gerar_boleto !== false).
+      const optouSemBoleto = d?.gerar_boleto === false;
+      if (
+        d &&
+        d.status !== 'cancelada' &&
+        !optouSemBoleto &&
+        carne < abertas &&
+        !tentouCarne.current
+      ) {
         tentouCarne.current = true;
         try {
           const r = await regenerarCarneVenda(user.id, id);
@@ -171,7 +179,7 @@ export default function VendaDetailScreen() {
     if (!user?.id || !id) return;
     setGerandoCarne(true);
     try {
-      const r = await regenerarCarneVenda(user.id, id);
+      const r = await regenerarCarneVenda(user.id, id, { forcar: true });
       if (r.avisoBoleto) {
         Toast.show({ type: 'error', text1: r.avisoBoleto, visibilityTime: 8000 });
       } else {
@@ -325,12 +333,20 @@ export default function VendaDetailScreen() {
         ) : null}
 
         <View style={styles.actions}>
-          {detail.status !== 'cancelada' && qtdCarne < detail.parcelas.filter((p) => p.status !== 'cancelado').length ? (
-            <PrimaryButton
-              title={gerandoCarne ? 'Gerando carnê…' : 'Gerar carnê em A receber'}
-              onPress={() => void onGerarCarne()}
-              disabled={gerandoCarne}
-            />
+          {detail.status !== 'cancelada' &&
+          qtdCarne < detail.parcelas.filter((p) => p.status !== 'cancelado').length ? (
+            <>
+              {detail.gerar_boleto === false && qtdCarne === 0 ? (
+                <Text style={styles.meta}>
+                  Esta venda foi salva sem boleto. Use o botão abaixo só se quiser gerar o carnê agora.
+                </Text>
+              ) : null}
+              <PrimaryButton
+                title={gerandoCarne ? 'Gerando carnê…' : 'Gerar carnê em A receber'}
+                onPress={() => void onGerarCarne()}
+                disabled={gerandoCarne}
+              />
+            </>
           ) : null}
           {qtdCarne > 0 ? (
             <Pressable style={styles.nfLink} onPress={() => router.push('/(app)/contas-receber')}>

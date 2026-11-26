@@ -82,18 +82,31 @@ export async function createVendaWithParcelas(
 
   const { descricao, itens_descricao } = serializeVendaDescricaoItens(input.descricao_itens);
 
-  const { data: vendaRow, error: e1 } = await supabase
+  const gerarBoleto = input.gerar_boleto !== false;
+
+  const baseVenda = {
+    user_id: userId,
+    cliente_id: input.cliente_id,
+    descricao,
+    itens_descricao,
+    valor_total: input.valor_total,
+    status: 'pendente' as VendaStatus,
+  };
+
+  let { data: vendaRow, error: e1 } = await supabase
     .from('vendas')
-    .insert({
-      user_id: userId,
-      cliente_id: input.cliente_id,
-      descricao,
-      itens_descricao,
-      valor_total: input.valor_total,
-      status: 'pendente' as VendaStatus,
-    })
+    .insert({ ...baseVenda, gerar_boleto: gerarBoleto })
     .select('id')
     .single();
+
+  // Migration 058 ainda não rodada: grava sem a coluna (flag fica no log).
+  if (e1 && /gerar_boleto/i.test(e1.message)) {
+    ({ data: vendaRow, error: e1 } = await supabase
+      .from('vendas')
+      .insert(baseVenda)
+      .select('id')
+      .single());
+  }
 
   if (e1 || !vendaRow) {
     throw new Error(e1?.message ?? 'Não foi possível criar a venda.');
@@ -119,7 +132,6 @@ export async function createVendaWithParcelas(
 
   let avisoBoleto: string | undefined;
   let avisoEmail: string | undefined;
-  const gerarBoleto = input.gerar_boleto !== false;
   if (gerarBoleto) {
     try {
       const boletoRes = await gerarBoletosParaVendaCriada(userId, vendaId, {

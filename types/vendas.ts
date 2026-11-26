@@ -18,6 +18,8 @@ export interface Venda {
   itens_descricao?: string[] | null;
   valor_total: number;
   status: VendaStatus;
+  /** false = não criar/recriar carnê automático em Contas a receber. */
+  gerar_boleto?: boolean;
   created_at: string;
   updated_at?: string;
 }
